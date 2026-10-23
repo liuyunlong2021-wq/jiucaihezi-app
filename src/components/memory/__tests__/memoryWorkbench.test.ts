@@ -493,7 +493,7 @@ test('memory file tree groups project identity above its three file actions', ()
   assert.doesNotMatch(tree, /async function selectWebProject[\s\S]*initializeMemoryProject/)
 })
 
-test('memory project entry unifies local and cloud projects while settings only diagnoses sync', () => {
+test('memory project entry unifies local and cloud projects while settings omits the sync page', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const settings = source('src/components/memory/MemorySettings.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
@@ -545,7 +545,7 @@ test('memory project entry unifies local and cloud projects while settings only 
   )
   assert.doesNotMatch(settings, /立即同步|projectTextSync\.syncNow/)
   assert.doesNotMatch(settings, /上传并覆盖云端|下载并覆盖本地/)
-  assert.match(settings, /请在项目中心选择上传或下载/)
+  assert.doesNotMatch(settings, /showSync|tab === 'sync'|memory-sync|重新登录以启用同步/)
   assert.match(
     settings,
     /mobileRuntime = isTauriMobileRuntime\(\)[\s\S]*isTauriRuntime\(\) && !mobileRuntime/,
@@ -568,8 +568,6 @@ test('memory project entry unifies local and cloud projects while settings only 
     /\.memory-workbench\.creation-open \.memory-creation \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;[^}]*height: auto;/,
   )
   assert.match(tree, /progressCurrent[\s\S]*只处理文字，媒体和空目录不处理/)
-  assert.match(settings, /progressCurrent[\s\S]*只处理文字，媒体和空目录不处理/)
-  assert.match(settings, /重新登录一次账号/)
   assert.match(main, /await initApiKey\(\)[\s\S]*await initGatewaySessionToken\(\)/)
   assert.doesNotMatch(
     settings,

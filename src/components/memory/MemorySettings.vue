@@ -20,13 +20,13 @@ import {
   setApiKey,
   gatewaySessionAuthenticated,
 } from '@/services/newApiClient'
-import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
+import { projectTextSync } from '@/services/projectTextSync'
 import { confirmAction } from '@/utils/confirmAction'
 import DesktopUpdateSettings from './DesktopUpdateSettings.vue'
 import { desktopUpdateStatus } from '@/services/desktopUpdater'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
-type SettingsTab = 'account' | 'models' | 'sync' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot' | 'update'
+type SettingsTab = 'account' | 'models' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot' | 'update'
 
 const tab = ref<SettingsTab>('account')
 const apiKey = ref('')
@@ -260,10 +260,6 @@ async function saveKey() {
   saved.value = true
   status.value = '已保存'
 }
-
-function showSync() {
-  tab.value = 'sync'
-}
 </script>
 
 <template>
@@ -274,9 +270,6 @@ function showSync() {
       </button>
       <button v-if="desktopRuntime" :class="{ active: tab === 'models' }" @click="tab = 'models'">
         <JcIcon name="settings" />模型与服务
-      </button>
-      <button :class="{ active: tab === 'sync' }" @click="showSync">
-        <JcIcon name="sync" />同步
       </button>
       <button v-if="desktopRuntime" :class="{ active: tab === 'skills' }" @click="tab = 'skills'">
         <JcIcon name="extension" />Skill
@@ -415,32 +408,6 @@ function showSync() {
         </section>
         </template>
       </div>
-      <div v-else-if="tab === 'sync'" class="memory-sync">
-        <template v-if="!gatewaySessionAuthenticated">
-          <p>{{ apiKey ? '当前 API Key 可用于模型，但云同步需要重新登录一次账号。' : '请先在“账号”中登录。手动填写 API Key 不能识别同步账号。' }}</p>
-          <button @click="tab = 'account'">{{ apiKey ? '重新登录以启用同步' : '前往登录' }}</button>
-        </template>
-        <template v-else-if="!owner">
-          <p>请先在左侧选择一个本地项目。</p>
-        </template>
-        <template v-else-if="projectTextSyncStatus.cloudProjectId">
-          <div class="memory-sync-summary">
-            <strong>{{ projectName || '当前项目' }}</strong>
-            <span>{{ projectTextSyncStatus.message || '已连接云项目' }}</span>
-            <span v-if="projectTextSyncStatus.pending">待同步 {{ projectTextSyncStatus.pending }} 项</span>
-            <progress
-              v-if="projectTextSyncStatus.phase === 'syncing' && projectTextSyncStatus.progressTotal"
-              :value="projectTextSyncStatus.progressCurrent"
-              :max="projectTextSyncStatus.progressTotal"
-            ></progress>
-            <span>只处理文字，媒体和空目录不处理</span>
-          </div>
-          <p>请在项目中心选择上传或下载。</p>
-        </template>
-        <template v-else>
-          <p>当前项目尚未上传。请点击左上角项目名，在项目中心上传当前项目或下载云项目。</p>
-        </template>
-      </div>
       <WebSkillPanel v-else-if="desktopRuntime && tab === 'skills'" />
       <McpManagerPanel v-else-if="desktopRuntime && tab === 'mcp'" />
       <DesktopRemoteSettings v-else-if="desktopRuntime && tab === 'remote'" />
@@ -532,14 +499,6 @@ function showSync() {
 .memory-service-switch input:checked::before { left: 15px; }
 .memory-service-switch input:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .memory-service-switch input, .memory-service-switch input::before { transition: none; } }
-.memory-sync { display: grid; gap: 12px; }
-.memory-sync p { margin: 0; color: var(--ink3); line-height: 1.6; }
-.memory-sync > button { min-height: 36px; padding: 0 12px; border: 1px solid var(--olive); border-radius: 6px; background: var(--olive); color: white; cursor: pointer; font: inherit; }
-.memory-sync button:disabled { opacity: .5; cursor: progress; }
-.memory-sync-summary { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-.memory-sync-summary span { color: var(--ink3); font-size: 12px; }
-.memory-sync-summary progress { width: 100%; height: 6px; accent-color: var(--olive); }
-.memory-sync .memory-sync-error { color: var(--danger); }
 .memory-appearance { display: grid; gap: 20px; }
 .memory-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .memory-theme-options button { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; }
