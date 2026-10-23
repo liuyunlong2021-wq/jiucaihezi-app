@@ -202,7 +202,21 @@ function closeConfigDialog() {
     <div v-if="!accountOnly" class="jc-login-title">{{ title }}</div>
 
     <div class="jc-login-actions primary">
-      <button class="jc-login-link jc-login-primary" :disabled="loginBusy" @click="openLoginDialog">
+      <!-- 桌面端：登录不再是使用前提，填 Key 就能用。这个位置留给以后的多端同步，
+           现在只占坑并明确标灰，避免让人以为「不登录就用不了」。手机端账号页冻结，
+           仍保留原来的登录入口。 -->
+      <button
+        v-if="!accountOnly"
+        class="jc-login-link jc-login-sync"
+        type="button"
+        disabled
+        title="即将开放：现在填写模型调用 Key 就能用"
+      >
+        <JcIcon name="sync" />
+        <span>多端同步</span>
+        <em class="jc-login-soon">即将开放</em>
+      </button>
+      <button v-else class="jc-login-link jc-login-primary" :disabled="loginBusy" @click="openLoginDialog">
         <JcIcon name="login" />
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
@@ -220,8 +234,10 @@ function closeConfigDialog() {
       </button>
     </div>
 
-    <div v-if="loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
-      <strong>已登录，云端同步已启用</strong>
+    <!-- 桌面端不再用登录状态收起 Key 输入：Key 是唯一的调用前提，藏起来只会让人
+         以为「不登录就用不了」。手机端账号页冻结，保持原样。 -->
+    <div v-if="accountOnly && loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
+      <strong>已登录</strong>
       <button class="jc-login-inline" @click="setAdvancedOpen(true)">填写模型调用 Key 才能使用云端模型</button>
     </div>
 
@@ -239,7 +255,7 @@ function closeConfigDialog() {
           <JcIcon :name="showKey ? 'visibility_off' : 'visibility'" />
         </button>
       </div>
-      <button v-if="loggedIn && !apiKeyDraft" class="jc-login-inline subtle" @click="setAdvancedOpen(false)">
+      <button v-if="accountOnly && loggedIn && !apiKeyDraft" class="jc-login-inline subtle" @click="setAdvancedOpen(false)">
         收起高级设置
       </button>
     </div>
@@ -332,6 +348,10 @@ function closeConfigDialog() {
 .jc-login-primary { background: var(--olive, #9d925f); border-color: var(--olive, #9d925f); color: #fff; }
 .jc-login-primary:hover { background: var(--olive-dark, #70673e); color: #fff; }
 .jc-login-gold { color: #b68c00; }
+/* 占位按钮：disabled 的 CTA 看着像坏了，所以用普通链接样式 + 明确的「即将开放」标。 */
+.jc-login-sync { cursor: not-allowed; color: var(--ink3, #8a8265); background: var(--surface-alt, #faf8ef); }
+.jc-login-sync:hover { border-color: var(--border, #ded8bf); background: var(--surface-alt, #faf8ef); }
+.jc-login-soon { font-style: normal; font-size: 10px; line-height: 1; padding: 2px 5px; border-radius: 999px; background: var(--border, #ded8bf); color: var(--ink3, #8a8265); }
 .jc-login-label { display: block; margin: 6px 0 6px; font-size: 12px; font-weight: 800; color: var(--ink2, #4f4a36); }
 .jc-login-key-row { display: flex; gap: 8px; }
 .jc-login-input {

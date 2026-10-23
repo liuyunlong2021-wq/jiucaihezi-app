@@ -213,7 +213,7 @@ async function login(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> 
 
 async function handleLogin() {
   await agentStore.fetchModels().catch(() => {})
-  status.value = '已登录，云端同步已启用'
+  status.value = '已登录'
 }
 
 async function logout() {

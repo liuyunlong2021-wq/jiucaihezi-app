@@ -30,20 +30,31 @@ test('一键抄配置只使用已有 Key，不再自动创建 Key', () => {
   assert.match(loginBox, /请先填写并保存 API Key/)
 })
 
-test('已登录不再等同于可直接使用云端模型', () => {
+test('桌面端不再用登录状态收起 Key 输入', () => {
   const loginBox = source('src/components/auth/JcCloudLoginBox.vue')
 
   assert.doesNotMatch(loginBox, /已登录，可直接使用/)
-  assert.match(loginBox, /云端同步/)
+  // Key 是唯一调用前提。桌面端若按 loggedIn 收起输入框，用户会以为「登录了就能用」。
+  assert.match(loginBox, /v-if="accountOnly && loggedIn && !advancedOpen && !apiKeyDraft"/)
+  assert.doesNotMatch(loginBox, /v-if="loggedIn && !advancedOpen && !apiKeyDraft"/)
 })
 
-test('云端必需文案把账号登录和模型调用 Key 分开', () => {
+test('桌面端「一键登录」换成占位的「多端同步」并标灰', () => {
+  const loginBox = source('src/components/auth/JcCloudLoginBox.vue')
+
+  // 桌面端不提供登录入口：现在填 Key 就能用，登录位留给以后的多端同步。
+  assert.match(loginBox, /<span>多端同步<\/span>/)
+  assert.match(loginBox, /class="jc-login-link jc-login-sync"[^>]*disabled/s)
+  // 手机端账号页冻结，登录入口必须保留。
+  assert.match(loginBox, /v-else class="jc-login-link jc-login-primary"/)
+})
+
+test('云端必需文案只指向 Key，不提账号登录', () => {
   for (const kind of ['chat', 'files', 'media']) {
     const message = getCloudRequiredMessage(kind)
-    assert.match(message, /账号登录/)
-    assert.match(message, /云端同步/)
     assert.match(message, /管理密钥/)
     assert.match(message, /本地模型/)
-    assert.doesNotMatch(message, /一键登录生成 Key/)
+    assert.doesNotMatch(message, /账号登录/)
+    assert.doesNotMatch(message, /一键登录/)
   }
 })
