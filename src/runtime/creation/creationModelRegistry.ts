@@ -3009,6 +3009,24 @@ export function getCreationModelSpec(idOrModel: string): CreationModelSpec | und
   return matches[0]
 }
 
+/**
+ * 面板与 @影音 共用的默认模型顺序：优先表写在前面，其余按注册表顺序。
+ * 两个入口从这里取默认模型，面板选不到的隐藏型号就不可能变成默认。
+ */
+const CREATION_MODEL_PRIORITIES: Partial<Record<CreationTask, string[]>> = {
+  image: ['newapi/xiaoyi/grok-imagine-image-2.0'],
+}
+
+export function prioritizedCreationModelIds(task: CreationTask): string[] {
+  const models = listCreationModels({ task }).map(model => model.id)
+  const preferred = (CREATION_MODEL_PRIORITIES[task] || []).filter(id => models.includes(id))
+  return [...preferred, ...models.filter(id => !preferred.includes(id))]
+}
+
+export function defaultCreationModelId(task: CreationTask): string {
+  return prioritizedCreationModelIds(task)[0] || ''
+}
+
 export function listCreationModels(filter: ListCreationModelsFilter = {}): CreationModelListItem[] {
   return CREATION_MODEL_REGISTRY.filter(spec => !filter.task || spec.task === filter.task)
     .filter(spec => !filter.mode || spec.mode === filter.mode)

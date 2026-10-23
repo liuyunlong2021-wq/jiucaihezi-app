@@ -8,6 +8,7 @@ import {
   parseMediaPlan,
   parseMediaPlans,
   replaceMediaPlanModelId,
+  resolveProductDefaultModelId,
   stripMediaPlanBlocks,
   updateMediaPlanParameters,
   validateMediaPlan,
@@ -16,6 +17,10 @@ import {
   clearMediaModelAvailability,
   setMediaModelAvailability,
 } from '@/data/mediaModelCapabilities'
+import {
+  getCreationModelSpec,
+  listCreationModels,
+} from '@/runtime/creation/creationModelRegistry'
 
 test('media plan parser accepts one fenced image plan', () => {
   const plan = parseMediaPlan([
@@ -37,7 +42,7 @@ test('media plan parser accepts one fenced image plan', () => {
     kind: 'image',
     title: '精华液主图',
     prompt: '白色台面上的精华液产品摄影',
-    modelId: 'gpt-image-2-超分',
+    modelId: 'newapi/xiaoyi/grok-imagine-image-2.0',
     usesProductDefaultModel: true,
     ratio: '1:1',
     resolution: '2k',
@@ -96,7 +101,7 @@ test('model-authored plans cannot inject media paths or URLs', () => {
   )
 })
 
-test('model-free plans use the product defaults for images and text-to-video', () => {
+test('model-free plans use the visible panel defaults for images and text-to-video', () => {
   const image = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
     kind: 'image', title: '品牌主图', prompt: '极简科技产品摄影',
   }) + '\n```')
@@ -104,17 +109,18 @@ test('model-free plans use the product defaults for images and text-to-video', (
     kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
   }) + '\n```')
 
-  assert.equal(image.modelId, 'gpt-image-2-1k')
-  assert.equal(video.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
+  // 默认只能落在面板可见的模型上：图片是面板首选的 Grok Image，视频是无参考时唯一合法的 jc 文生视频
+  assert.equal(image.modelId, 'newapi/xiaoyi/grok-imagine-image-2.0')
+  assert.equal(video.modelId, 'jc-minimax-h3')
 })
 
-test('a model-selected Fast video is normalized to the standard Seedance default before user adjustment', () => {
+test('a model-selected Fast video is normalized to the visible default before user adjustment', () => {
   const plan = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
     kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
     modelId: 'runninghub/api/rh-seedance2-fast-text',
   }) + '\n```')
 
-  assert.equal(plan.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
+  assert.equal(plan.modelId, 'jc-minimax-h3')
   assert.equal(plan.usesProductDefaultModel, true)
 })
 
@@ -146,6 +152,9 @@ test('choosing a model in the confirmation card stops default-model refinement',
 test('native media planning does not require a bundled Skill', () => {
   assert.doesNotMatch(MEDIA_PLAN_POLICY, /jc-instant-create/)
   assert.match(MEDIA_PLAN_POLICY, /prompt 必须原样使用，不得擅自扩写、润色或替换/)
+  // 默认模型不再写死具体型号（旧文案点名的 GPT Image 2 / Seedance 2.0 与面板不一致）
+  assert.doesNotMatch(MEDIA_PLAN_POLICY, /默认使用当前注册表中的 GPT Image 2/)
+  assert.match(MEDIA_PLAN_POLICY, /从当前面板可见的模型里/)
 })
 
 test('native media policy is generated from the executable Creation registry', () => {
@@ -293,4 +302,13 @@ test('media plan editor keeps the user in control of the final prompt and lists 
   assert.equal(updated.modelId, 'newapi/zx/veo-3.1-fast-generate-preview')
   // 可见模型照旧在列表里
   assert.equal(labels.includes('jc-MiniMax H3 参考生视频'), true)
+})
+
+test('★ 默认模型永远落在面板可见的型号上（隐藏型号不能当默认）', () => {
+  for (const kind of ['image', 'video', 'audio', 'model3d'] as const) {
+    const id = resolveProductDefaultModelId({ kind })
+    assert.ok(id, kind)
+    assert.equal(getCreationModelSpec(id)?.hidden, undefined, `${kind} → ${id} 是隐藏型号`)
+    assert.equal(listCreationModels().some(model => model.id === id), true, `${kind} → ${id} 不在可见目录`)
+  }
 })

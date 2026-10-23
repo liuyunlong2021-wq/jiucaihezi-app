@@ -163,3 +163,19 @@ test('media plan bridge sends ordered references to Hunyuan image-to-3D', () => 
   assert.deepEqual(model3d.videoParams?.imageUrls, ['front', 'left'])
   assert.equal(model3d.plan.task, 'model3d')
 })
+
+test('★ @影音 提交的参数与创作面板同源：比例不再丢', () => {
+  const submission = buildMediaPlanSubmission({
+    kind: 'image',
+    title: '女网红写真',
+    prompt: '一个中国女网红',
+    modelId: 'newapi/t8/mj_relax_imagine',
+    ratio: '9:16',
+  })
+
+  // 面板走的就是 buildCreationSubmitRequest：ratio 必须在 imageParams 里
+  assert.equal(submission.imageParams?.ratio, '9:16')
+  assert.equal(submission.plan.debug.normalizedParams.ratio, '9:16')
+  // MJ 没有像素尺寸，不能凭空多出一个 size
+  assert.equal('size' in submission.plan.debug.normalizedParams, false)
+})

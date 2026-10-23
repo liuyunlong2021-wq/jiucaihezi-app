@@ -1,3 +1,7 @@
+- **创作参数复制（2026-10-23）：** 面板参数行新增「复制参数」，输出 `[创作参数] 类型 | 模型 | 模式 | 比例/分辨率/时长/价格` + `提示词：`；@影音 在加载历史与流式完成两条路径解析该前缀并**强制覆盖** plan 的 modelId/ratio/resolution/duration（隐藏模型不参与匹配，类型不符只忽略）。解析 6 项、面板契约 102 项通过，vue-tsc 通过；实机粘贴链路未验收。
+
+- **@影音 与创作面板打通（2026-10-23）：** 默认模型改从可见目录解析（此前写死 hidden 的 `gpt-image-2-超分` 与 `rh-seedance25-*`），面板与 @影音 共用 `prioritizedCreationModelIds`；`buildMediaPlanSubmission` 改用 `buildCreationSubmitRequest`，比例等参数不再丢；对话卡片显示模型/价格/比例并可「直接生成」（先 `confirmAction` 确认，再按同一 submission 提交，进度回显在同一气泡）。定向 228 项与 vue-tsc 通过；直接生成的实机付费链路未验收。
+
 - **图片切分（2026-10-23）：** 媒体查看器（`MediaViewer`）新增 `splitEnabled` 与「切图」按钮，`ImageSplitDialog` 支持 2×2（默认）/1×2/2×1/3×3，点格子选择后由宿主 `saveSplitTiles` 写入项目「图片」并排队进画布；裁剪在本地 canvas 完成，不调上游。记忆工作台中心预览（`memory-preview`，用户实际看的就是它）、创作面板与文件树预览三个宿主都已接线，项目图片走 `readBinary` 字节读取以免 canvas 被污染；几何 5 项与面板契约（含三个宿主的接线断言）71 项通过，两个宿主尚未逐屏人工验收。
 
 - **T8 Midjourney Relax 已登记（2026-10-23）：** 新增 `mj_relax_imagine`（¥0.2/张）。三版收敛：先并进 zx 适配器（渠道混用）、再建独立适配器（多一次部署）均被否，终版只用 `t8-mj` 插件 0.2.1 直连 `https://ai.t8star.org` 的 `/mj-relax/mj`（忽略渠道 Base URL），不部署任何服务；接受面板 multipart，仅文生图（上游只收 base64Array）。面板已可选比例（插件拼 `--ar`，MJ 无像素尺寸）；插件15项/模型计划与面板契约128项/媒体运行56项通过；真实扣费未验收，见 [[运维/T8-Midjourney-Relax接入合同-2026-10-23]]。

@@ -1207,3 +1207,32 @@ test('切图入口挂在媒体查看器，两个宿主都按截帧同一套落�
   assert.match(workbench, /:blob-loader="loadPreviewImageBlob"/)
   assert.match(workbench, /readBinary\(resource\)/)
 })
+
+test('@影音 卡片显示模型与价格，并可直接生成（先确认）', () => {
+  const workbench = readFileSync(join(root, 'src/components/memory/MemoryWorkbench.vue'), 'utf8')
+  // 卡片文案：真模型 + 真价格 + 比例/分辨率
+  assert.match(workbench, /function mediaPlanSpecText\(plan: MediaPlan\)/)
+  assert.match(workbench, /displayModelLabel\(spec\.label\), displayModelPrice\(spec\)/)
+  assert.match(workbench, /<small>\{\{ mediaPlanSpecText\(plan\) \}\}<\/small>/)
+  // 直接生成：先 confirmAction，再走与面板同一个 submission
+  const direct = workbench.match(/async function submitMediaPlanDirect\([\s\S]*?\n}/)?.[0] || ''
+  assert.ok(direct, 'submitMediaPlanDirect body should be found')
+  assert.match(direct, /await confirmAction\(/)
+  assert.match(direct, /buildMediaPlanSubmission\(plan\)/)
+  assert.match(direct, /mediaTaskStore\.submitTask\(/)
+  assert.match(direct, /chatMessageId: key/)
+  assert.match(workbench, /class="memory-media-plan-run"[\s\S]*?submitMediaPlanDirect\(turn\.id, planIndex, plan\)/)
+})
+
+test('创作面板「复制参数」与 @影音 的粘贴解析成对', () => {
+  const panel = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(panel, /class="cp-copy-params"/)
+  assert.match(panel, /@click\.stop="copyCreationParams"/)
+  assert.match(panel, /buildMediaParamsText\(\{/)
+  assert.match(panel, /mediaParamsPrice\(spec\.id\)/)
+
+  const workbench = readFileSync(join(root, 'src/components/memory/MemoryWorkbench.vue'), 'utf8')
+  assert.match(workbench, /applyMediaParamsToPlan, parseMediaParamsText/)
+  // 两条建 plan 的路径都要覆盖：加载历史对话 + 流式完成后
+  assert.equal((workbench.match(/applyPastedMediaParams\(plans, userText\)/g) || []).length, 2)
+})

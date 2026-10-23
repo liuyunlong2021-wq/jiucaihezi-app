@@ -4,6 +4,7 @@ import {
   displayModelPrice,
   getCreationModelSpec,
   listCreationModels,
+  prioritizedCreationModelIds,
 } from '@/runtime/creation/creationModelRegistry'
 import type { CreationModelSpec } from '@/runtime/creation/creationMediaTypes'
 import { getMediaModelAvailability } from '@/data/mediaModelCapabilities'
@@ -52,7 +53,7 @@ export const MEDIA_PLAN_POLICY = [
   '媒体执行规则：当用户明确要求生成图片、视频、音频或 3D 模型时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
   '媒体计划字段：kind(image|video|audio|model3d)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
   '用户明确给出媒体提示词或动作描述时，prompt 必须原样使用，不得擅自扩写、润色或替换；只有用户明确要求优化，或没有给出可执行描述时，才可以补全。',
-  '不要自行选择默认模型：应用会默认使用当前注册表中的 GPT Image 2 生图；视频按无参考、一张参考图、多素材分别使用标准 Seedance 2.0 文生、图生、多模态。用户可在确认卡手动调整模型。',
+  '不要自行选择默认模型：应用会从当前面板可见的模型里按参考素材自动挑一个（图片与视频各有一套顺序），用户可在卡片或创作面板里改。',
   '只能使用应用提供的素材 referenceId；不要输出 referenceImages、referenceVideos、URL、data URL 或文件路径。',
   '不要直接运行媒体 API、轮询或下载；用户确认后由应用的公共媒体任务引擎执行。没有媒体生成意图时不要输出媒体计划。',
 ].join('\n')
@@ -260,10 +261,12 @@ export function updateMediaPlanParameters(
   return next
 }
 
+/**
+ * 默认模型只能从**面板可见**的模型里挑：以前写死的 gpt-image-2-超分、
+ * rh-seedance25-* 都已 hidden，@影音 却会默认用它，用户点进面板根本选不到。
+ * 顺序与创作面板同源（`prioritizedCreationModelIds`），再按参考素材与分辨率过滤。
+ */
 export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'resolution' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
-  if (plan.kind === 'image') return plan.resolution && plan.resolution !== '1k' ? 'gpt-image-2-超分' : 'gpt-image-2-1k'
-  if (plan.kind === 'audio') return 'runninghub/api/rh-suno-v55-single'
-
   const imageCount = Math.max(
     plan.referenceImages?.length || 0,
     plan.mediaReferences?.filter(reference => reference.kind === 'image').length || 0,
@@ -272,11 +275,17 @@ export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'res
     plan.referenceVideos?.length || 0,
     plan.mediaReferences?.filter(reference => reference.kind === 'video').length || 0,
   )
-  if (plan.kind === 'model3d') {
-    return imageCount > 0 ? 'runninghub/api/rh-3d-image' : 'runninghub/api/rh-3d-text'
-  }
-  if (videoCount > 0) return 'runninghub/api/rh-seedance25-with-video-ref'
-  return 'runninghub/api/rh-seedance25-no-video-ref'
+  const candidates = prioritizedCreationModelIds(plan.kind)
+  const usable = candidates.filter(id => {
+    const spec = getCreationModelSpec(id)
+    if (!spec) return false
+    if (!acceptsFileCount(spec.files?.images, imageCount)) return false
+    if (!acceptsFileCount(spec.files?.videos, videoCount)) return false
+    const resolutions = spec.capabilities.resolutions
+    if (plan.resolution && resolutions?.length && !resolutions.includes(plan.resolution)) return false
+    return isCreationModelAvailable(id)
+  })
+  return usable[0] || candidates[0] || ''
 }
 
 function acceptsFileCount(

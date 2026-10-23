@@ -23,6 +23,7 @@ import {
   getYihongGptImageResolutions,
   getCreationModelSpec,
   listCreationModels,
+  prioritizedCreationModelIds,
 } from '@/runtime/creation/creationModelRegistry'
 import {
   buildCreationRunPlan,
@@ -295,12 +296,8 @@ export function getVisibleCreationTasks(): CreationTask[] {
 }
 
 function getModelsForTask(task: CreationTask): string[] {
-  // 视频档最常用的 Dola / 菠萝两项 2026-10-23 退出面板，视频默认回到注册表顺序（jc 本机参考生视频）。
-  const priorities = task === 'image' ? ['newapi/xiaoyi/grok-imagine-image-2.0'] : []
-  const models = listCreationModels({ task })
-    .map(model => model.id)
-  const selected = priorities.filter(model => models.includes(model))
-  return [...selected, ...models.filter(model => !selected.includes(model))]
+  // 默认顺序与 @影音 共用注册表里的一份，避免两个入口各写一套优先级。
+  return prioritizedCreationModelIds(task)
 }
 
 function getMediaFieldCompat(model: CreationModel | undefined, key: string): MediaModelField | undefined {

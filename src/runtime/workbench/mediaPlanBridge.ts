@@ -1,4 +1,5 @@
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
+import { buildCreationSubmitRequest } from '@/runtime/creation/creationMediaRuntime'
 import { getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
 
 import { validateMediaPlan, type MediaPlan } from './mediaPlan'
@@ -40,6 +41,9 @@ export function buildMediaPlanSubmission(plan: MediaPlan) {
     },
   })
 
+  // 参数不再手抄一份：直接用创作面板同一个 builder，比例/分辨率/尺寸都随归一化结果走，
+  // 否则 MJ 的 ratio 这类字段会在 @影音 提交时丢掉。
+  const request = buildCreationSubmitRequest(runPlan)
   return {
     type: plan.kind,
     model: spec.model,
@@ -48,15 +52,9 @@ export function buildMediaPlanSubmission(plan: MediaPlan) {
     prompt: plan.prompt,
     referenceImages: plan.referenceImages || [],
     referenceVideos: plan.referenceVideos || [],
-    ...(plan.kind === 'video' || plan.kind === 'model3d'
-      ? { videoParams: { prompt: plan.prompt, videoUrl: plan.referenceVideos?.[0], imageUrl: plan.referenceImages?.[0], imageUrls: plan.referenceImages, duration: plan.duration } }
-      : {}),
-    ...(plan.kind === 'image'
-      ? { imageParams: { prompt: plan.prompt, image: plan.referenceImages?.length ? plan.referenceImages : undefined } }
-      : {}),
-    ...(plan.kind === 'audio'
-      ? { audioParams: { prompt: plan.prompt, title: plan.title } }
-      : {}),
+    ...(request.imageParams ? { imageParams: request.imageParams } : {}),
+    ...(request.videoParams ? { videoParams: request.videoParams } : {}),
+    ...(request.audioParams ? { audioParams: request.audioParams } : {}),
     source: 'creation' as const,
     plan: runPlan,
   }

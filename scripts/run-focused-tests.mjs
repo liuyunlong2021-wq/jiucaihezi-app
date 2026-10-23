@@ -83,6 +83,7 @@ const wave1FocusedTests = [
   'src/runtime/workbench/__tests__/mediaReference.test.ts',
   'src/runtime/workbench/__tests__/mediaPlan.test.ts',
   'src/runtime/workbench/__tests__/mediaPlanBridge.test.ts',
+  'src/runtime/workbench/__tests__/mediaParamsClipboard.test.ts',
   'src/composables/__tests__/officeTools.test.ts',
   'src/runtime/tools/__tests__/kernel.test.ts',
   'src/runtime/tools/__tests__/artifacts.test.ts',

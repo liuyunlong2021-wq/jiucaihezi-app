@@ -128,6 +128,9 @@ import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 import { confirmAction } from '@/utils/confirmAction'
+import { displayModelLabel, displayModelPrice, getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
+import { buildMediaPlanSubmission } from '@/runtime/workbench/mediaPlanBridge'
+import { applyMediaParamsToPlan, parseMediaParamsText } from '@/runtime/workbench/mediaParamsClipboard'
 import { findComposerSuggestion, replaceComposerSuggestion } from './composerSuggestions'
 import { summarizeProcessSteps } from './processSummary'
 import { safePrompt } from '@/utils/safePrompt'
@@ -2204,7 +2207,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
         const plans = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
         if (generation !== resourceOpenGeneration) return
-        mediaPlans.value[turn.id] = plans
+        const userText = activeConversation.transcript.turns.find(item => item.id === previousUserTurnId)?.content || ''
+        mediaPlans.value[turn.id] = applyPastedMediaParams(plans, userText)
       } catch { /* ordinary assistant reply */ }
       try {
         skillInstallPlans.value[turn.id] = await parseSkillInstallPlan(turn.content)
@@ -3066,8 +3070,10 @@ async function send(remoteText?: string) {
     if (turn?.role === 'assistant') {
       if (run.programStatus) programStatuses.value[turn.id] = run.programStatus
       try {
-        mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
+        const plans = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
+        const userText = [...complete.transcript.turns].reverse().find(item => item.role === 'user')?.content || ''
+        mediaPlans.value[turn.id] = applyPastedMediaParams(plans, userText)
         const firstPlan = mediaPlans.value[turn.id][0]
         if (firstPlan) await openMediaPlanInCreation(turn.id, 0, firstPlan)
       } catch { /* no media plan */ }
@@ -4011,6 +4017,56 @@ async function openMediaPlanInCreation(turnId: string, planIndex: number, plan: 
   })
 }
 
+/** 卡片上要显示的是真模型和真价格，而不是只有标题。 */
+function mediaPlanSpecText(plan: MediaPlan): string {
+  const spec = getCreationModelSpec(plan.modelId)
+  if (!spec) return plan.modelId
+  const parts = [displayModelLabel(spec.label), displayModelPrice(spec)]
+  if (plan.ratio) parts.push(plan.ratio)
+  if (plan.resolution) parts.push(plan.resolution)
+  if (plan.duration !== undefined) parts.push(`${plan.duration}s`)
+  return parts.filter(Boolean).join(' · ')
+}
+
+/**
+ * 对话里直接生成：和创作面板走同一个 plan → submission 合同，
+ * 付费前必须让用户看见模型与价格。
+ */
+async function submitMediaPlanDirect(turnId: string, planIndex: number, plan: MediaPlan) {
+  const active = conversation.value
+  const owner = projectOwner.value
+  if (!active || !owner) {
+    contextNotice.value = '请先选择项目再生成'
+    return
+  }
+  const spec = getCreationModelSpec(plan.modelId)
+  const price = spec ? displayModelPrice(spec) : ''
+  const confirmed = await confirmAction(
+    `${spec ? displayModelLabel(spec.label) : plan.modelId}｜${price || '价格未知'}\n${plan.prompt.slice(0, 80)}`,
+    { title: plan.title || '确认生成', okLabel: '生成', cancelLabel: '取消', kind: 'info' },
+  )
+  if (!confirmed) return
+  const key = mediaPlanKey(turnId, planIndex)
+  if (mediaTaskIdForPlan(turnId, planIndex)) {
+    contextNotice.value = '这个计划已经提交过了'
+    return
+  }
+  try {
+    const submission = buildMediaPlanSubmission(plan)
+    await mediaTaskStore.submitTask({
+      ...submission,
+      source: 'creation',
+      sessionId: active.transcript.id,
+      chatMessageId: key,
+      directory: isTauriRuntime() ? owner : undefined,
+      memory: true,
+    })
+    contextNotice.value = '已提交，进度会显示在这条消息下'
+  } catch (cause) {
+    contextNotice.value = `提交失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 async function openCreationForCurrentConversation() {
   const active = conversation.value
   if (!active) return
@@ -4401,6 +4457,19 @@ async function resolveMediaPlanReferences(plan: MediaPlan, context: MediaContext
     : materialized
 }
 
+/**
+ * 用户从创作面板粘来的 `[创作参数]`：解析出来钉到计划上，模型无权改。
+ * 没粘就返回 null，行为与以前完全一致。
+ */
+function pastedMediaParams(turnText: string) {
+  return parseMediaParamsText(turnText)
+}
+
+function applyPastedMediaParams(plans: MediaPlan[], userText: string): MediaPlan[] {
+  const snapshot = pastedMediaParams(userText)
+  return snapshot ? plans.map(plan => applyMediaParamsToPlan(plan, snapshot)) : plans
+}
+
 function mediaReferenceResolvers(): MediaReferenceResolvers {
   return {
     async readProject(locator) {
@@ -4733,15 +4802,24 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </button>
           </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
-            <button
-              type="button"
-              class="memory-media-plan-link"
-              @click="openMediaPlanInCreation(turn.id, planIndex, plan)"
-            >
-              <JcIcon name="palette" />
-              <span>{{ plan.title }}</span>
-              <small>在创作面板中调整</small>
-            </button>
+            <div class="memory-media-plan-card">
+              <button
+                type="button"
+                class="memory-media-plan-link"
+                @click="openMediaPlanInCreation(turn.id, planIndex, plan)"
+              >
+                <JcIcon name="palette" />
+                <span>{{ plan.title }}</span>
+                <small>{{ mediaPlanSpecText(plan) }}</small>
+              </button>
+              <button
+                v-if="!mediaTaskIdForPlan(turn.id, planIndex)"
+                type="button"
+                class="memory-media-plan-run"
+                title="直接生成（会先确认模型与价格）"
+                @click="submitMediaPlanDirect(turn.id, planIndex, plan)"
+              ><JcIcon name="play-arrow" /><span>直接生成</span></button>
+            </div>
             <MediaTaskBubble
               v-if="mediaTaskIdForPlan(turn.id, planIndex)"
               :task-id="mediaTaskIdForPlan(turn.id, planIndex)"
@@ -5529,6 +5607,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-media-plan-link .mso { color: var(--olive); }
 .memory-media-plan-link span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-media-plan-link small { flex: 0 0 auto; color: var(--ink3); }
+.memory-media-plan-card { display: flex; align-items: stretch; gap: 6px; margin-top: 8px; }
+.memory-media-plan-card .memory-media-plan-link { margin-top: 0; flex: 1; }
+.memory-media-plan-run { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 45%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 14%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-media-plan-run:hover { background: color-mix(in srgb, var(--olive) 22%, var(--paper)); }
 .memory-scene-card { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, #4b9978 38%, var(--line)); border-radius: 6px; background: color-mix(in srgb, #4b9978 7%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-scene-card:hover { border-color: #4b9978; }
 .memory-scene-card > .mso { flex: 0 0 auto; color: #398362; font-size: 22px; }

@@ -166,6 +166,7 @@ import { memoryMediaDirectoryFor, legacyCanvasMediaCandidates } from '@/utils/me
 import { queuePendingCanvasMedia, takePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
 import { nextMaterialPath } from '@/utils/projectMaterials'
 import { saveSplitTiles } from '@/utils/imageGridSplit'
+import { buildMediaParamsText, mediaParamsPrice } from '@/runtime/workbench/mediaParamsClipboard'
 import FrameCaptureDialog from '@/components/media/FrameCaptureDialog.vue'
 import ImageSplitDialog from '@/components/media/ImageSplitDialog.vue'
 import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
@@ -1250,6 +1251,50 @@ const rhModeLabel = computed(() => {
   const specMode = currentCreationSpec.value?.mode
   return modeLabel(planMode || specMode)
 })
+/** 复制当前「类型 + 模型 + 模式 + 比例/分辨率/时长 + 价格」，粘到 @影音 输入框后接着写提示词。 */
+async function copyCreationParams() {
+  const spec = currentCreationSpec.value
+  if (!spec) return
+  const kind = spec.task === 'model3d' ? 'model3d' : spec.task
+  if (!['image', 'video', 'audio', 'model3d'].includes(kind)) {
+    cpState.progressText = '当前类型不支持复制参数'
+    return
+  }
+  const text = buildMediaParamsText({
+    kind: kind as 'image' | 'video' | 'audio' | 'model3d',
+    modelLabel: displayModelLabel(spec.label),
+    mode: canvasReferenceRunPlan.value?.mode || currentRunPlan.value?.mode || spec.mode,
+    ...(aspectOptions.value.length ? { ratio: cpState.ar } : {}),
+    ...(resolutionOptions.value.length ? { resolution: cpState.res } : {}),
+    ...(hasDuration.value && cpState.dur !== undefined ? { duration: cpState.dur } : {}),
+    ...(mediaParamsPrice(spec.id) ? { price: mediaParamsPrice(spec.id) } : {}),
+  })
+  const ok = await writeClipboard(text)
+  cpState.progressText = ok ? '已复制参数，粘贴到输入框后接着写提示词' : '复制失败，请检查剪贴板权限'
+}
+
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // 无剪贴板权限时退回 execCommand，桌面 WebView 偶发拒绝 writeText
+    try {
+      const area = document.createElement('textarea')
+      area.value = text
+      area.style.position = 'fixed'
+      area.style.opacity = '0'
+      document.body.appendChild(area)
+      area.select()
+      const ok = document.execCommand('copy')
+      area.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
 const selectedReferenceSummary = computed(() => {
   const images = selectedReferenceAssets.value.filter(asset => asset.kind === 'image').length
   const videos = selectedReferenceAssets.value.filter(asset => asset.kind === 'video').length
@@ -4916,6 +4961,14 @@ const canSend = computed(
           <span>s</span>
         </div>
       </div>
+      <button
+        v-if="currentCreationSpec"
+        class="cp-copy-params"
+        type="button"
+        title="复制参数到剪贴板，粘到 @影音 输入框后接着写提示词"
+        aria-label="复制创作参数"
+        @click.stop="copyCreationParams"
+      ><JcIcon name="content-copy" /><span>复制参数</span></button>
       <div v-if="showMvSelect" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('mv')" @keydown.space.self.prevent="togglePop('mv')" @click="togglePop('mv')">
         <div class="cp-island-label">版本</div>
         <div class="cp-island-val">{{ cpState.mv }}</div>
@@ -5915,6 +5968,9 @@ const canSend = computed(
   background: var(--olive);
 }
 
+.cp-copy-params { display: inline-flex; align-items: center; gap: 4px; align-self: center; margin-left: 4px; padding: 4px 8px; border: 1px solid var(--jc-border); border-radius: 8px; background: var(--paper); color: var(--ink3); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.cp-copy-params:hover { border-color: var(--olive); color: var(--olive); }
+.cp-copy-params .mso { font-size: 14px; }
 .cp-params {
   display: flex;
   width: 100%;

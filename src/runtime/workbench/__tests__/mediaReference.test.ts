@@ -94,7 +94,7 @@ test('materialization always includes explicit references and validates model-se
   )
 })
 
-test('a default video plan switches to Seedance image-to-video after one image reference resolves', () => {
+test('a default video plan switches to the panel default image-to-video after one image reference resolves', () => {
   const snapshot = createMediaContextSnapshot({
     owner: 'project-one',
     sessionId: 'creative_one',
@@ -106,10 +106,10 @@ test('a default video plan switches to Seedance image-to-video after one image r
 
   const materialized = materializeMediaPlanReferences(plan, snapshot)
 
-  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
+  assert.equal(materialized.modelId, 'jc-minimax-h3-ref2v')
 })
 
-test('a default video plan switches to Seedance multimodal for multiple references', () => {
+test('a default video plan stays on the panel default image-to-video for multiple references', () => {
   const snapshot = createMediaContextSnapshot({
     owner: 'project-one',
     sessionId: 'creative_one',
@@ -122,7 +122,7 @@ test('a default video plan switches to Seedance multimodal for multiple referenc
 
   const materialized = materializeMediaPlanReferences(plan, snapshot)
 
-  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
+  assert.equal(materialized.modelId, 'jc-minimax-h3-ref2v')
 })
 
 test('recent task references are limited to the current session and project', () => {
