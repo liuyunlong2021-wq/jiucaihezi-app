@@ -121,9 +121,9 @@ test('a Skill without allowed-tools can read its declared package resources', as
   )
 })
 
-test('生成策略只跟随 @影音：@排版 不再注入媒体 plan 规则', () => {
-  // 面板上 @排版 是文档/网页/长图，和 jc-media-plan 无关。之前用
-  // `mediaSelected || avSelected` 判断，只选 @排版 也会把影音生成策略与
+test('生成策略只跟随 @影音：@导出 不再注入媒体 plan 规则', () => {
+  // 面板上 @导出 是文档/表格/网页/长图，和 jc-media-plan 无关。之前用
+  // `mediaSelected || avSelected` 判断，只选 @导出 也会把影音生成策略与
   // 批量确认文案灌进系统提示，模型因此拿文档需求去凑生成计划。
   const source = readFileSync(new URL('../memoryChat.ts', import.meta.url), 'utf8')
   const start = source.indexOf('skillSystemPrompt: explicitCapabilitySelected')

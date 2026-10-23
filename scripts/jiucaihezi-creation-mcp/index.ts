@@ -68,7 +68,7 @@ export function createCreationMcpServer(
   options: { allowPaid?: boolean } = {},
 ): McpServer {
   const server = new McpServer({ name: 'jiucaihezi-creation-mcp-server', version: '1.0.0' })
-  // @排版/@3D 也要能查创作上下文、查任务、把已生成的结果放进画布，但不该拿到会花钱的
+  // @导出/@3D 也要能查创作上下文、查任务、把已生成的结果放进画布，但不该拿到会花钱的
   // submit_creation_task——那个只属于 @影音。默认允许，现有调用方语义不变。
   const register = (
     name: string,

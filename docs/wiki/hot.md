@@ -1020,3 +1020,8 @@
 
 - 不新增 `@office` 芯片：AnyDoc（[documentFormats.ts](src/utils/documentFormats.ts) 的真源）只做 Office/PDF/EPUB → Markdown 的**导入**解析，导出是 artifact 工具的职责；芯片按用途分（排版/影音/3D），再开一个格式芯片会让「@哪个只用哪个」自相矛盾。
 - `create_document` 已支持 `format: csv`（[memoryArtifactTools.ts](src/runtime/memory/memoryArtifactTools.ts) / [creativeToolContract.ts](src/runtime/direct/creativeToolContract.ts) / [officeTools.ts](src/composables/officeTools.ts) 三处同名工具都已对齐）。**本地 xlsx 写出器仍未接入**，[officeAutoExport.ts](src/utils/officeAutoExport.ts) 是没有任何调用者的死代码，别把它当成现有能力。
+
+## 2026-10-23 芯片改名 @排版 → @导出
+
+- 输入框芯片文案 `@排版` 改为 `@导出`，选择器文案改为「导出文档、表格、网页、长图和幻灯片」。**内部 id 一直是 `media`（`mediaSelected` / `media` capability），没有改**，历史会话、权限与工具白名单都不受影响；旧文档里的「@排版」等同于现在的「@导出」。
+- 不叫 `@office`：四个工具里 `create_html`（网页）和 `export_markdown_png`（长图）不是办公格式，叫 office 会让这两类产物失去归宿。

@@ -1339,7 +1339,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   }
   const localCapabilities = [input.mediaSelected && 'media', input.scene3dSelected && '3d'].filter(Boolean) as string[]
   // App 自己的创作工具由随包原生 Harness 插件注册，通过本机桥接调用现有 Store/executor。
-  // `@影音` 的付费提交只在该芯片选中时注册；排版/3D 只拿免费上下文和对应工具。
+  // `@影音` 的付费提交只在该芯片选中时注册；导出/3D 只拿免费上下文和对应工具。
   const needsCreation = Boolean(input.avSelected || input.mediaSelected || input.scene3dSelected)
   const nativeToolsEnabled = needsCreation || localCapabilities.length > 0
   const needsMcp = mcpServerIds.length > 0
@@ -1381,7 +1381,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     "  name: '@jiucaihezi/dsh-tool-creation'",
     '  config:',
     `    creation: ${needsCreation}`,
-    // 影音目录/任务工具跟 @影音 走；@排版 / @3D 只拿创作上下文和画布追加。
+    // 影音目录/任务工具跟 @影音 走；@导出 / @3D 只拿创作上下文和画布追加。
     `    mediaCatalog: ${Boolean(input.avSelected)}`,
     `    allowPaid: ${Boolean(input.avSelected)}`,
     '    capabilities:',

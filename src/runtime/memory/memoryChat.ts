@@ -439,7 +439,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     loadWebSkillByName,
     skillAllowedToolNames,
   )
-  // 生成能力只看 @影音 或 Skill 自己声明的 av/media；@排版 / @3D 不应连带影音规则。
+  // 生成能力只看 @影音 或 Skill 自己声明的 av/media；@导出 / @3D 不应连带影音规则。
   const avMediaPolicy = Boolean(
     input.avSelected || [...skillAllowedToolNames].some(name => name === 'media' || name === 'av'),
   )
@@ -493,7 +493,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     skillSystemPrompt: explicitCapabilitySelected
       ? [
           // 只有 @影音（或明确声明 media/av 的 Skill）才拿到生成策略：
-          // @排版 是文档/网页/长图，和 jc-media-plan 无关，不能把影音规则灌进去。
+          // @导出 是文档/表格/网页/长图，和 jc-media-plan 无关，不能把影音规则灌进去。
           avMediaPolicy
             ? buildMediaPlanPolicy(input.mediaReferencePolicy)
             : '',

@@ -528,11 +528,11 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /nativeToolCapabilities/)
   assert.match(source, /@jiucaihezi\/dsh-tool-creation/)
   assert.match(source, /creation: \$\{needsCreation\}/)
-  // 创作服务器在任一创作芯片下都挂，付费只由 @影音 放行：只开 @排版 时
+  // 创作服务器在任一创作芯片下都挂，付费只由 @影音 放行：只开 @导出 时
   // add_creation_result_to_canvas 曾是 unknown tool，模型因此跑去找 CLI 硬做。
   assert.match(source, /const needsCreation = Boolean\(input\.avSelected \|\| input\.mediaSelected \|\| input\.scene3dSelected\)/)
   assert.match(source, /allowPaid: \$\{Boolean\(input\.avSelected\)\}/)
-  // 影音目录/任务工具同理只在 @影音 注册：@排版 / @3D 仍拿创作上下文与
+  // 影音目录/任务工具同理只在 @影音 注册：@导出 / @3D 仍拿创作上下文与
   // add_creation_result_to_canvas，但看不到 list_creation_models 那套。
   assert.match(source, /mediaCatalog: \$\{Boolean\(input\.avSelected\)\}/)
   // patch 里新增插件只能走 `- insert:`：官方 applyEntryPatches 对非 insert 条目是按 id

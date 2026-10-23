@@ -532,7 +532,7 @@ const selectedToolChips = computed(() => [
       selected: true,
     }
   }),
-  { id: 'media', label: '@排版', icon: 'image', selected: mediaSelected.value },
+  { id: 'media', label: '@导出', icon: 'image', selected: mediaSelected.value },
   { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
 ].filter(tool => tool.selected))
@@ -1157,7 +1157,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     ...(desktopOnlyRuntime
       ? [{ type: 'tool' as const, id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' }]
       : []),
-    { type: 'tool', id: 'media', display: '排版', description: '创建文档、表格、网页、长图和幻灯片', icon: 'image' },
+    { type: 'tool', id: 'media', display: '导出', description: '导出文档、表格、网页、长图和幻灯片', icon: 'image' },
     { type: 'tool', id: 'av', display: '影音', description: '生成图片、视频和音频', icon: 'movie' },
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
   ]
