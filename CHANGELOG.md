@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## v2.2.39 (2026-10-23)
 
-- [调整] 桌面端设置里的「一键登录」换成灰色的「多端同步 · 即将开放」占位：现在填模型调用 Key 就能用，登录不再是前提。同时**不再按登录状态收起 Key 输入框**（以前登录过但没填 Key 的用户会看到「已登录」而找不到输入框）。手机端账号页冻结，登录入口保持原样。
+- [调整] 三个创作入口只圈定 Skill 范围：不再每轮自动追加 `/jc-manju-zhizuo`、`/jc-duanju`、`/jc-novel`，删除自建路由，纯路由 Skill `jc-manju-zhizuo` / `jc-duanju` 退役且规则不迁移；改为 DSH 官方目录 + 官方 `skill` 工具渐进加载。路由清单合并为 `public/skills/production-skills.json`。电脑操控默认关闭（`jc_computer_use` 改为 `'1'` 才开）。
+- [调整] 桌面安装包改由 R2 分发：独立发布桶 `jiucaihezi-releases` + `downloads.jiucaihezi.studio`，旧 `api.jiucaihezi.studio/updates/{version}/{filename}` 按版本重定向；上传前后 SHA-256 双向核对、清单原子推广、失败保持上一可用版本；Windows 便携 ZIP 纳入必传资产；发布 job 加并发锁。
+- [修复] 上游重试多次而界面只显示 1 次：`retryId` 标识整组重试却被当成单次尝试的键，客户端按 ID 合并；配对键改为 `retryId + attempt`。
+- [调整] 设置改动：桌面端「一键登录」换成灰色的「多端同步 · 即将开放」占位（现在填模型调用 Key 就能用，登录不再是前提）；**不再按登录状态收起 Key 输入框**（以前登录过但没填 Key 的用户会看到「已登录」而找不到输入框）；移除设置里的「同步」页（同步仍在项目中心）。手机端账号页冻结，登录入口保持原样。
 - [调整] 去掉「账号登录 / 云端同步」相关过时文案：Key 缺失提示、云端必需提示、登录成功状态都只指向 Key。
 - [修复] 删掉「本轮引用里的图片用 read_image 读」这条指路：`read_image` 只在模型声明图片输入时才工作（官方会直接报 `does not declare image input`），所以内联送达时不必读、没视觉时读必定被拒、格式不支持时读回来还是那个格式——三种情况都错。它还会诱导模型去重抄 `attachments/v1/objects/xx/<64 位十六进制>` 这种无扩展名路径（实测抄错一个字符 → `FS_NOT_FOUND`）。视频提示保留：视频永远不能内联，只有 `@jc-watch` 抽帧一条路。
 - [调整] 过程列表里的路径参数改成按尾巴截断：`read` 的 `file_path` 常年是绝对路径，按 80 字符从头切会把文件名切掉，只剩 `/Users/xxx/Documents/.../src-tauri/target/debug/skills/` 这种前缀，看起来像模型在翻源码。现在显示 `…/skills/jc-new-user-guide/references/2-….md`。
