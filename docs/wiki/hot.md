@@ -1036,3 +1036,10 @@
 - 现象：问「这些 @ 有什么用」时，过程里出现「读取文件 /Users/by3/Documents/jiucaihezi-app/src-tauri/target/debug/skills/jc-new-user-guide/...」，像是模型在翻开发目录。
 - 结论：**读 skill 自己的参考文件是设计行为**（`SKILL.md` 的参考导航指向 `references/N.md`），不是乱翻。dev 版的 `resource_dir()` 就是 `src-tauri/target/debug`（`bundled_skills_dir` 先看 `resource_dir/skills`），打包后同一路径在 `韭菜盒子.app/Contents/Resources/skills/`。
 - 真问题是**显示**：`deepSeekToolSummary` 按 80 字符从头截断路径，把文件名切掉只剩本机目录前缀。已改为路径类键（`file_path` / `path`）按尾部保留，显示 `…/skills/jc-new-user-guide/references/2-….md`。
+
+## 2026-10-23 过程里的 FS_NOT_FOUND 图片读取
+
+- 现象：一次「这些 @ 有什么用」的对话里，第一步 `读取图片` 32ms 失败 `FS_NOT_FOUND`，路径在 `~/Library/Application Support/com.jiucaihezi.desktop/deepseek-harness/workspaces/<key>/attachments/…`。
+- 日志证据（`workspaces/<key>/sessions/<cwd>/<session>/session.v4.jsonl.zstd`，`zstd -dc`）：正确路径出现 5 次、模型抄错的路径出现 4 次。真文件是 `…/objects/67/6760a7be49ce1886f355c58bf36` + `a5f417c1…`，模型抄成 `…f355c58bf36f355c58bf36f4f417c1…`——把一段哈希重复了一遍。
+- 根因在**我们的提示**：`deepSeekContentBlocks` 对已内联的图片仍追加「本轮引用里的图片用 read_image 读」。图片明明已经在消息里，再指路只会诱导模型去重抄那串 64 位十六进制（无扩展名、无文件名，最容易抄错）。
+- 已改为只对**没能内联**的图片（模型不支持视觉 / 格式不支持）提示 `read_image`。

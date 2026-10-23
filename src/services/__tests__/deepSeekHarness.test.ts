@@ -202,6 +202,24 @@ test('DeepSeek Harness tells the model when an attached image cannot be delivere
   )
 })
 
+test('已经内联送达的图片不再让模型 read_image', () => {
+  // 附件对象路径是 attachments/v1/objects/xx/<64 位十六进制>：无扩展名、无文件名。
+  // 既内联又点名「用 read_image 读」＝自相矛盾，模型会去重抄那串哈希，实测抄错
+  // 一个字符就是 FS_NOT_FOUND（...f355c58bf36f355c58bf36...）。
+  const image = {
+    id: 'image-1', name: 'image.png', mime: 'image/png', size: 3, kind: 'image' as const,
+    value: 'data:image/png;base64,QUJD',
+    readablePath: '/tmp/objects/67/6760a7be49ce1886f355c58bf36a5f417c129725b323f1b4c26a325d9d04080f',
+  }
+  const delivered = deepSeekContentBlocks('看图', [image], [], true)
+  assert.equal(delivered.filter(block => block.type === 'image').length, 1)
+  assert.doesNotMatch(String(delivered[0].text), /read_image/)
+
+  // 没送达（模型不支持视觉）时仍要告诉它怎么自己去看。
+  const undelivered = deepSeekContentBlocks('看图', [image], [], false)
+  assert.match(String(undelivered[0].text), /read_image/)
+})
+
 test('DeepSeek Harness sends already-read files in the first prompt', () => {
   assert.deepEqual(
     deepSeekContentBlocks('修改它', [], [{ name: 'wiki/方案.md', content: '# 旧方案' }]),
