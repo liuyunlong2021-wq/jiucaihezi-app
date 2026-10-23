@@ -747,6 +747,13 @@ test('工具结果超长时截断并标记，摘要候选字段按实操键名�
     deepSeekProgress({ type: 'tool/call', data: { callId: 'c2', name: 'skill', arguments: '{"name":"jc-daoju"}' } })?.summary,
     'jc-daoju',
   )
+  // 绝对路径按尾截断：按头截断会把文件名切掉，只剩
+  // `/Users/xxx/Documents/.../src-tauri/target/debug/skills/` 这种让人以为模型在翻源码的前缀。
+  const longPath = deepSeekProgress({ type: 'tool/call', data: { callId: 'c3', name: 'read', arguments: JSON.stringify({
+    file_path: '/Users/someone/Documents/some-repo/src-tauri/target/debug/skills/jc-new-user-guide/references/2-输入框的@能力.md',
+  }) } })?.summary
+  assert.ok(String(longPath).startsWith('…/'), `路径应保留尾部, got ${longPath}`)
+  assert.ok(String(longPath).endsWith('2-输入框的@能力.md'), `路径尾部必须是文件名, got ${longPath}`)
   // 参数不是合法 JSON 时必须退化为空摘要而不是抛错。
   assert.equal(
     deepSeekProgress({ type: 'tool/call', data: { callId: 'c3', name: 'read', arguments: '{not json' } })?.summary,

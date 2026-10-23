@@ -1030,3 +1030,9 @@
 - `@文件` 芯片从输入框 `@` 菜单移除。根因是它早就不是独立开关：`fileToolsSelected` 直接取 `permissionTier === 'danger-full-access'`，点 `@文件` 只是改权限档，和底部「权限」按钮重复。`enableTool/disableTool` 里的 `id === 'file'` 分支一并删除。
 - 新手指南（`public/skills/jc-new-user-guide`）新增 `references/2-输入框的@能力.md`：`@` 菜单七项各自的作用/产物/扣费，@影音 的媒体计划与「复制参数」，Office 的 CSV 与长图/网页，以及「@哪个只用哪个 + 未选 Skill 时自动选」。`SKILL.md` 的触发词与导航表同步。
 - 新增回归：`memoryWorkbench.test.ts` 断言指南与芯片名同步，芯片改名或下线时测试会红。
+
+## 2026-10-23 过程列表里的绝对路径
+
+- 现象：问「这些 @ 有什么用」时，过程里出现「读取文件 /Users/by3/Documents/jiucaihezi-app/src-tauri/target/debug/skills/jc-new-user-guide/...」，像是模型在翻开发目录。
+- 结论：**读 skill 自己的参考文件是设计行为**（`SKILL.md` 的参考导航指向 `references/N.md`），不是乱翻。dev 版的 `resource_dir()` 就是 `src-tauri/target/debug`（`bundled_skills_dir` 先看 `resource_dir/skills`），打包后同一路径在 `韭菜盒子.app/Contents/Resources/skills/`。
+- 真问题是**显示**：`deepSeekToolSummary` 按 80 字符从头截断路径，把文件名切掉只剩本机目录前缀。已改为路径类键（`file_path` / `path`）按尾部保留，显示 `…/skills/jc-new-user-guide/references/2-….md`。

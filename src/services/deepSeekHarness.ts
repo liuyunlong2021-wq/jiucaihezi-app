@@ -825,6 +825,28 @@ function deepSeekClip(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text
 }
 
+/**
+ * 路径参数只显示最具体的几层。
+ *
+ * `read` / `read_image` 的 `file_path` 常年是绝对路径，按 80 字符从头截断时正好把最有
+ * 信息量的文件名切掉，留下 `/Users/xxx/Documents/.../src-tauri/target/debug/skills/` 这种
+ * 前缀——用户看到的是一串本机目录，会以为模型在翻源码。尾部才是「它在读什么」。
+ */
+function deepSeekShortPath(value: string, limit: number): string {
+  if (value.length <= limit) return value
+  const parts = value.split(/[\\/]+/).filter(Boolean)
+  if (parts.length < 2) return deepSeekClip(value, limit)
+  const tail: string[] = []
+  for (const part of [...parts].reverse()) {
+    if ([part, ...tail].join('/').length > limit - 2) break
+    tail.unshift(part)
+  }
+  return tail.length ? `…/${tail.join('/')}` : deepSeekClip(value, limit)
+}
+
+/** 这两个键的值是路径，按尾截断；其余键（命令、查询词）仍按头截断。 */
+const DEEPSEEK_PATH_SUMMARY_KEYS = new Set(['file_path', 'path'])
+
 function deepSeekToolSummary(rawArguments: unknown): string {
   if (typeof rawArguments !== 'string') return ''
   let parsed: unknown
@@ -838,7 +860,10 @@ function deepSeekToolSummary(rawArguments: unknown): string {
   for (const key of DEEPSEEK_SUMMARY_KEYS) {
     const value = (parsed as Record<string, unknown>)[key]
     if (typeof value !== 'string' || !value.trim()) continue
-    return deepSeekClip(value.replace(/\s+/g, ' ').trim(), DEEPSEEK_SUMMARY_LIMIT)
+    const text = value.replace(/\s+/g, ' ').trim()
+    return DEEPSEEK_PATH_SUMMARY_KEYS.has(key)
+      ? deepSeekShortPath(text, DEEPSEEK_SUMMARY_LIMIT)
+      : deepSeekClip(text, DEEPSEEK_SUMMARY_LIMIT)
   }
   return ''
 }

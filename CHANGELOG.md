@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [调整] 过程列表里的路径参数改成按尾巴截断：`read` 的 `file_path` 常年是绝对路径，按 80 字符从头切会把文件名切掉，只剩 `/Users/xxx/Documents/.../src-tauri/target/debug/skills/` 这种前缀，看起来像模型在翻源码。现在显示 `…/skills/jc-new-user-guide/references/2-….md`。
 - [调整] 输入框 `@` 菜单下线 `@文件` 条目：本机读写与终端早已由底部「权限」档控制（`fileToolsSelected` 直接看权限档），这个芯片是重复开关，留着只会让人以为它和权限档是两件事。
 - [调整] 新手指南大更新：新增 `references/2-输入框的@能力.md` 讲清 `@` 菜单每一项（Wiki Memory / Skill / Office / 影音 / 3D / MCP / 会话）的作用、产物、是否扣费与「@哪个只用哪个」的隔离规则；同步 `@排版`→`@Office`、`@文件`→权限档、CSV 导出、影音与创作面板「复制参数」打通；补一条指南与芯片名同步的回归测试。
 - [调整] 输入框芯片 `@排版` 改名 `@Office`：一眼能对上文档 / 表格 / PPT / PDF，网页和长图也走这个芯片（靠文案科普）。内部 id 仍是 `media`，历史会话与开关状态不受影响。
