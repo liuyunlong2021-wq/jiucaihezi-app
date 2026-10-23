@@ -137,6 +137,33 @@ test('existing-tag revalidation runs native probes and promotion despite skipped
   assert.match(workflow, /promote-updater:[\s\S]*?if: always\(\) && needs\.verify-native-upgrade\.result == 'success'/)
 })
 
+test('version tag releases automatically promote OTA only after all native upgrades pass', () => {
+  const condition = workflow.match(/\n  promote-updater:[\s\S]*?\n    if: ([^\n]+)/)?.[1]
+  assert.ok(condition)
+  const expression = condition
+    .replace(/needs\.verify-native-upgrade\.result/g, 'result')
+    .replace(/github\.event_name/g, 'event')
+    .replace(/github\.ref/g, 'ref')
+    .replace(/inputs\.native_platform/g, 'platform')
+    .replace(/inputs\.promote_updater/g, 'promote')
+    .replace(/inputs\.publish_tag/g, 'tag')
+  const accepts = new Function('result', 'event', 'ref', 'platform', 'promote', 'tag', 'always', 'startsWith', `return ${expression}`)
+  const scenarios = [
+    ['tag release', 'success', 'push', 'refs/tags/v2.2.40', '', false, '', true],
+    ['failed upgrades', 'failure', 'push', 'refs/tags/v2.2.40', '', false, '', false],
+    ['cancelled upgrades', 'cancelled', 'push', 'refs/tags/v2.2.40', '', false, '', false],
+    ['skipped upgrades', 'skipped', 'push', 'refs/tags/v2.2.40', '', false, '', false],
+    ['branch push', 'success', 'push', 'refs/heads/main', '', false, '', false],
+    ['manual promotion', 'success', 'workflow_dispatch', 'refs/heads/main', 'all', true, 'v2.2.39', true],
+    ['download republication', 'success', 'workflow_dispatch', 'refs/heads/main', 'all', false, 'v2.2.39', false],
+    ['manual tag republication', 'success', 'workflow_dispatch', 'refs/tags/v2.2.39', 'all', false, 'v2.2.39', false],
+    ['Windows diagnostics', 'success', 'workflow_dispatch', 'refs/heads/main', 'windows', true, 'v2.2.39', false],
+  ]
+  for (const [name, result, event, ref, platform, promote, tag, expected] of scenarios) {
+    assert.equal(accepts(result, event, ref, platform, promote, tag, () => true, (value, prefix) => value.startsWith(prefix)), expected, name)
+  }
+})
+
 test('R2 publication verifies all immutable public bytes before redirects and download promotion', () => {
   const job = workflow.slice(workflow.indexOf('\n  publish-download-manifest:'), workflow.indexOf('\n  verify-native-upgrade:'))
   assert.match(job, /--pattern '\*_x64_windows_portable\.zip'/)
