@@ -817,7 +817,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速</)
   assert.match(workbench, /const skillCommand = \{/)
-  for (const label of ['@Skill', '@导出', '@影音', '@3D', '@MCP'])
+  for (const label of ['@Skill', '@Office', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
   // 权限开关**不带 `@`**：旁边那五个是「启用某能力」，它不是。
   // 当前档位常驻写在按钮上；按钮显示和菜单选项相同的全名，避免不同档位看起来都像“工作区”。

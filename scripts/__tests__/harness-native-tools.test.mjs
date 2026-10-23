@@ -53,7 +53,7 @@ test('native 3D tools bind to their own App without the shared discovery file', 
 })
 
 test('没有 mediaCatalog 时创作工具只留上下文与画布追加', async () => {
-  // @导出 / @3D 也会挂创作服务器（历史原因：只开 @导出 时
+  // @Office / @3D 也会挂创作服务器（历史原因：只开 @Office 时
   // add_creation_result_to_canvas 曾是 unknown tool），但不能顺带看到影音目录。
   const registered = []
   await apply({ tools: { register: tool => registered.push(tool.name) } }, { creation: true, allowPaid: false, mediaCatalog: false, capabilities: [] })
