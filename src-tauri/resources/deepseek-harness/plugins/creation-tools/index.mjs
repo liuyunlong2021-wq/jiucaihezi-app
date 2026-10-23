@@ -8,6 +8,8 @@ export const name = 'tool-jiucaihezi-creation'
 export const inject = ['tools']
 export const Config = z.object({
   creation: z.boolean().default(false),
+  // 影音目录/任务那套只读工具只跟 @影音 走；@排版 / @3D 拿不到媒体目录。
+  mediaCatalog: z.boolean().default(false),
   allowPaid: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
 })
@@ -84,33 +86,37 @@ function registerCreationTool(ctx, name, description, parameters, execute) {
   }))
 }
 
-function registerCreationTools(ctx, allowPaid) {
+function registerCreationTools(ctx, allowPaid, mediaCatalog) {
   registerCreationTool(ctx, 'get_creation_context', '读取当前韭菜盒子项目、画布和提交上下文。', {},
     () => invokeApp('get_creation_context', {}))
-  registerCreationTool(ctx, 'list_creation_models', '按 Key 权限分页查询影音能力；创作面板可见性不影响执行权限。新模型须先读取详情合同。', {
-    query: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer' },
-    input_modality: { type: 'string' }, output_modality: { type: 'string' },
-  }, args => invokeApp('list_creation_models', { ...args, capabilities: ['av'] }))
-  registerCreationTool(ctx, 'get_creation_model', '读取影音能力的参数 schema、素材槽位和版本；只按合同填写，不猜接口。', {
-    modelId: { type: 'string', required: true }, revision: { type: 'string' },
-  }, args => invokeApp('get_creation_model', { ...args, capabilities: ['av'] }))
-  registerCreationTool(ctx, 'get_creation_task', '查询韭菜盒子媒体任务的状态、进度和结果。', {
-    taskId: { type: 'string', required: true },
-  }, args => invokeApp('get_creation_task', args))
-  registerCreationTool(ctx, 'list_creation_history', '分页读取创作面板中的媒体任务历史。', {
-    offset: { type: 'integer' },
-    limit: { type: 'integer' },
-  }, args => invokeApp('list_creation_history', args))
-  registerCreationTool(ctx, 'cancel_creation_task', '默认停止跟踪；remote=true 按能力合同请求远程取消，等待真实终态。停止跟踪或请求取消均不代表退款。', {
-    taskId: { type: 'string', required: true }, remote: { type: 'boolean' },
-  }, args => invokeApp('cancel_creation_task', args))
-  registerCreationTool(ctx, 'retry_media_persistence', '重试保存已成功生成的结果，不会重新生成。', {
-    taskId: { type: 'string', required: true },
-  }, args => invokeApp('retry_media_persistence', args))
   registerCreationTool(ctx, 'add_creation_result_to_canvas', '把已保存的创作结果显式追加到当前画布。', {
     taskId: { type: 'string', required: true },
     contextVersion: { type: 'string', required: true },
   }, args => invokeApp('add_creation_result_to_canvas', args))
+  // 目录、任务查询与结果保存都是影音专属；只开 @排版 / @3D 时不能出现，
+  // 否则模型会拿文档需求去查媒体模型。画布追加与上下文是所有创作芯片的公共能力。
+  if (mediaCatalog) {
+    registerCreationTool(ctx, 'list_creation_models', '按 Key 权限分页查询影音能力；创作面板可见性不影响执行权限。新模型须先读取详情合同。', {
+      query: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer' },
+      input_modality: { type: 'string' }, output_modality: { type: 'string' },
+    }, args => invokeApp('list_creation_models', { ...args, capabilities: ['av'] }))
+    registerCreationTool(ctx, 'get_creation_model', '读取影音能力的参数 schema、素材槽位和版本；只按合同填写，不猜接口。', {
+      modelId: { type: 'string', required: true }, revision: { type: 'string' },
+    }, args => invokeApp('get_creation_model', { ...args, capabilities: ['av'] }))
+    registerCreationTool(ctx, 'get_creation_task', '查询韭菜盒子媒体任务的状态、进度和结果。', {
+      taskId: { type: 'string', required: true },
+    }, args => invokeApp('get_creation_task', args))
+    registerCreationTool(ctx, 'list_creation_history', '分页读取创作面板中的媒体任务历史。', {
+      offset: { type: 'integer' },
+      limit: { type: 'integer' },
+    }, args => invokeApp('list_creation_history', args))
+    registerCreationTool(ctx, 'cancel_creation_task', '默认停止跟踪；remote=true 按能力合同请求远程取消，等待真实终态。停止跟踪或请求取消均不代表退款。', {
+      taskId: { type: 'string', required: true }, remote: { type: 'boolean' },
+    }, args => invokeApp('cancel_creation_task', args))
+    registerCreationTool(ctx, 'retry_media_persistence', '重试保存已成功生成的结果，不会重新生成。', {
+      taskId: { type: 'string', required: true },
+    }, args => invokeApp('retry_media_persistence', args))
+  }
   if (allowPaid) {
     registerCreationTool(ctx, 'submit_creation_task', '使用 Key 有权调用的影音能力提交任务。调用前先查询目录、get_creation_model 与上下文；modelId 使用 capability_id，revision 和 params 按合同填写。网络不确定时使用原 requestId 查询恢复，重新生成才使用新 ID。任务使用 App 已配置的媒体服务与 Key，并进入创作历史。', {
       requestId: { type: 'string', required: true },
@@ -181,7 +187,7 @@ function registerAppTools(ctx, capabilities, listed) {
 }
 
 export async function apply(ctx, config) {
-  if (config.creation) registerCreationTools(ctx, config.allowPaid)
+  if (config.creation) registerCreationTools(ctx, config.allowPaid, config.mediaCatalog)
   const capabilities = [...new Set(config.capabilities.filter(item => item === 'media' || item === '3d'))]
   if (capabilities.length) {
     const listed = await invokeApp('list_harness_tools', { capabilities })

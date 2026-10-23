@@ -52,6 +52,22 @@ test('native 3D tools bind to their own App without the shared discovery file', 
   })
 })
 
+test('没有 mediaCatalog 时创作工具只留上下文与画布追加', async () => {
+  // @排版 / @3D 也会挂创作服务器（历史原因：只开 @排版 时
+  // add_creation_result_to_canvas 曾是 unknown tool），但不能顺带看到影音目录。
+  const registered = []
+  await apply({ tools: { register: tool => registered.push(tool.name) } }, { creation: true, allowPaid: false, mediaCatalog: false, capabilities: [] })
+  assert.deepEqual(registered, ['get_creation_context', 'add_creation_result_to_canvas'])
+})
+
+test('@影音 之外多注册的只有媒体目录与任务工具', async () => {
+  const registered = []
+  await apply({ tools: { register: tool => registered.push(tool.name) } }, { creation: true, allowPaid: false, mediaCatalog: true, capabilities: [] })
+  assert.ok(registered.includes('list_creation_models'))
+  assert.ok(registered.includes('add_creation_result_to_canvas'))
+  assert.ok(!registered.includes('submit_creation_task'))
+})
+
 test('MCP child processes use the same instance-bound connection instead of global discovery', async () => {
   await withEnvironment(async () => {
     const server = createCreationMcpServer()

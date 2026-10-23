@@ -1381,6 +1381,8 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     "  name: '@jiucaihezi/dsh-tool-creation'",
     '  config:',
     `    creation: ${needsCreation}`,
+    // 影音目录/任务工具跟 @影音 走；@排版 / @3D 只拿创作上下文和画布追加。
+    `    mediaCatalog: ${Boolean(input.avSelected)}`,
     `    allowPaid: ${Boolean(input.avSelected)}`,
     '    capabilities:',
     ...nativeToolCapabilities.map(capability => `      - ${capability}`),

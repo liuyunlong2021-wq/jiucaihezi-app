@@ -532,6 +532,9 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   // add_creation_result_to_canvas 曾是 unknown tool，模型因此跑去找 CLI 硬做。
   assert.match(source, /const needsCreation = Boolean\(input\.avSelected \|\| input\.mediaSelected \|\| input\.scene3dSelected\)/)
   assert.match(source, /allowPaid: \$\{Boolean\(input\.avSelected\)\}/)
+  // 影音目录/任务工具同理只在 @影音 注册：@排版 / @3D 仍拿创作上下文与
+  // add_creation_result_to_canvas，但看不到 list_creation_models 那套。
+  assert.match(source, /mediaCatalog: \$\{Boolean\(input\.avSelected\)\}/)
   // patch 里新增插件只能走 `- insert:`：官方 applyEntryPatches 对非 insert 条目是按 id
   // 匹配**已有**行，匹配不到就 warn + skip。MCP 条目曾经写成顶层 `- id:`，于是创作 /
   // 媒体 / 3D / 自定义 MCP 在 Harness 会话里从来没有挂上过（--dump-config 实测命中 0）。

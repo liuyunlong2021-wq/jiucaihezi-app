@@ -1009,3 +1009,9 @@
 
 - v2.2.37 三平台发布未完成：Windows/ARM成功，Intel的Apple票据网络失败，重跑又遇中间包重名。后继 v2.2.38 删除Tauri提前上传中间包的根因，并为Apple票据服务错误68增加有限重试；签名、公证和原生检查保留。详见 [[运维/桌面发布与自动更新连续失败修复-2026-10-09]]，发布状态以Actions为准。
 - **v2.2.38 三平台正式安装包已发布**：`9b44365f` 与tag已推送，Actions `39660955198` 全部成功，包括三平台构建/原生启动、Mac签名公证、公开校验和三平台官方引擎隔离升级；公网 `latest.json` 为2.2.38。正式OTA推广按规则跳过，人工GUI/权限/用户项目升级不在此次验证范围。
+
+# 2026-10-23 @芯片单选隔离
+
+- 已修：系统提示里的影音生成策略（`buildMediaPlanPolicy` + 批量媒体确认文案）原来用 `mediaSelected || avSelected` 判断，只选 @排版 也会把 `jc-media-plan` 规则灌进去；现在只看 `@影音` 或 Skill 自己声明的 media/av。定向 34/34。
+- 已修：Harness 创作插件新增 `mediaCatalog` 配置，`list_creation_models` / `get_creation_model` / `get_creation_task` / `list_creation_history` / `cancel_creation_task` / `retry_media_persistence` 只在 `@影音` 注册；@排版 / @3D 只剩 `get_creation_context` + `add_creation_result_to_canvas`（这两件是历史回归结论，别删）。付费提交仍只有 `allowPaid: avSelected`。
+- 用户裁定：未选 Skill 时 Skill 行为跟官方 DSH 一致（没选就是自动选），`production-skills.mjs` 的 `mode === 'none'` 放行**不改**，不要改成「一个都不加载」。
