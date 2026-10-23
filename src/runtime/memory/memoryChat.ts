@@ -439,6 +439,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     loadWebSkillByName,
     skillAllowedToolNames,
   )
+  // 生成能力只看 @影音 或 Skill 自己声明的 av/media；@排版 / @3D 不应连带影音规则。
+  const avMediaPolicy = Boolean(
+    input.avSelected || [...skillAllowedToolNames].some(name => name === 'media' || name === 'av'),
+  )
   const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
   const maxOutputTokens =
     model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
@@ -488,14 +492,12 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         .join('\n\n') + (memoryQueryContext ? `\n\n${memoryQueryContext}` : ''),
     skillSystemPrompt: explicitCapabilitySelected
       ? [
-          input.mediaSelected ||
-          input.avSelected ||
-          [...skillAllowedToolNames].some(name => name === 'media' || name === 'av')
+          // 只有 @影音（或明确声明 media/av 的 Skill）才拿到生成策略：
+          // @排版 是文档/网页/长图，和 jc-media-plan 无关，不能把影音规则灌进去。
+          avMediaPolicy
             ? buildMediaPlanPolicy(input.mediaReferencePolicy)
             : '',
-          input.mediaSelected ||
-          input.avSelected ||
-          [...skillAllowedToolNames].some(name => name === 'media' || name === 'av')
+          avMediaPolicy
             ? '记忆工作台支持批量媒体确认：单个任务在 jc-media-plan 中写一个 JSON 对象；多个独立任务写对象数组，每个任务一项。不要输出多个 jc-media-plan 代码块.'
             : '',
           selectedSkillPrompt || buildWebSkillCatalogPrompt(catalog),

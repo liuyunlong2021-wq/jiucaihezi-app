@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
@@ -118,6 +119,18 @@ test('a Skill without allowed-tools can read its declared package resources', as
     selectMemoryTools(tools, ['reader']).map(tool => tool.function.name),
     ['read'],
   )
+})
+
+test('生成策略只跟随 @影音：@排版 不再注入媒体 plan 规则', () => {
+  // 面板上 @排版 是文档/网页/长图，和 jc-media-plan 无关。之前用
+  // `mediaSelected || avSelected` 判断，只选 @排版 也会把影音生成策略与
+  // 批量确认文案灌进系统提示，模型因此拿文档需求去凑生成计划。
+  const source = readFileSync(new URL('../memoryChat.ts', import.meta.url), 'utf8')
+  const start = source.indexOf('skillSystemPrompt: explicitCapabilitySelected')
+  assert.ok(start > 0)
+  const policyBlock = source.slice(start, start + 900)
+  assert.match(policyBlock, /avMediaPolicy/)
+  assert.doesNotMatch(policyBlock, /input\.mediaSelected/)
 })
 
 test('a selected Skill cannot load another Skill implicitly', () => {
