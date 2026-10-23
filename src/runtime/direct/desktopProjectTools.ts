@@ -666,7 +666,7 @@ export function createDesktopProjectToolExecutor(input: {
       const artifact = createDocumentArtifact(
         String(args.title),
         String(args.content),
-        String(args.format) as 'docx' | 'md' | 'txt',
+        String(args.format) as 'docx' | 'md' | 'txt' | 'csv',
       )
       const path = await writeGeneratedFile(
         `.raw/jc-media/文档/${artifact.filename}`,

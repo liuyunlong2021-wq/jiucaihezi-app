@@ -2,7 +2,7 @@ import { toBlob } from 'html-to-image'
 import { createDocxFromText } from '@/utils/localDocx'
 import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
 
-export type MemoryArtifactFormat = 'docx' | 'md' | 'txt'
+export type MemoryArtifactFormat = 'docx' | 'md' | 'txt' | 'csv'
 export type MemorySlideFormat = 'html' | 'pdf' | 'pptx'
 export type MemoryImageRenderer = (input: { title: string; content: string; width?: number }) => Promise<Blob>
 
@@ -159,16 +159,18 @@ export function createDocumentArtifact(
   format: MemoryArtifactFormat,
 ): { filename: string; mimeType: string; data: string | Uint8Array } {
   if (!String(content || '').trim()) throw new Error('生成内容不能为空')
-  if (!['docx', 'md', 'txt'].includes(format)) throw new Error(`不支持的文档格式: ${format}`)
+  if (!['docx', 'md', 'txt', 'csv'].includes(format)) throw new Error(`不支持的文档格式: ${format}`)
   if (format === 'docx') return {
     filename: artifactFilename(title, 'docx'),
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     data: createDocxFromText({ title, content }),
   }
+  const textMimeType: string | undefined = { md: 'text/markdown', csv: 'text/csv' }[format as 'md' | 'csv']
   return {
     filename: artifactFilename(title, format),
-    mimeType: format === 'md' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8',
-    data: content,
+    mimeType: textMimeType ? `${textMimeType};charset=utf-8` : 'text/plain;charset=utf-8',
+    // CSV 带 BOM：Excel 双击打开时用不带 BOM 的 UTF-8 会把中文显示成乱码。
+    data: format === 'csv' ? `\uFEFF${content}` : content,
   }
 }
 

@@ -33,14 +33,14 @@ const OFFICE_TOOL_DEFINITIONS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'create_document',
-      description: '把指定文本内容保存为本地文档文件。支持生成 Word/docx、Markdown 和 TXT。必须使用当前对话中用户要求转换的内容，不要改写成其他主题。',
+      description: '把指定文本内容保存为本地文档文件。支持生成 Word/docx、Markdown、TXT 和 CSV 表格。必须使用当前对话中用户要求转换的内容，不要改写成其他主题。',
       parameters: {
         type: 'object',
         properties: {
           doc_type: {
             type: 'string',
-            enum: ['md', 'markdown', 'txt', 'docx', 'word'],
-            description: '目标文档类型。docx/word 会生成本地 Word 文档。',
+            enum: ['md', 'markdown', 'txt', 'docx', 'word', 'csv'],
+            description: '目标文档类型。docx/word 会生成本地 Word 文档，csv 需要逗号分隔的表格正文。',
           },
           title: {
             type: 'string',
@@ -151,17 +151,23 @@ async function saveMarkdownDocument(args: Record<string, unknown>): Promise<stri
   const requestedType = String(args.doc_type || args.format || 'md').trim().toLowerCase()
   const title = sanitizeFilenamePart(String(args.title || args.filename || '韭菜盒子对话导出'), '韭菜盒子对话导出')
   const isDocx = requestedType === 'docx' || requestedType === 'word'
-  const filename = `${title}.${isDocx ? 'docx' : requestedType === 'txt' ? 'txt' : 'md'}`
+  const textType = requestedType === 'txt' ? 'txt' : requestedType === 'csv' ? 'csv' : 'md'
+  const filename = `${title}.${isDocx ? 'docx' : textType}`
   const mimeType = isDocx
     ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    : requestedType === 'txt'
+    : textType === 'txt'
       ? 'text/plain;charset=utf-8'
-      : 'text/markdown;charset=utf-8'
+      : textType === 'csv'
+        ? 'text/csv;charset=utf-8'
+        : 'text/markdown;charset=utf-8'
 
   const { saveGeneratedFile } = await import('@/utils/exportSave')
   const data = isDocx
     ? (await import('@/utils/localDocx')).createDocxFromText({ title, content })
-    : content
+    // CSV 带 BOM：Excel 双击打开时用不带 BOM 的 UTF-8 会把中文显示成乱码。
+    : textType === 'csv'
+      ? `\uFEFF${content}`
+      : content
   const saved = await saveGeneratedFile({
     filename,
     mimeType,
@@ -173,7 +179,7 @@ async function saveMarkdownDocument(args: Record<string, unknown>): Promise<stri
     tool: 'create_document',
     engine: isDocx ? 'local_docx_writer' : 'local_text_export',
     requested_type: requestedType,
-    actual_type: isDocx ? 'docx' : requestedType === 'txt' ? 'txt' : 'md',
+    actual_type: isDocx ? 'docx' : textType,
     path: saved.path || '',
     message: isDocx ? '已按当前对话内容生成 Word 文档。' : '已按当前对话内容导出文档。',
   })

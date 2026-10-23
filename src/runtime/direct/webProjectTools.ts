@@ -314,7 +314,7 @@ export function createWebProjectToolExecutor(input: {
       const artifact = createDocumentArtifact(
         String(args.title),
         String(args.content),
-        String(args.format) as 'docx' | 'md' | 'txt',
+        String(args.format) as 'docx' | 'md' | 'txt' | 'csv',
       )
       const requestedPath = `.raw/jc-media/文档/${artifact.filename}`
       const entry =

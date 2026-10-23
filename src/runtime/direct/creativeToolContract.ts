@@ -362,14 +362,14 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
   ),
   tool(
     'create_document',
-    'Create a real DOCX, Markdown, or text document in the project document materials folder.',
+    'Create a real DOCX, Markdown, text, or CSV document in the project document materials folder. Use CSV for table data that should open in a spreadsheet.',
     {
       title: { type: 'string', description: 'Output title and filename without extension' },
       content: { type: 'string', description: 'Complete document content' },
       format: {
         type: 'string',
-        enum: ['docx', 'md', 'txt'],
-        description: 'Output document format',
+        enum: ['docx', 'md', 'txt', 'csv'],
+        description: 'Output document format; csv expects comma separated rows',
       },
     },
     ['title', 'content', 'format'],

@@ -1015,3 +1015,8 @@
 - 已修：系统提示里的影音生成策略（`buildMediaPlanPolicy` + 批量媒体确认文案）原来用 `mediaSelected || avSelected` 判断，只选 @排版 也会把 `jc-media-plan` 规则灌进去；现在只看 `@影音` 或 Skill 自己声明的 media/av。定向 34/34。
 - 已修：Harness 创作插件新增 `mediaCatalog` 配置，`list_creation_models` / `get_creation_model` / `get_creation_task` / `list_creation_history` / `cancel_creation_task` / `retry_media_persistence` 只在 `@影音` 注册；@排版 / @3D 只剩 `get_creation_context` + `add_creation_result_to_canvas`（这两件是历史回归结论，别删）。付费提交仍只有 `allowPaid: avSelected`。
 - 用户裁定：未选 Skill 时 Skill 行为跟官方 DSH 一致（没选就是自动选），`production-skills.mjs` 的 `mode === 'none'` 放行**不改**，不要改成「一个都不加载」。
+
+## 2026-10-23 表格导出与「@office」结论
+
+- 不新增 `@office` 芯片：AnyDoc（[documentFormats.ts](src/utils/documentFormats.ts) 的真源）只做 Office/PDF/EPUB → Markdown 的**导入**解析，导出是 artifact 工具的职责；芯片按用途分（排版/影音/3D），再开一个格式芯片会让「@哪个只用哪个」自相矛盾。
+- `create_document` 已支持 `format: csv`（[memoryArtifactTools.ts](src/runtime/memory/memoryArtifactTools.ts) / [creativeToolContract.ts](src/runtime/direct/creativeToolContract.ts) / [officeTools.ts](src/composables/officeTools.ts) 三处同名工具都已对齐）。**本地 xlsx 写出器仍未接入**，[officeAutoExport.ts](src/utils/officeAutoExport.ts) 是没有任何调用者的死代码，别把它当成现有能力。

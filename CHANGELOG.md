@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [新增] `@排版` 的 `create_document` 支持 `format: csv`：表格数据导 CSV（带 BOM，Excel 双击开中文不乱码），零依赖。AnyDoc 只负责 Office/PDF/EPUB→Markdown 的导入解析，不参与导出，因此不新增 `@office` 芯片；本地 xlsx 写出器仍未接入。
 - [调整] @芯片隔离收紧：影音生成策略（`buildMediaPlanPolicy` 与批量确认文案）只跟 @影音 走，不再灌进 @排版；`list_creation_models` / `get_creation_task` / `list_creation_history` / `cancel_creation_task` / `retry_media_persistence` 只在 @影音 注册，@排版 / @3D 仍保留 `get_creation_context` 与 `add_creation_result_to_canvas`。未选 Skill 时仍按官方 DSH「自动选」语义，不封锁 Skill。
 - [新增] 创作面板「复制参数」：把类型/模型/模式/比例/分辨率/时长/价格写成 `[创作参数] …` 一行，粘到 @影音 输入框接着写提示词；@影音 解析后强制按粘贴的模型与参数执行（只认可见模型，类型不符则忽略）。
 - [调整] @影音 与创作面板打通：默认模型只从面板可见型号里挑（不再落到 hidden 的 `gpt-image-2-超分` / `rh-seedance25-*`），提交参数改用面板同一个 builder（MJ 的 `ratio` 不再丢），卡片显示模型/价格/比例，并可「直接生成」（先确认模型与价格）。

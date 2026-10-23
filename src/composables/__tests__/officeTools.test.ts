@@ -6,6 +6,9 @@ import { executeOfficeToolCall, getDefaultOfficeToolDefinitions, getOfficeToolDe
 test('exposes local document creation and editor export tools to the model', () => {
   assert.deepEqual(getDefaultOfficeToolDefinitions().map(tool => tool.function.name), ['create_document', 'export_editor_document'])
   assert.deepEqual(getOfficeToolDefinitions('office-writer', 'Word 文档')?.map(tool => tool.function.name), ['create_document', 'export_editor_document'])
+  // 表格没有本地 xlsx 写出器，导出面就靠 CSV：Excel 能直接打开且零依赖。
+  const docTypes = (getDefaultOfficeToolDefinitions()[0].function.parameters as any).properties.doc_type.enum
+  assert.ok(docTypes.includes('csv'))
 })
 
 test('office create saves requested content through local docx writer', async () => {
