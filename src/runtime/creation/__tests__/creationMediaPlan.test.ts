@@ -228,20 +228,56 @@ test('ZX Midjourney Fast Imagine uses the NewAPI image task contract', () => {
   assert.equal(textPlan.endpoint, '/v1/videos')
   assert.equal(textPlan.pollKind, 'newapi-task')
   assert.equal(textPlan.assetFlow, 'none')
+
   assert.equal(imagePlan.mode, 'image-to-image')
   assert.equal(imagePlan.assetFlow, 'none')
   assert.equal(displayModelPrice(getCreationModelSpec('newapi/zx/mj_fast_imagine')!), '0.5/张')
 })
 
+test('T8 Midjourney Relax Imagine shares the MJ task contract and is visible in the panel', () => {
+  const spec = getCreationModelSpec('newapi/t8/mj_relax_imagine')!
+  const textPlan = buildCreationRunPlan({
+    modelId: spec.id,
+    params: { prompt: '一只小花猫坐在窗边 --ar 1:1' },
+  })
+  assert.throws(() => buildCreationRunPlan({
+    modelId: spec.id,
+    params: { prompt: '保留猫的花纹 --ar 1:1', images: ['data:image/png;base64,aGVsbG8='] },
+  }), /参考图/)
+
+  assert.equal(spec.model, 'mj_relax_imagine')
+  assert.equal(displayModelLabel(spec.label), 'Midjourney Relax Imagine')
+  assert.equal(displayModelPrice(spec), '0.2/张')
+  // 插件直连 T8：没有适配器，且上游只收 base64Array，所以面板不开参考图
+  assert.deepEqual(spec.files?.images, { min: 0, max: 0 })
+  assert.equal(textPlan.apiStyle, 'newapi-image-task')
+  assert.equal(textPlan.endpoint, '/v1/videos')
+  assert.equal(textPlan.pollKind, 'newapi-task')
+  assert.equal(textPlan.assetFlow, 'none')
+
+  // 比例跟着提示词走，不推导像素 size（MJ 没有尺寸参数）
+  const landscape = buildCreationRunPlan({
+    modelId: spec.id,
+    params: { prompt: '一只小花猫', ratio: '16:9' },
+  })
+  assert.equal(landscape.debug.normalizedParams.ratio, '16:9')
+  assert.equal('size' in landscape.debug.normalizedParams, false)
+  assert.deepEqual(spec.capabilities.ratios, ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'])
+  assert.equal(spec.capabilities.resolutions, undefined)
+  // fast 仍按 2026-10-23 决定隐藏；relax 是替代品，必须能选到。
+  assert.equal(listCreationModels({ task: 'image' }).some(item => item.id === spec.id), true)
+  assert.equal(listCreationModels({ task: 'image' }).some(item => item.id === 'newapi/zx/mj_fast_imagine'), false)
+})
+
 test('ZX Seedance models are mapped and routed; only selected models are visible at per-task prices', () => {
   const models = [
     ['seedance-2.0-0826-480p', '1/条', '480p', true],
-    ['seedance-2.0-0826-720p', '1.2/条', '720p', false],
+    ['seedance-2.0-0826-720p', '1.2/条', '720p', true],
     ['seedance-2.0-fast-0826-480p', '0.8/条', '480p', true],
     ['seedance-2.0-fast-0826-720p', '1.2/条', '720p', true],
     ['seedance-2.0-TS', '1.2/条', '720p', true],
-    ['seedance-2.5', '1.2/条', '720p', false],
-    ['seedance-2.5-30s', '8/条', '720p', false],
+    ['seedance-2.5', '1.2/条', '720p', true],
+    ['seedance-2.5-30s', '8/条', '720p', true],
   ] as const
   const visibleIds = new Set(listCreationModels({ task: 'video' }).map(model => model.id))
 
@@ -437,6 +473,37 @@ test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 
   }
   assert.equal(imageIds.includes('gpt-image-2.5-1k'), true)
   assert.equal(displayModelPrice(getCreationModelSpec('gpt-image-2-菠萝')!), '0.08/张')
+})
+
+test('2026-10-23 截图点名的十款模型退出面板，jc 本机保持可见', () => {
+  const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
+  const videoIds = listCreationModels({ task: 'video' }).map(model => model.id)
+
+  for (const id of ['runninghub/api/rh-gpt2-image', 'runninghub/api/rh-gpt2-text', 'newapi/zx/mj_fast_imagine']) {
+    assert.equal(imageIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
+  }
+  for (const id of [
+    'newapi/zx/seedance-2.0-0826-720p',
+    'newapi/zx/seedance-2.5',
+    'newapi/zx/seedance-2.5-30s',
+    'newapi/dola/seedance2.5',
+    'newapi/shanhai/oc-model-r5cfh8',
+    'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s',
+    'newapi/boluo/minimax_h3_zm_u24',
+  ]) {
+    assert.equal(videoIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
+  }
+  for (const id of [
+    'jc-minimax-h3-ref2v',
+    'jc-minimax-h3',
+    'jc-minimax-h3-director8',
+    'jc-minimax-h3-first-frame',
+    'jc-minimax-h3-first-last',
+  ]) {
+    assert.equal(videoIds.includes(id), true, id)
+  }
 })
 
 test('Gemini image models use the native Xiaoyi image contract', () => {
@@ -1092,13 +1159,14 @@ test('partial contracts produce plan warnings instead of silent submits', () => 
 })
 
 test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary', () => {
-  const items = listCreationPanelModels({ task: 'image', source: 'all' })
+  // includeDisabled：GPT2.0 图生图 2026-10-23 起退出面板，这里仍然核对它的面板字段与摘要。
+  const items = listCreationPanelModels({ task: 'image', source: 'all', includeDisabled: true })
   const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
 
   assert.ok(gpt)
   assert.ok(rh)
-  assert.equal(items.some(item => item.id === 'runninghub/api/z-image-turbo'), false)
+  assert.equal(listCreationPanelModels({ task: 'image', source: 'all' }).some(item => item.id === 'runninghub/api/z-image-turbo'), false)
   assert.equal(gpt.source, 'newapi-direct')
   assert.equal(rh.source, 'runninghub')
   assert.ok(gpt.fields.some(field => field.key === 'prompt'))
@@ -1108,7 +1176,7 @@ test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary'
 })
 
 test('panel model labels distinguish GPT Image 2 routing tiers', () => {
-  const items = listCreationPanelModels({ task: 'image', source: 'all' })
+  const items = listCreationPanelModels({ task: 'image', source: 'all', includeDisabled: true })
   const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
 
@@ -1196,8 +1264,9 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
 
   // 定价与范围是有意钉住的：加模型或改价必须同步改这里，避免静默漂移。
   // model 必须是 NewAPI 渠道的公开名（渠道里的模型映射再换成山海上游 id）。
+  // includeDisabled：这一款 2026-10-23 起退出面板，但渠道合同仍要逐字钉住。
   assert.deepEqual(
-    listCreationModels({ source: 'all' })
+    listCreationModels({ source: 'all', includeDisabled: true })
       .filter(model => model.id.startsWith('newapi/shanhai/'))
       .map(model => [model.id, model.model, model.price, model.task]),
     [

@@ -478,6 +478,69 @@ test('Xiaoyi multipart loads the source Blob directly and trusts its bytes over 
   }
 })
 
+test('T8 Midjourney Relax surfaces the upstream failure reason instead of a generic message', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      return Response.json({ id: '1792717889720671', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/1792717889720671')) {
+      return Response.json({ status: 'failed', fail_reason: '消息包含敏感词汇(生成失败的任务不消耗GPU时间)' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/t8/mj_relax_imagine',
+      params: { prompt: '一个中国性感女网红' },
+    })
+    await assert.rejects(
+      () => withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan))),
+      /敏感词汇/,
+    )
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('T8 Midjourney Relax submits the panel ratio and no reference image', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let submitted: FormData | null = null
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      submitted = init.body as FormData
+      return Response.json({ id: '1792715269745219', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/1792715269745219')) {
+      return Response.json({ status: 'completed', metadata: { url: 'https://ai.t8star.org/mj/image/1792715269745219' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/t8/mj_relax_imagine',
+      params: { prompt: '一个中国美女', ratio: '16:9' },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://ai.t8star.org/mj/image/1792715269745219')
+    const body = submitted as FormData | null
+    assert.ok(body)
+    assert.equal(body.get('model'), 'mj_relax_imagine')
+    assert.equal(body.get('prompt'), '一个中国美女')
+    // 比例必须进 multipart，否则插件拼不出 --ar
+    assert.equal(body.get('ratio'), '16:9')
+    assert.equal(body.get('image'), null)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('ZX Midjourney Fast Imagine submits through the NewAPI image task contract', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

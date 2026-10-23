@@ -1161,3 +1161,49 @@ test('canvas context media exposes an owner-scoped source-file location action',
   assert.match(source, /!app\?\.editor\?\.list.includes\(node\)/)
   assert.match(source, /canvasStore.assets\[ctxMenu.value.assetId\]/)
 })
+
+test('jc 本机分组排在模型菜单最后', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const start = source.indexOf('const order = cpState.task')
+  const order = source.slice(start, source.indexOf('return [...groups].sort', start))
+  // 三套任务各自的顺序表都要以「其他模型 → jc 本机」收尾。
+  assert.equal((order.match(/'其他模型',\s*'jc 本机',\s*\]/g) || []).length, 3)
+  assert.doesNotMatch(order, /'jc 本机', '菠萝'|'FK · H3', 'jc 本机'/)
+})
+
+test('生图菜单里 FK 图片组排在灵动前面', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const start = source.indexOf('const order = cpState.task')
+  const imageOrder = source.slice(start, source.indexOf(": cpState.task === 'video'", start))
+  // 两族都在表里（不在表里的组 indexOf 返回 -1，会被顶到最前面）。
+  assert.match(imageOrder, /'FK-Image',\s*'灵动seedace2\.5',/)
+})
+
+test('切图入口挂在媒体查看器，两个宿主都按截帧同一套落地', () => {
+  const viewer = readFileSync(join(root, 'src/components/media/MediaViewer.vue'), 'utf8')
+  assert.match(viewer, /splitEnabled\?: boolean/)
+  assert.match(viewer, /requestSplit: \[\]/)
+  assert.match(viewer, /type === 'image' && splitEnabled[\s\S]*?emit\('requestSplit'\)/)
+
+  const dialog = readFileSync(join(root, 'src/components/media/ImageSplitDialog.vue'), 'utf8')
+  assert.match(dialog, /IMAGE_SPLIT_GRIDS/)
+  assert.match(dialog, /saveSplitTiles|cropImageTiles/)
+  assert.match(dialog, /emit\('split', files\)/)
+
+  for (const host of ['src/components/creation/CreationPanel.vue', 'src/components/filetree/ProjectFileTree.vue']) {
+    const source = readFileSync(join(root, host), 'utf8')
+    assert.match(source, /<ImageSplitDialog/, host)
+    assert.match(source, /@request-split="openImageSplit"/, host)
+    assert.match(source, /:split-enabled="[^"]*type === 'image'"/, host)
+    assert.match(source, /saveSplitTiles\(owner, files\)/, host)
+  }
+
+  // 记忆工作台的中心预览是它自己的 memory-preview（不是 MediaViewer），切图按钮必须在那里
+  const workbench = readFileSync(join(root, 'src/components/memory/MemoryWorkbench.vue'), 'utf8')
+  assert.match(workbench, /mediaKind === 'image' && mediaUrl[\s\S]*?@click="showImageSplit = true"/)
+  assert.match(workbench, /<ImageSplitDialog[\s\S]*?@split="handleSplitTiles"/)
+  assert.match(workbench, /saveSplitTiles\(owner, files\)/)
+  // 项目图片必须走读盘字节，别让 canvas 被自定义协议或跨域污染
+  assert.match(workbench, /:blob-loader="loadPreviewImageBlob"/)
+  assert.match(workbench, /readBinary\(resource\)/)
+})

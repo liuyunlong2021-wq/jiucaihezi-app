@@ -295,11 +295,8 @@ export function getVisibleCreationTasks(): CreationTask[] {
 }
 
 function getModelsForTask(task: CreationTask): string[] {
-  const priorities = task === 'image'
-    ? ['newapi/xiaoyi/grok-imagine-image-2.0']
-    : task === 'video'
-      ? ['newapi/dola/seedance2.5', 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s']
-      : []
+  // 视频档最常用的 Dola / 菠萝两项 2026-10-23 退出面板，视频默认回到注册表顺序（jc 本机参考生视频）。
+  const priorities = task === 'image' ? ['newapi/xiaoyi/grok-imagine-image-2.0'] : []
   const models = listCreationModels({ task })
     .map(model => model.id)
   const selected = priorities.filter(model => models.includes(model))

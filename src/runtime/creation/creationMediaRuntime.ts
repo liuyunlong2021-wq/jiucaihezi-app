@@ -378,6 +378,8 @@ async function executeDirectImageRequest(
       response_format: request.plan.apiStyle === 'newapi-image-task' || request.plan.model === 'xy-grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
     }
     if (params.size) fields.size = params.size
+    // 比例要显式带上：这个分支不会自动传 ratio，MJ 靠它拼 `--ar`。
+    if (params.ratio) fields.ratio = asString(params.ratio)
     if (images.length) fields.image = await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal)))
     const data = await apiCallMultipart('/v1/videos', fields, request.signal)
     const directUrl = extractMediaUrl(data, 'image')

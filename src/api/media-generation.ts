@@ -630,7 +630,10 @@ function checkUpstreamError(data: any) {
   const rawCode = data.code ?? data.status_code ?? data.statusCode
   const status = String(data.status || data.data?.status || '').toLowerCase()
   const errCode = data.errorCode || data.error_code
-  const errMsg = data.errorMessage || data.error_message || data.error?.message
+  // 任务插件的失败原因通常落在 fail_reason（插件 parseTaskResult 的 reason 由宿主存这里）；
+  // 漏掉它，面板就只剩一句「上游任务失败」，看不出是敏感词还是额度。
+  const errMsg = data.errorMessage || data.error_message || data.error?.message ||
+                 data.fail_reason || data.failReason || data.error?.failReason
   if (/^(failed|failure|fail|error|cancelled|canceled)$/i.test(status)) {
     throw terminalCreationTaskError(
       errMsg ? String(errMsg) : errCode ? `上游任务失败 (${errCode})` : '上游任务失败',

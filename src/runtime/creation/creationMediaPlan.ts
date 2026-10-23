@@ -312,6 +312,10 @@ function normalizeOpenAiImageParams(
     })
   }
   const ratio = String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1')
+  // MJ 只认 `--ar`：没有像素尺寸，也不走 size 推导（否则会按比例算出一个上游不存在的 size）。
+  if (spec.id.startsWith('newapi/t8/mj')) {
+    return compact({ model: spec.model, prompt: params.prompt, ratio })
+  }
   const yihongGptImage = spec.id.startsWith('newapi/yihong/yihong-gpt-image-')
   const resolution = String(params.resolution || spec.fields.find(field => field.key === 'resolution')?.defaultValue || '2k')
   // 小易插件只接受列明的像素预设，通用比例取整结果并不总在该集合中。

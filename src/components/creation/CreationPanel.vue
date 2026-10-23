@@ -165,7 +165,9 @@ import type { ProjectResource } from '@/utils/projectResource'
 import { memoryMediaDirectoryFor, legacyCanvasMediaCandidates } from '@/utils/memoryProjectPaths'
 import { queuePendingCanvasMedia, takePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
 import { nextMaterialPath } from '@/utils/projectMaterials'
+import { saveSplitTiles } from '@/utils/imageGridSplit'
 import FrameCaptureDialog from '@/components/media/FrameCaptureDialog.vue'
+import ImageSplitDialog from '@/components/media/ImageSplitDialog.vue'
 import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
@@ -483,6 +485,30 @@ function closeTaskPreview() {
 }
 
 const showFrameCapture = ref(false)
+const showImageSplit = ref(false)
+
+function openImageSplit() {
+  if (taskPreview.value?.type !== 'image') return
+  showImageSplit.value = true
+}
+
+async function handleSplitTiles(files: File[]) {
+  const owner = canvasMediaOwner()
+  if (!owner) {
+    cpState.progressText = '请先选择项目文件夹，再切图'
+    return
+  }
+  try {
+    const saved = await saveSplitTiles(owner, files)
+    const placed = await flushPendingCanvasMedia(owner)
+    showImageSplit.value = false
+    cpState.progressText = placed > 0
+      ? `已切出 ${saved.length} 张并放到画布`
+      : `已切出 ${saved.length} 张；下次打开画布时会自动出现`
+  } catch (cause) {
+    cpState.progressText = `切图保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
 
 function openFrameCapture() {
   if (taskPreview.value?.type !== 'video') return
@@ -4082,24 +4108,27 @@ const modelGroups = computed(() => {
   const groups = new Map<string, typeof modelList.value>()
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
   // 分组顺序：不在表里的组会落到最前面（indexOf 返回 -1），新增分组必须同时补进来。
-  // 菠萝 = 图片两项排最前、视频两项跟在 jc 本机后面（用户 2026-09-27 决定）。
+  // 菠萝 = 图片两项排最前；FK 图片组排在灵动前面；jc 本机整组排最后（用户 2026-10-23 决定）。
   const order = cpState.task === 'image'
     ? [
-        'FK-Image', '菠萝', 'jc 本机', '易红 API',
+        'FK-Image', '灵动seedace2.5', '菠萝', '易红 API',
         'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
         'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+        'jc 本机',
       ]
     : cpState.task === 'video'
       ? [
           // FK Seedance 2.5 置顶；H3 保留独立分组。
-          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'jc 本机', 'ZX · Seedance', '菠萝',
+          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'ZX · Seedance', '菠萝',
           'Seedance 2.5', '易红 API', '源流 AI', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+          'jc 本机',
         ]
       : [
-          'jc 本机', '菠萝',
+          '菠萝',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Veo', 'Grok Video',
           'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+          'jc 本机',
         ]
   return [...groups].sort(([left], [right]) => order.indexOf(left) - order.indexOf(right))
 })
@@ -4574,9 +4603,18 @@ const canSend = computed(
       :model="taskPreview.model"
       :source-url="taskPreview.sourceUrl"
       :capture-enabled="true"
+      :split-enabled="taskPreview.type === 'image'"
       @request-capture="openFrameCapture"
+      @request-split="openImageSplit"
       @close="closeTaskPreview"
       @download="downloadTaskPreview"
+    />
+    <ImageSplitDialog
+      :show="showImageSplit"
+      :url="taskPreview?.url || ''"
+      :title="taskPreview?.filename || ''"
+      @close="showImageSplit = false"
+      @split="handleSplitTiles"
     />
     <FrameCaptureDialog
       :show="showFrameCapture"

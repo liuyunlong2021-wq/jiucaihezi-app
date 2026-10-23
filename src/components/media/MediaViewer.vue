@@ -21,6 +21,7 @@ const props = defineProps<{
   sourceUrl?: string
   mode?: 'creation' | 'file'
   captureEnabled?: boolean
+  splitEnabled?: boolean
 }>()
 const Model3DViewer = defineAsyncComponent(() => import('./Model3DViewer.vue'))
 
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   reference: []
   regenerate: []
   requestCapture: []
+  requestSplit: []
     copyUrl: []
   prev: []
   next: []
@@ -133,6 +135,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         </button>
         <button v-if="type === 'video' && captureEnabled" class="mv-btn ghost" @click="requestCaptureClick" title="截帧 → 取一帧当参考图">
           <JcIcon name="photo_camera" />
+        </button>
+        <button v-if="type === 'image' && splitEnabled" class="mv-btn ghost" @click="emit('requestSplit')" title="切图 → 把宫格拆成独立图片">
+          <JcIcon name="grid-view" />
         </button>
         <button v-if="isMedia" class="mv-btn primary" @click="emit('download')" title="下载">
           <JcIcon name="download" />

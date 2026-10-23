@@ -85,12 +85,12 @@ const ZX_SEEDANCE_MODELS: Array<{
   fixedDuration?: number
 }> = [
   { model: 'seedance-2.0-0826-480p', price: '1/条', resolution: '480p', maxDuration: 15, hidden: true },
-  { model: 'seedance-2.0-0826-720p', price: '1.2/条', resolution: '720p', maxDuration: 15 },
+  { model: 'seedance-2.0-0826-720p', price: '1.2/条', resolution: '720p', maxDuration: 15, hidden: true },
   { model: 'seedance-2.0-fast-0826-480p', price: '0.8/条', resolution: '480p', maxDuration: 15, hidden: true },
   { model: 'seedance-2.0-fast-0826-720p', price: '1.2/条', resolution: '720p', maxDuration: 15, hidden: true },
   { model: 'seedance-2.0-TS', price: '1.2/条', resolution: '720p', maxDuration: 15, hidden: true },
-  { model: 'seedance-2.5', price: '1.2/条', resolution: '720p', maxDuration: 30 },
-  { model: 'seedance-2.5-30s', price: '8/条', resolution: '720p', maxDuration: 30, fixedDuration: 30 },
+  { model: 'seedance-2.5', price: '1.2/条', resolution: '720p', maxDuration: 30, hidden: true },
+  { model: 'seedance-2.5-30s', price: '8/条', resolution: '720p', maxDuration: 30, fixedDuration: 30, hidden: true },
 ]
 
 // ── 山海画布（https://shanhai.vnshu.cn/docs）────────────────────────────────
@@ -1397,6 +1397,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     model: 'dola-seedance2.5',
     label: 'Seedance 2.5 · Dola',
     price: 0.2,
+    hidden: true,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'text-to-video',
@@ -1420,6 +1421,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     model: 'minimax_h3_image_audio_to_video_v2_15s',
     label: 'MiniMax H3 参考生视频 · 菠萝',
     price: '0.08/秒',
+    hidden: true,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'image-to-video',
@@ -1499,6 +1501,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     model: 'minimax_h3_zm_u24',
     label: 'MiniMax H3 参考生视频增强版 · 菠萝',
     price: '0.1/秒',
+    hidden: true,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'image-to-video',
@@ -1527,6 +1530,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     model: model.model,
     label: model.label,
     price: model.price,
+    // 2026-10-23 用户要求退出面板；合同保留，按 id 仍可调用。
+    hidden: true,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'text-to-video',
@@ -2084,6 +2089,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     task: 'image',
     mode: 'image-to-image',
     price: 0.15,
+    hidden: true,
     notes: ['docs/notes/runninghub-GPT-image-2.md'],
     files: { images: { min: 1, max: 5 } },
     fields: promptFields([
@@ -2111,6 +2117,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     task: 'image',
     mode: 'text-to-image',
     price: 0.15,
+    hidden: true,
     notes: ['docs/notes/runninghub-GPT-image-2.md'],
     fields: promptFields([
       {
@@ -2392,6 +2399,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     model: 'mj_fast_imagine',
     label: 'Midjourney Fast Imagine · ZX',
     price: 0.5,
+    hidden: true,
     upstreamFamily: 'zx',
     apiStyle: 'newapi-image-task',
     mode: 'text-to-image',
@@ -2404,6 +2412,37 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     fields: promptFields([{ key: 'images', label: '参考图', kind: 'images' }]),
     notes: ['docs/wiki/运维/ZX API Midjourney 使用文档'],
     contractIssues: ['仅接 ZX Fast Imagine；尚未接入 Relax 与按钮后续操作。'],
+  }),
+  directImage({
+    id: 'newapi/t8/mj_relax_imagine',
+    model: 'mj_relax_imagine',
+    label: 'Midjourney Relax Imagine · T8',
+    price: 0.2,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-image-task',
+    mode: 'text-to-image',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'none',
+    resultExtractor: 'newapi-task',
+    contractStatus: 'partial',
+    // 上游 imagine 只收 base64Array，插件拿不到文件字节：这一档只开文生图。
+    files: { images: { min: 0, max: 0 } },
+    // MJ 没有像素尺寸参数：比例由插件拼成 `--ar`，像素由 MJ 自己决定。
+    ratios: RATIOS.filter(value => value !== 'adaptive'),
+    fields: promptFields([
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '1:1',
+        options: options(RATIOS.filter(value => value !== 'adaptive')),
+      },
+    ]),
+    notes: ['docs/wiki/运维/T8-Midjourney-Relax接入合同-2026-10-23.md'],
+    contractIssues: [
+      't8-mj 插件直连 T8，无需部署适配器；目前仅文生图（垫图待接入）。上游提交、查询、成图与扣费尚未实测。',
+    ],
   }),
   ...([6, 10, 15] as const).map(seconds => baseSpec({
     id: `newapi/zx/grok-1.5-video-${seconds}s`,

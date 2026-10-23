@@ -54,7 +54,8 @@ import {
   flattenProjectResourceChange,
   onProjectResourceChange,
 } from '@/services/projectFileService'
-import { createProjectFileActions } from '@/services/projectFileActions'
+import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
+import { saveSplitTiles } from '@/utils/imageGridSplit'
 import { acquireProjectMediaDisplay, type MediaDisplayLease } from '@/services/projectMediaResolver'
 import { openProjectResource } from '@/services/projectExplorerService'
 import { createProjectResourceWatcher } from '@/services/projectResourceWatcher'
@@ -66,6 +67,7 @@ import {
   type WebProjectTransferEntry,
 } from '@/utils/webProjectTransfer'
 import MediaViewer from '@/components/media/MediaViewer.vue'
+import ImageSplitDialog from '@/components/media/ImageSplitDialog.vue'
 import { parseConversationTranscript } from '@/runtime/memory/conversationTranscript'
 import {
   gatewaySessionAuthenticated,
@@ -2583,6 +2585,38 @@ function releaseFilePreviewUrl() {
   filePreviewLease?.release()
   filePreviewLease = null
 }
+const showImageSplit = ref(false)
+
+function openImageSplit() {
+  if (filePreview.value?.type !== 'image') return
+  showImageSplit.value = true
+}
+
+async function loadPreviewImageBlob(): Promise<Blob> {
+  const node = filePreview.value?.node
+  if (!node) throw new Error('没有可切的图片')
+  const resource = resourceForNode(node)
+  const binary = await projectFiles.readBinary(resource)
+  // readBinary 给的是 {data, size, mimeType}；拷进独占 ArrayBuffer 才符合 BlobPart
+  const bytes = new Uint8Array(binary.data.byteLength)
+  bytes.set(binary.data)
+  return new Blob([bytes], { type: binary.mimeType || mediaMimeForPath(resource.path) })
+}
+
+async function handleSplitTiles(files: File[]) {
+  const owner = projectKey.value
+  if (!owner || !filePreview.value) return
+  try {
+    const saved = await saveSplitTiles(owner, files)
+    showImageSplit.value = false
+    // 文件树自己监听资源变更事件，不需要手工刷新
+    statusMsg.value = `已切出 ${saved.length} 张，存入「图片」并排队加入画布`
+  } catch (error) {
+    showImageSplit.value = false
+    errorMsg.value = `切图保存失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
 function closeFilePreview() {
   filePreviewRequestId++
   releaseFilePreviewUrl()
@@ -3374,8 +3408,18 @@ onBeforeUnmount(() => {
       :url="filePreview.url"
       :type="filePreview.type"
       :model="filePreview.node.name"
+      :split-enabled="filePreview.type === 'image'"
+      @request-split="openImageSplit"
       @close="closeFilePreview"
       @download="downloadFilePreview"
+    />
+    <ImageSplitDialog
+      :show="showImageSplit"
+      :url="filePreview?.url || ''"
+      :title="filePreview?.node.name || ''"
+      :blob-loader="loadPreviewImageBlob"
+      @close="showImageSplit = false"
+      @split="handleSplitTiles"
     />
 
     <Teleport to="body">

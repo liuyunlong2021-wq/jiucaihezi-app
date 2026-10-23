@@ -76,7 +76,7 @@ test('creation lists the most-used image and video models first', () => {
   switchTask('image')
   assert.equal(availableModels.value[0], 'newapi/xiaoyi/grok-imagine-image-2.0')
   switchTask('video')
-  assert.equal(availableModels.value[0], 'newapi/dola/seedance2.5')
+  assert.equal(availableModels.value[0], 'jc-minimax-h3-ref2v')
 })
 
 test('Dola Seedance accepts up to 30 images with a 20 MB per-image limit', () => {

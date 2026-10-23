@@ -29,6 +29,7 @@
 - [韭菜盒子 Seedance 2.5 API 接口](韭菜盒子Seedance2.5中转接入.md) - 可直接发给第三方用户的 `dola-seedance2.5` 视频接口合同。
 - [韭菜盒子灵动（满血）Seedance 2.5 API 对外接入](韭菜盒子灵动Seedance2.5API对外接入-2026-10-02.md) - 可直接发给第三方用户的 5 条灵动线路合同：按秒（0.5/0.75/1.5 元）与按次（`SD-2.5-特价` 2.5 元、固定 30 秒、21:9、12000 字）、参考图上限和错误处理。
 - [源流 AI Seedance 2.5 接入](源流AISeedance2.5接入-2026-10-11.md) - 两个 OpenAPI 视频模型的 NewAPI Task Plugin、素材上限、面板售价与待验收项。
+- [T8 Midjourney Relax 接入合同](T8-Midjourney-Relax接入合同-2026-10-23.md) - `mj_relax_imagine`（¥0.2/张）复用 zx-video-adapter 与 zx 插件 0.1.2、按模型选 MJ 上游域名；NewAPI 上传建渠道与真实出图、扣费待验收。
 - [易红 API Seedance 2.5 插件接入](易红APISeedance2.5插件接入-2026-10-11.md) - 十个型号的 NewAPI Task Plugin、素材与时长限制、上浮定价表达式及待验收项；`seedance2.5 max` 因文档未列出而暂缓。
 - [本机 ComfyUI 模型对外接入（jc- 前缀）](本机ComfyUI模型对外接入-2026-09-26.md) - 本机 4090 上的 MiniMax H3 与 Qwen Image 经 comfy-adapter + NewAPI Task Plugin 接入；图片型号于 2026-10-02 接回对外，和视频共用 GPU 与队列。
 - [本机 ComfyUI MiniMax H3 导演台 8 步接入](本机ComfyUI-MiniMaxH3导演台8步接入-2026-10-12.md) - 提示词、0.2–120 秒时长、1–9 张参考图与输出分辨率四个面板字段；保留 Topaz 1.5×；NewAPI 上传、生产配置、生成和账单待验收。

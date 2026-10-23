@@ -138,6 +138,7 @@ import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardT
 import { findMarkdownFileBacklinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { queuePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
+import { saveSplitTiles } from '@/utils/imageGridSplit'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
@@ -207,6 +208,7 @@ const loadCreationPanel = () => import('@/components/creation/CreationPanel.vue'
 const CreationPanel = defineAsyncComponent(loadCreationPanel)
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const FrameCaptureDialog = defineAsyncComponent(() => import('@/components/media/FrameCaptureDialog.vue'))
+const ImageSplitDialog = defineAsyncComponent(() => import('@/components/media/ImageSplitDialog.vue'))
 import type { Scene3DHost, Scene3DEditorContext } from '@/runtime/memory/scene3dHost'
 
 const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
@@ -669,6 +671,7 @@ const status = ref('')
 const error = ref('')
 const contextNotice = ref('')
 const showFrameCapture = ref(false)
+const showImageSplit = ref(false)
 
 async function handleCapturedFrame(file: File) {
   const owner = projectOwner.value
@@ -695,6 +698,36 @@ async function handleCapturedFrame(file: File) {
       : '已存入图片；下次打开画布时会自动出现'
   } catch (cause) {
     contextNotice.value = `截帧保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+async function loadPreviewImageBlob(): Promise<Blob> {
+  const resource = previewResource.value?.resource
+  if (!resource) throw new Error('没有可切的图片')
+  const binary = await files.readBinary(resource)
+  // readBinary 给的是 {data, size, mimeType}；拷进独占 ArrayBuffer 才符合 BlobPart
+  const bytes = new Uint8Array(binary.data.byteLength)
+  bytes.set(binary.data)
+  return new Blob([bytes], { type: binary.mimeType || mediaMimeForPath(resource.path) })
+}
+
+async function handleSplitTiles(files: File[]) {
+  const owner = projectOwner.value
+  if (!owner) {
+    contextNotice.value = '请先选择项目再切图'
+    return
+  }
+  try {
+    const saved = await saveSplitTiles(owner, files)
+    let placed = 0
+    if (creationMounted.value) {
+      placed = (await creationPanelRef.value?.flushPendingCanvasMedia?.(owner)) || 0
+    }
+    showImageSplit.value = false
+    contextNotice.value = placed > 0
+      ? `已切出 ${saved.length} 张并放到画布`
+      : `已切出 ${saved.length} 张；下次打开画布时会自动出现`
+  } catch (cause) {
+    contextNotice.value = `切图保存失败：${cause instanceof Error ? cause.message : String(cause)}`
   }
 }
 const memoryToolAlwaysAllowedConversations = new Set<string>()
@@ -5116,6 +5149,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               title="截帧 → 取一帧当参考图"
               @click="showFrameCapture = true"
             ><JcIcon name="photo_camera" /></button>
+            <button
+              v-if="previewResource.type === 'media' && previewResource.mediaKind === 'image' && mediaUrl"
+              class="icon-button"
+              title="切图 → 把宫格拆成独立图片"
+              @click="showImageSplit = true"
+            ><JcIcon name="grid-view" /></button>
             <template v-if="previewResource.type === 'editor' && !editingMarkdown">
               <button class="icon-button" title="编辑 Markdown" @click="startMarkdownEdit"><JcIcon name="edit" /></button>
             </template>
@@ -5189,6 +5228,15 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         </div>
         <div v-else class="memory-empty-state">该文件不支持直接预览，请从文件树菜单导出。</div>
     </section>
+
+    <ImageSplitDialog
+      :show="showImageSplit"
+      :url="mediaUrl"
+      :title="previewResource?.resource?.name || ''"
+      :blob-loader="loadPreviewImageBlob"
+      @close="showImageSplit = false"
+      @split="handleSplitTiles"
+    />
 
     <FrameCaptureDialog
       :show="showFrameCapture"
