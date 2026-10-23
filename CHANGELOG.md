@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [调整] 输入框 `@` 菜单下线 `@文件` 条目：本机读写与终端早已由底部「权限」档控制（`fileToolsSelected` 直接看权限档），这个芯片是重复开关，留着只会让人以为它和权限档是两件事。
+- [调整] 新手指南大更新：新增 `references/2-输入框的@能力.md` 讲清 `@` 菜单每一项（Wiki Memory / Skill / Office / 影音 / 3D / MCP / 会话）的作用、产物、是否扣费与「@哪个只用哪个」的隔离规则；同步 `@排版`→`@Office`、`@文件`→权限档、CSV 导出、影音与创作面板「复制参数」打通；补一条指南与芯片名同步的回归测试。
 - [调整] 输入框芯片 `@排版` 改名 `@Office`：一眼能对上文档 / 表格 / PPT / PDF，网页和长图也走这个芯片（靠文案科普）。内部 id 仍是 `media`，历史会话与开关状态不受影响。
 - [新增] `@排版` 的 `create_document` 支持 `format: csv`：表格数据导 CSV（带 BOM，Excel 双击开中文不乱码），零依赖。AnyDoc 只负责 Office/PDF/EPUB→Markdown 的导入解析，不参与导出，因此不新增 `@office` 芯片；本地 xlsx 写出器仍未接入。
 - [调整] @芯片隔离收紧：影音生成策略（`buildMediaPlanPolicy` 与批量确认文案）只跟 @影音 走，不再灌进 @排版；`list_creation_models` / `get_creation_task` / `list_creation_history` / `cancel_creation_task` / `retry_media_persistence` 只在 @影音 注册，@排版 / @3D 仍保留 `get_creation_context` 与 `add_creation_result_to_canvas`。未选 Skill 时仍按官方 DSH「自动选」语义，不封锁 Skill。

@@ -295,7 +295,7 @@ export function selectMemoryTools(
       'copy',
       'delete',
       'write_text_batch',
-      // `@文件` = 本机全权：拿到路径就放开终端、Skill 脚本与本地 3D 导出。
+      // 本机全权（底部「权限」档，旧称 `@文件`）：拿到路径就放开终端、Skill 脚本与本地 3D 导出。
       'terminal',
       'skill_run_script',
       'export_3d_scene_video',

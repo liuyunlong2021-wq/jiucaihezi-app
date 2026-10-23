@@ -1024,3 +1024,9 @@
 ## 2026-10-23 芯片改名 @排版 → @Office
 
 - 输入框芯片文案 `@排版` 改为 `@Office`（用户裁定：Office 一眼能覆盖文档/表格/PPT/PDF，网页与长图靠文案科普，不再改名）。选择器文案「导出文档、表格、幻灯片、PDF、网页和长图」。**内部 id 一直是 `media`（`mediaSelected` / `media` capability），没有改**，历史会话、权限与工具白名单都不受影响；旧文档里的「@排版」等同于现在的「@Office」。
+
+## 2026-10-23 @文件 下线与新手指南大更新
+
+- `@文件` 芯片从输入框 `@` 菜单移除。根因是它早就不是独立开关：`fileToolsSelected` 直接取 `permissionTier === 'danger-full-access'`，点 `@文件` 只是改权限档，和底部「权限」按钮重复。`enableTool/disableTool` 里的 `id === 'file'` 分支一并删除。
+- 新手指南（`public/skills/jc-new-user-guide`）新增 `references/2-输入框的@能力.md`：`@` 菜单七项各自的作用/产物/扣费，@影音 的媒体计划与「复制参数」，Office 的 CSV 与长图/网页，以及「@哪个只用哪个 + 未选 Skill 时自动选」。`SKILL.md` 的触发词与导航表同步。
+- 新增回归：`memoryWorkbench.test.ts` 断言指南与芯片名同步，芯片改名或下线时测试会红。

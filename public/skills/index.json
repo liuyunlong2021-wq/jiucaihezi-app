@@ -343,7 +343,7 @@
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
     "displayName": "新手指南",
-    "description": "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially short-drama, novel or manga creation, the Creation Panel, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、短剧写作、短剧改编、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide.",
+    "description": "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially what each @ entry does (@Office / @影音 / @3D / @MCP / Skill / Wiki Memory), short-drama, novel or manga creation, the Creation Panel, media generation, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、@Office、@影音、@3D、@MCP、@的作用、芯片、导出Word、导出表格、导出PPT、生成图片视频、短剧写作、短剧改编、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide.",
     "triggers": [],
     "commands": [],
     "files": [
@@ -351,6 +351,7 @@
       "huanying.GIF",
       "references/1-Wiki使用.md",
       "references/10-短剧写作.md",
+      "references/2-输入框的@能力.md",
       "references/3-Skill科普.md",
       "references/4-产品功能.md",
       "references/5-模型科普.md",
@@ -378,6 +379,10 @@
         },
         {
           "path": "references/10-短剧写作.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/2-输入框的@能力.md",
           "kind": "reference"
         },
         {

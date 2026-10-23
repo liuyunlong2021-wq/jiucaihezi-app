@@ -47,7 +47,7 @@ test('explicit MCP selection reaches the model as execution intent, not only a m
   assert.ok(prompt.endsWith('生成一张美女图片'))
 })
 
-test('@文件 maps to the official Harness full-access mode', () => {
+test('权限档 maps to the official Harness full-access mode', () => {
   // 三档逐字用官方 zh 字典；默认档与官方 sandbox-policy 缺省值一致。
   assert.deepEqual(
     DEEPSEEK_PERMISSION_TIERS.map(option => [option.tier, option.label]),
@@ -936,14 +936,14 @@ test('a second launch focuses the existing instance instead of starting another 
   )
 })
 
-test('an existing session is switched to the @文件 permission instead of keeping its pinned default', () => {
+test('an existing session is switched to the 完全权限 tier instead of keeping its pinned default', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
   const prepare = readFileSync('scripts/prepare-deepseek-harness.mjs', 'utf8')
   // 会话把权限记成 durable 事实。实测会话文件里三条都在：
   //   permission/preset = workspace-write、sandbox/mode = workspace-write、approval/policy = ask
   // 进程级 DSH_PERMISSION_MODE 只决定**新会话**的默认值；已存在的会话按官方
-  // pinInitialPermission 保留自己的开关，所以打开 @文件 也松不开沙箱——写 ~/.agents/skills
+  // pinInitialPermission 保留自己的开关，所以切到完全权限也松不开沙箱——写 ~/.agents/skills
   // 会拿到 [sandbox: file access denied under workspace-write mode]，用户看到的就是「没有权限」。
   assert.match(source, /async function alignSessionPermission\(/)
   assert.match(source, /await alignSessionPermission\(active, wireSessionId, input\.permissionTier, input\.signal\)/)

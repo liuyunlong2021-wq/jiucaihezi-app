@@ -1149,11 +1149,11 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       display: item.transcript.title, description: '引用该对话最近 12 条用户/助手消息',
     }))
   if (scope === 'session') return desktopOnlyRuntime ? sessionOptions() : []
-  // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
+  // 与芯片排保持一致：本机文件与终端由底部「权限」档直接控制（旧称 @文件），
+  // 不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
     ...(desktopOnlyRuntime ? [{ type: 'tool' as const, id: 'wiki', display: 'Wiki Memory', description: '查询、整理项目资料与归档创作成果', icon: 'description' }] : []),
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
-    { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
     ...(desktopOnlyRuntime
       ? [{ type: 'tool' as const, id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' }]
       : []),
@@ -2458,7 +2458,6 @@ function enableTool(id: string) {
     if (!selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)) selectedSkillNames.value.push(WIKI_MEMORY_SKILL)
     saveProductionPreferences()
   }
-  if (id === 'file') setPermissionTier('danger-full-access')
   if (id === 'mcp') insertCommand({ id: 'mcp', label: '@MCP' })
   if (id.startsWith('mcp__') && !selectedMcpToolNames.value.includes(id)) selectedMcpToolNames.value.push(id)
   if (id === 'media') mediaSelected.value = true
@@ -2467,7 +2466,6 @@ function enableTool(id: string) {
 }
 
 function disableTool(id: string) {
-  if (id === 'file') setPermissionTier(DEEPSEEK_DEFAULT_PERMISSION_TIER)
   if (id.startsWith('mcp__')) {
     selectedMcpToolNames.value = selectedMcpToolNames.value.filter(item => item !== id)
     return

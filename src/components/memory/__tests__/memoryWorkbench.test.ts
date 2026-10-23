@@ -810,6 +810,17 @@ test('点 @Skill 只列 Skill，不重复芯片排已有的工具入口', () => 
   assert.match(workbench, /recordSkillUse\(option\.name\)/)
 })
 
+test('新手指南跟输入框的 @ 入口保持同步', () => {
+  const guide = source('public/skills/jc-new-user-guide/SKILL.md')
+  const menu = source('public/skills/jc-new-user-guide/references/2-输入框的@能力.md')
+  // 芯片改名或下线时，指南必须跟着改；否则用户按老文档去点会点空。
+  for (const label of ['@Office', '@影音', '@3D', '@MCP', '@Skill'])
+    assert.ok(guide.includes(label), `新手指南缺少 ${label}`)
+  assert.doesNotMatch(source('src/components/memory/MemoryWorkbench.vue'), /id: 'file', display: '文件'/)
+  assert.match(menu, /`@文件` 芯片已经下线/)
+  assert.match(menu, /要扣费/)
+})
+
 test('memory composer uses one workbench mode with beginner-friendly command templates', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
@@ -2046,7 +2057,7 @@ test('aggregate MCP mentions remain searchable by their internal tool prefix', (
 test('capability chips survive a completed round and come back with the conversation', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  // 一轮跑完只清一次性状态（输入框、当轮附件）；清掉 @文件 等于静默收权，用户要再点一次才能继续。
+  // 一轮跑完只清一次性状态（输入框、当轮附件）；清掉权限档等于静默收权，用户要再点一次才能继续。
   assert.doesNotMatch(workbench, /clearToolSelections/)
   // 派发瞬间清草稿（不然要等整轮跑完才能输入下一段）；当轮附件在落盘成功与中断收尾各清一次，中间不夹带清开关/清引用。
   const sendBody = workbench.match(/async function send\(remoteText\?: string\) \{([\s\S]*?)\n\}/)?.[1]
