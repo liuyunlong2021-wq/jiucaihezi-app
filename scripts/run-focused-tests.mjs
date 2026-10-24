@@ -187,6 +187,7 @@ const wave1FocusedTests = [
 ]
 
 const externalNodeTests = [
+  'scripts/__tests__/project-window-state.test.mjs',
   'scripts/__tests__/harness-conversation-ui.test.mjs',
   'newapi-plugins/__tests__/boluo.test.mjs',
   'newapi-plugins/__tests__/comfy.test.mjs',

@@ -52,6 +52,11 @@ function boundWorkspace(): string {
 const WINDOW_LABEL = currentWindowLabel()
 const PROJECT_DIR_KEY = `jc_project_dir:${WINDOW_LABEL}`
 
+// 空窗口编号会复用；项目只跟随该窗口会话，不能从上一个同编号窗口恢复。
+function projectStorage(): Storage {
+  return WINDOW_LABEL.startsWith('win-') ? sessionStorage : localStorage
+}
+
 /**
  * 向 Rust 认领一个工作区，返回**真正拥有它的**窗口 label。
  *
@@ -76,7 +81,7 @@ export async function claimWorkspace(cwd: string): Promise<string> {
  * 本窗口的初始工作区。
  *
  * 优先级：窗口绑定 > 分窗口存的 > 旧的全键（**只有主窗口回落**）。
- * 分窗口存是必须的 —— 共用一个键的话，A 窗口换个项目会把 B 窗口也换掉。
+ * 空窗口分会话存，其余窗口分窗口长期存；共用一个键会让 A 的选择影响 B。
  * 旧的全键属于单窗口年代 = 主窗口；新建的空窗口若回落它，一开就显示上一个项目，
  * 看起来就像「新建窗口只是把当前窗口又开了一遍」。
  */
@@ -84,7 +89,7 @@ function loadProjectDir(): string {
   const bound = boundWorkspace()
   if (bound) return bound
   try {
-    const scoped = localStorage.getItem(PROJECT_DIR_KEY)
+    const scoped = projectStorage().getItem(PROJECT_DIR_KEY)
     if (scoped) return scoped
     return WINDOW_LABEL === 'main' ? (localStorage.getItem('jc_project_dir') ?? '') : ''
   } catch {
@@ -120,7 +125,7 @@ export function useProjectStore() {
   async function selectProject(dir: string): Promise<boolean> {
     if (dir !== projectDir.value && (await claimWorkspace(dir)) !== WINDOW_LABEL) return false
     projectDir.value = dir
-    localStorage.setItem(PROJECT_DIR_KEY, dir)
+    projectStorage().setItem(PROJECT_DIR_KEY, dir)
     if (dir && !recentProjectDirs.value.includes(dir)) {
       recentProjectDirs.value.unshift(dir)
       if (recentProjectDirs.value.length > 10) recentProjectDirs.value.pop()
@@ -131,7 +136,7 @@ export function useProjectStore() {
 
   function clearProject() {
     projectDir.value = ''
-    localStorage.removeItem(PROJECT_DIR_KEY)
+    projectStorage().removeItem(PROJECT_DIR_KEY)
   }
 
   function selectWebProject(project: { id: string; name: string }) {

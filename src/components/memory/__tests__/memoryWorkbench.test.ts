@@ -1737,7 +1737,7 @@ test('a workspace opens in its own window and never twice', () => {
   assert.match(lib, /window\.__JC_WORKSPACE__ = \{\}/)
   // 分窗口存项目：共用一个键的话，A 窗口换个项目会把 B 窗口也换掉。
   assert.match(store, /const PROJECT_DIR_KEY = `jc_project_dir:\$\{WINDOW_LABEL\}`/)
-  assert.match(store, /localStorage\.getItem\(PROJECT_DIR_KEY\)/)
+  assert.match(store, /projectStorage\(\)\.getItem\(PROJECT_DIR_KEY\)/)
   // 菜单是应用级的，不知道哪个窗口在工作：转给聚焦窗口，由前端请 Rust 开一个**空**窗口。
   assert.match(lib, /window\.emit\("jc:new-window", \(\)\)/)
   assert.match(main, /listen\('jc:new-window'/)
