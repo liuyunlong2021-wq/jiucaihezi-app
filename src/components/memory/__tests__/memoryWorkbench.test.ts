@@ -14,6 +14,26 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
 
+test('chat model families use the requested order and merge remaining suppliers', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const functions = workbench.slice(workbench.indexOf('function modelGroupKey('), workbench.indexOf('function isInternalMediaModel('))
+  const block = transformSync(functions + workbench.slice(workbench.indexOf('const modelGroups = computed('), workbench.indexOf('const currentModelLabel =')), { loader: 'ts' }).code
+  const models = ['doubao-chat', 'gemini-pro', 'qwen-plus', 'gpt-6.1-sol', 'claude-opus', 'gpt-5.5', 'deepseek-chat', 'grok-4', 'glm-chat', 'local-chat'].map((id, index) => ({ id, index, providerId: index === 9 ? 'local-ollama' : 'custom:test' }))
+  const groups = new Function('computed', 'textModels', 'LOCAL_OLLAMA_PROVIDER_ID', 'findCustomProvider', `${block}; return modelGroups.value`)(computed, ref(models), 'local-ollama', () => ({}))
+  assert.deepEqual(groups.map((group: { key: string }) => group.key), ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'xai', 'other', 'local'])
+  assert.deepEqual(groups[1].models.map((model: { index: number }) => model.index), [3, 5])
+  assert.deepEqual(groups[6].models.map((model: { index: number }) => model.index), [0, 8])
+})
+
+test('preview and creation docks share the topbar shrink rules', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /\.memory-workbench:is\(\.preview-open, \.creation-open\) \.memory-title-drag \{ min-width: 0; \}/)
+  assert.match(workbench, /\.memory-workbench:is\(\.preview-open, \.creation-open\) \.memory-conversation-picker/)
+  assert.match(workbench, /\.memory-workbench\.chat-dock-minimal \.memory-creation-toggle > span \{ display: none; \}/)
+  assert.match(workbench, /\.memory-topbar-actions \{ display: flex; flex: 0 0 auto;/)
+})
+
 // Execute the actual SFC candidate loader without mounting the entire workbench.
 function mentionLoaderFixture(blockCatalog = false) {
   const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
@@ -1010,7 +1030,7 @@ test('memory topbar uses a grouped model popover and an adaptive new conversatio
   assert.match(workbench, /<JcIcon name="add" class="memory-new-conversation-icon" \/>/)
   assert.doesNotMatch(workbench, /<select v-model="agentStore\.currentModel"/)
   assert.match(workbench, /const modelGroups = computed/)
-  assert.match(workbench, /Claude[\s\S]*GPT \/ OpenAI[\s\S]*Gemini \/ Google/)
+  assert.match(workbench, /anthropic: 'Claude', openai: 'GPT', google: 'Gemini'/)
   assert.match(
     workbench,
     /agentStore\.textModels\.filter\(model => !isInternalMediaModel\(model\.id\)\)/,
@@ -1398,7 +1418,7 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   assert.match(workbench, /@click="closeCreationHost"/)
   assert.match(
     workbench,
-    /\.memory-workbench\.creation-open \.memory-title-drag \{ min-width: 0; \}/,
+    /\.memory-workbench:is\(\.preview-open, \.creation-open\) \.memory-title-drag \{ min-width: 0; \}/,
   )
   assert.match(
     workbench,
@@ -1424,8 +1444,8 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
     workbench,
     /\.memory-model-picker \{ position: relative; flex: none; min-width: 0; max-width: min\(260px, 28vw\); \}/,
   )
-  const pickerCap = /\.memory-workbench\.creation-open \.memory-conversation-picker,[\s\S]{0,140}?max-width: ([^;]+);/.exec(workbench)
-  assert.ok(pickerCap, 'creation-open 下两个 picker 的封顶规则必须存在')
+  const pickerCap = /\.memory-workbench:is\(\.preview-open, \.creation-open\) \.memory-conversation-picker,[\s\S]{0,140}?max-width: ([^;]+);/.exec(workbench)
+  assert.ok(pickerCap, '预览和创作面板下两个 picker 的封顶规则必须存在')
   assert.equal(pickerCap[1], '220px')
   assert.match(creation, />\u63d0\u793a\u8bcd\u53c2\u8003</)
   assert.doesNotMatch(creation, /title="\u65b0\u5efa\u9879\u76ee\u6587\u6863"/)

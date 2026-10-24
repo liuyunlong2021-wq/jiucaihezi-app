@@ -11,7 +11,7 @@ import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
 import { getModelContextWindow, getModelMaxOutputTokens, DEFAULT_LOCAL_CONTEXT_WINDOW, DEFAULT_LOCAL_MAX_OUTPUT_TOKENS } from '@/data/modelContextWindows'
 import { parseSkillMd, serializeToSkillMd } from '../types/skill'
-import { gatewayModels } from '@/services/newApiClient'
+import { gatewayModels, inferGatewayModelCapability as inferCapability } from '@/services/newApiClient'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { appendSkillCreatorHistory } from '@/utils/skillCreatorWorkspace'
@@ -88,7 +88,6 @@ const MEDIA_CREATION_MODEL_IDS = new Set(
 )
 
 function isMediaCreationModel(model: ModelEntry): boolean {
-  if (model.providerId && model.providerId !== 'jiucaihezi') return false
   return MEDIA_CREATION_MODEL_IDS.has(model.id.trim().toLowerCase())
 }
 
@@ -169,15 +168,6 @@ function loadCachedModelEntries(): ModelEntry[] | null {
   }
 }
 
-/** 根据模型 ID 推断能力分类 */
-function inferCapability(id: string): ModelEntry['capability'] {
-  const lower = id.toLowerCase()
-  if (/image|dall|midjourney|sd-|stable.?diff|flux/.test(lower)) return 'image'
-  if (/video|veo|grok-video|rh-mimic|kling|runway|pika|luma/.test(lower)) return 'video'
-  if (/suno|audio|music|tts|whisper/.test(lower)) return 'audio'
-  return 'text'
-}
-
 /** 模型能力层级：复杂 Skill 生成和长文推理需要 strong 级别模型 */
 export type ModelTier = 'strong' | 'medium' | 'light'
 
@@ -245,7 +235,7 @@ export const useAgentStore = defineStore('agents', () => {
 
   /** 按能力分类的视图 */
   const textModels = computed(() => availableModels.value.filter(
-    m => (m.capability || inferCapability(m.id)) === 'text' && !isMediaCreationModel(m),
+    m => (m.capability || inferCapability(m.id)) === 'text' && inferCapability(m.id) === 'text' && !isMediaCreationModel(m),
   ))
   const imageModels = computed(() => availableModels.value.filter(m => m.capability === 'image'))
   const videoModels = computed(() => availableModels.value.filter(m => m.capability === 'video'))

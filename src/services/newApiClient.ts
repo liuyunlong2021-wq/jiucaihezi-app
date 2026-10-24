@@ -739,8 +739,8 @@ export function inferGatewayModelCapability(
     if (catalogModel.task === 'audio') return 'audio'
   }
   const text = `${id} ${channel} ${taskTypes.join(' ')}`.toLowerCase()
-  if (/video|videos|veo|grok-video|kling|runway|pika|luma|t8/.test(text)) return 'video'
-  if (/image|images|dall|gpt-image|grok.*image|flux|stable|sd2/.test(text)) return 'image'
+  if (/video|videos|veo|grok-video|kling|runway|pika|luma|t8|seedance|sora|rh-mimic|(?:^|[\s/_-])wan(?:[\d\s._-]|$)|视频/.test(text)) return 'video'
+  if (/image|images|dall|gpt-image|grok.*image|flux|stable|sd2|sd-|midjourney|banana|seedream|imagen|生图|绘图/.test(text)) return 'image'
   if (/audio|speech|voice|tts|suno|music|whisper/.test(text)) return 'audio'
   return 'text'
 }

@@ -1308,16 +1308,10 @@ const modelGroups = computed(() => {
     group.push(model)
     groups.set(key, group)
   }
-  const entries = [...groups.entries()]
-  const modelFamilyOrder = ['doubao', 'qwen', 'local']
-  const familyAnchor = entries.some(([key]) => key === 'doubao') ? 'doubao'
-    : entries.some(([key]) => key === 'qwen') ? 'qwen' : 'local'
-  const familyStart = entries.findIndex(([key]) => key === familyAnchor)
-  const remainingBeforeFamilies = entries.slice(0, familyStart).filter(([key]) => !modelFamilyOrder.includes(key)).length
-  const orderedFamilies = entries.filter(([key]) => modelFamilyOrder.includes(key))
-    .sort(([left], [right]) => modelFamilyOrder.indexOf(left) - modelFamilyOrder.indexOf(right))
-  const remaining = entries.filter(([key]) => !modelFamilyOrder.includes(key))
-  if (familyStart >= 0) remaining.splice(remainingBeforeFamilies, 0, ...orderedFamilies)
+  const remaining = [...groups.entries()]
+  const preferredGroups = ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'xai', 'other', 'local']
+  const groupRank = (key: string) => preferredGroups.indexOf(key)
+  remaining.sort(([left], [right]) => groupRank(left) - groupRank(right))
   return remaining.map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
@@ -1850,8 +1844,6 @@ onBeforeUnmount(() => {
 
 function modelGroupKey(model: { id: string; providerId?: string }): string {
   if (model.providerId === LOCAL_OLLAMA_PROVIDER_ID) return 'local'
-  // 自定义端点单独成组：共用 'other' 的话，刚配好的模型会掉在列表末尾找不到。
-  if (findCustomProvider(model.providerId)) return 'custom'
   const id = model.id.toLowerCase()
   if (id.includes('claude') || id.includes('anthropic')) return 'anthropic'
   if (id.includes('gpt') || id.includes('openai')) return 'openai'
@@ -1859,14 +1851,12 @@ function modelGroupKey(model: { id: string; providerId?: string }): string {
   if (id.includes('grok') || id.includes('xai')) return 'xai'
   if (id.includes('deepseek')) return 'deepseek'
   if (id.includes('qwen') || id.includes('tongyi')) return 'qwen'
-  if (id.includes('glm') || id.includes('zhipu')) return 'zhipu'
-  if (id.includes('doubao') || id.includes('bytedance')) return 'doubao'
   if (id.includes('ollama') || id.includes('local-')) return 'local'
   return 'other'
 }
 
 function modelGroupLabel(key: string): string {
-  return ({ anthropic: 'Claude', openai: 'GPT / OpenAI', google: 'Gemini / Google', xai: 'Grok / xAI', deepseek: 'DeepSeek', qwen: '通义千问', zhipu: '智谱', doubao: '豆包', local: '本地模型', custom: '自定义端点', other: '其他' } as Record<string, string>)[key] || key
+  return ({ anthropic: 'Claude', openai: 'GPT', google: 'Gemini', deepseek: 'DeepSeek', qwen: '千问', xai: 'Grok', other: '其他', local: '本地模型' } as Record<string, string>)[key] || key
 }
 
 function isInternalMediaModel(modelId: string): boolean {
@@ -5513,14 +5503,16 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.chat-dock-minimal .memory-topbar-actions { gap: 2px; }
 .memory-workbench.chat-dock-minimal .memory-model-picker { flex-basis: 72px; }
 .memory-workbench.chat-dock-minimal .memory-topbar-actions > .icon-button { width: 34px; flex-basis: 34px; }
+.memory-workbench.chat-dock-minimal .memory-creation-toggle { width: 30px; flex: 0 0 30px; justify-content: center; padding: 0; }
+.memory-workbench.chat-dock-minimal .memory-creation-toggle > span { display: none; }
 .memory-chat-compact-bar { position: absolute; z-index: 30; inset: 0; display: grid; align-content: start; justify-items: center; gap: 10px; padding-top: 10px; background: var(--paper); }
 .memory-chat-compact-bar .icon-button { width: 34px; }
 .memory-workbench.chat-dock-compact:is(.preview-open, .creation-open) .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
 .memory-workbench.chat-dock-resizing > * { transition: none !important; }
-.memory-workbench.creation-open .memory-title-drag { min-width: 0; }
+.memory-workbench:is(.preview-open, .creation-open) .memory-title-drag { min-width: 0; }
 /* 顶栏动作区放不下时，先让对话标题截断（它本来就长），模型名保持完整 ——
    模型名短且必须可读，一旦被挤就只剩「gp…」（用户 2026-10-03 截图）。封顶用确定长度。 */
-.memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: 220px; }
+.memory-workbench:is(.preview-open, .creation-open) .memory-conversation-picker, .memory-workbench:is(.preview-open, .creation-open) .memory-model-picker { max-width: 220px; }
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
 .memory-workbench.desktop-runtime.creation-focused { padding-top: 28px; }
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
@@ -5534,7 +5526,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--jc-surface); }
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--jc-border); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
-.memory-topbar-actions { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 8px; margin-left: auto; }
+.memory-topbar-actions { display: flex; flex: 0 0 auto; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 8px; margin-left: auto; }
 .memory-topbar-actions > .memory-account-settings { width: 34px; flex: 0 0 34px; border: 0; background: transparent; color: var(--ink2); }
 .memory-topbar-actions > .memory-account-settings:hover { background: var(--surface-alt); }
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 8px; }

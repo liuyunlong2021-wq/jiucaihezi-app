@@ -32,6 +32,13 @@ test(
       'omni-v2v',
       'mj_fast_imagine',
       'MiniMax-H3-Context-IR',
+      'gpt-image-99',
+      'gemini-next-image-preview',
+      'new-video-model',
+      'sora-99',
+      'wan-99',
+      'nano-banana-new',
+      'midjourney-new',
     ]
     const cachedModels = [
       ...DEFAULT_CHAT_MODEL_IDS.map(id => ({
@@ -54,6 +61,13 @@ test(
       assert.deepEqual(agentStore.textModels.map(model => model.id), DEFAULT_CHAT_MODEL_IDS)
       assert.equal(mediaModelIds.every(id => agentStore.availableModels.some(model => model.id === id)), true)
       assert.equal(agentStore.currentModel, DEFAULT_CHAT_MODEL_IDS[0])
+      agentStore.availableModels.push(
+        { id: 'custom-image-generator', label: 'custom image', providerId: 'custom:test', capability: 'text' },
+        { id: 'local-video-generator', label: 'local video', providerId: 'ollama', capability: 'text' },
+        { id: 'qwen2.5-vl', label: 'vision chat', capability: 'text', inputModalities: ['text', 'image'] },
+      )
+      assert.equal(agentStore.textModels.some(model => model.id === 'custom-image-generator' || model.id === 'local-video-generator'), false)
+      assert.equal(agentStore.textModels.some(model => model.id === 'qwen2.5-vl'), true)
     } finally {
       storage.restore()
     }
