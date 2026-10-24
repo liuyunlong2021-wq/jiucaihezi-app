@@ -1,7 +1,6 @@
-# BOM 导致 frontmatter 解析失败 — 修复提案
+# BOM 导致 frontmatter 解析失败 — 历史交接
 
-> **状态**: 待修复（代码尚未落地）
-> **基线**: `main` 分支 commit 4445796
+> 2026-10-24 合并根目录副本并归档。原提案基线为 `4445796`；原“待修复”状态已过时。当前 `src-tauri/src/skills/scanner.rs`、`skills.rs`、`github_import.rs` 均显式处理前导 BOM。本次仅静态核对源码，未重新执行原生导入验收。下文保留历史问题与方案，不作为当前待办。
 
 ## 一、问题现象
 

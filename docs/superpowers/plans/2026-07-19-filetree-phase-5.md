@@ -126,7 +126,7 @@ Expected: PASS.
 **Files:**
 - Modify: `scripts/run-focused-tests.mjs`
 - Modify: `docs/wiki/开发/文件树五期编辑区与项目文档统一SDD.md`
-- Modify: `docs/wiki/hot.md`
+- Modify: `docs/wiki/归档/hot历史快照-2026-10-24.md`
 - Modify: `docs/wiki/log.md`
 
 - [ ] **Step 1: Add the new focused tests to the test runner**

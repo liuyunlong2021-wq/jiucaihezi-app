@@ -35,7 +35,6 @@ const forbiddenExtensions = new Set([
 const allowedRootFiles = new Set([
   'boot-guard.js',
   'boot-diagnostics.js',
-  'community-qr.jpg',
   'favicon.svg',
   'icons.svg',
   'index.html',

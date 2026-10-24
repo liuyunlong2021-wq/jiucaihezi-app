@@ -304,5 +304,5 @@ export function extractUsageOnComplete(ctx, result, body) {
 
 ## 8. 维护规则
 
-- 实施完成后：更新 [[hot.md]]、[[log.md]] 与 [[来源索引]]，并把本节合同登记到 [[CLAUDE]] 的开发入口表。
+- 实施完成后：更新 [[hot.md]]、[[log.md]] 与 [[来源索引]]，并把本节合同登记到 [[index]] 的开发入口表。
 - 本文档只描述**待审方案**；未实施前不得在其它文档里写成「已通过」。

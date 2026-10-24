@@ -294,7 +294,7 @@ git commit -m "feat(web): save creation media in active project" -m "涉及常�
 
 **Files:**
 - Modify: `docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md`
-- Modify: `docs/wiki/hot.md`
+- Modify: `docs/wiki/归档/hot历史快照-2026-10-24.md`
 
 - [ ] **Step 1: Run focused behavior tests**
 
@@ -329,6 +329,6 @@ Mark the implemented behavior complete, record the actual local storage model an
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md docs/wiki/hot.md
+git add docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md docs/wiki/归档/hot历史快照-2026-10-24.md
 git commit -m "docs: close Web project media parity" -m "涉及常识 #3 #17"
 ```

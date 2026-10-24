@@ -268,7 +268,7 @@ Commit only the four listed files.
 **Files:**
 - Modify: `docs/wiki/开发/创模式原生附件直连合同SDD.md`
 - Modify: `docs/wiki/来源索引.md`
-- Modify: `docs/wiki/hot.md`
+- Modify: `docs/wiki/归档/hot历史快照-2026-10-24.md`
 - Modify: `docs/wiki/log.md`
 
 - [x] **Step 1: Run automatic verification**

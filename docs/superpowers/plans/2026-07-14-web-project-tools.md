@@ -35,7 +35,7 @@
 - Modify `src/composables/web/chatCloud.ts`: inject catalog/tool definitions and execute browser tools.
 - Modify `src/components/filetree/__tests__/projectFileTreeCanvas.test.ts`: assert the Web backend is wired without changing Desktop behavior.
 - Modify `docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md`: record completed implementation facts.
-- Modify `docs/wiki/hot.md`: refresh the active implementation state.
+- Modify `docs/wiki/归档/hot历史快照-2026-10-24.md`: refresh the active implementation state.
 
 ### Task 1: IndexedDB Project Files
 
@@ -393,7 +393,7 @@ git commit -m "feat: run web tools until completion"
 
 **Files:**
 - Modify: `docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md`
-- Modify: `docs/wiki/hot.md`
+- Modify: `docs/wiki/归档/hot历史快照-2026-10-24.md`
 - Modify: `scripts/run-focused-tests.mjs`
 
 - [ ] **Step 1: Run the complete relevant test set**
@@ -432,6 +432,6 @@ Record the implemented file paths, test commands, and any provider-specific tool
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md docs/wiki/hot.md
+git add docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md docs/wiki/归档/hot历史快照-2026-10-24.md
 git commit -m "docs: close web project tools implementation"
 ```

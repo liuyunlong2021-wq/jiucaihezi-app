@@ -165,7 +165,7 @@ assetFlow: 'none',
 
 **Files:**
 - Modify: `docs/wiki/开发/启动默认对话与媒体确认卡参数编辑及ZX参考图视频修复SDD.md`
-- Modify: `docs/wiki/hot.md`
+- Modify: `docs/wiki/归档/hot历史快照-2026-10-24.md`
 - Modify: `docs/wiki/log.md`
 
 - [ ] **Step 1: 运行完整自动门禁**

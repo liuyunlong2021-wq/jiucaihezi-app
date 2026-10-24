@@ -108,7 +108,7 @@ git commit -m "feat: page OpenCode session history"
 - Modify: `src/opencodeClient/__tests__/catalog.test.ts`
 - Modify: `src/composables/__tests__/useChatControls.test.ts`
 - Modify: `docs/wiki/开发/OpenCode差异修复记录.md`
-- Modify: `docs/wiki/hot.md`
+- Modify: `docs/wiki/归档/hot历史快照-2026-10-24.md`
 
 - [ ] **Step 1: Write failing context refresh tests**
 
@@ -140,7 +140,7 @@ Expected: zero failures and no TypeScript errors.
 - [ ] **Step 5: Commit task**
 
 ```bash
-git add src/composables/useChat.ts src/composables/__tests__/useChatControls.test.ts src/opencodeClient/__tests__/catalog.test.ts docs/wiki/开发/OpenCode差异修复记录.md docs/wiki/hot.md
+git add src/composables/useChat.ts src/composables/__tests__/useChatControls.test.ts src/opencodeClient/__tests__/catalog.test.ts docs/wiki/开发/OpenCode差异修复记录.md docs/wiki/归档/hot历史快照-2026-10-24.md
 git commit -m "feat: expose OpenCode context state"
 ```
 

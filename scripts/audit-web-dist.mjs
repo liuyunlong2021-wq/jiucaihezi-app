@@ -42,7 +42,6 @@ const allowedRootFiles = new Set([
   'apple-touch-icon.png',
   'boot-guard.js',
   'boot-diagnostics.js',
-  'community-qr.jpg',
   'favicon.svg',
   'icons.svg',
   'index.html',
