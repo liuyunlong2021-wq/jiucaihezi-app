@@ -8,7 +8,7 @@ import { mkdir, writeTextFile } from '@tauri-apps/plugin-fs'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
-import { McpStdioTransport } from './mcpStdioTransport'
+import { McpStdioTransport, type McpStdioDiagnostics } from './mcpStdioTransport'
 import { getModelContextWindow, getModelMaxOutputTokens } from '@/data/modelContextWindows'
 import { computerUseEnabledNow, useAgentStore } from '@/stores/agentStore'
 
@@ -305,6 +305,15 @@ export const DEEPSEEK_RETRY_TEXT = {
   milliseconds: (milliseconds: number) => `${milliseconds}毫秒`,
   /** 官方 `message.turnError`。 */
   turnError: '本轮运行失败',
+}
+
+export function deepSeekExitText(diagnostics: Pick<McpStdioDiagnostics, 'exitCode' | 'signal' | 'stderr'>): string {
+  const status = [
+    ...(diagnostics.exitCode == null ? [] : [`退出码：${diagnostics.exitCode}`]),
+    ...(diagnostics.signal ? [`信号：${diagnostics.signal}`] : []),
+  ].join('，')
+  const detail = diagnostics.stderr.slice(-8).join('\n').trim()
+  return `DeepSeek Harness 已退出${status ? `（${status}）` : ''}${detail ? `\n${detail}` : ''}`
 }
 
 /**
@@ -1584,8 +1593,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   }
   transport.onclose = () => {
     const diagnostics = transport.diagnostics()
-    const detail = diagnostics.stderr.slice(-8).join('\n').trim()
-    const error = new Error(detail ? `DeepSeek Harness 已退出\n${detail}` : 'DeepSeek Harness 已退出')
+    const error = new Error(deepSeekExitText(diagnostics))
     failReady(error)
     for (const pending of active.runs.values()) pending.reject(error)
     active.runs.clear()

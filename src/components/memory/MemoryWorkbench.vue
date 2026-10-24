@@ -678,6 +678,8 @@ const mentionScope = ref<'all' | 'skill' | 'mcp' | 'session'>('all')
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const projectActionPending = ref(false)
+const projectLoading = ref(false)
+const projectLoadFailed = ref(false)
 const copiedTurnId = ref('')
 const harnessInbox = ref<DeepSeekInboxItem[]>([])
 const queueSubmitting = ref(false)
@@ -2043,6 +2045,8 @@ async function openProject(owner: string) {
   authorizedPaths.value = []
   if (!await closeCreationHost()) return
   const generation = ++projectGeneration
+  projectLoading.value = false
+  projectLoadFailed.value = false
   opened.value = null
   previewResource.value = null
   conversations.value = listHarnessConversationCatalog(owner).map(entry => conversationFromCatalog(entry))
@@ -2055,6 +2059,7 @@ async function openProject(owner: string) {
     if (updateResume) restoreUpdateInputDraft(updateResume, resumeKey)
     return
   }
+  projectLoading.value = true
   try {
     const query = await harnessConversationInput(owner)
     await migrateHarnessConversationPreferences(query).catch(cause => {
@@ -2090,7 +2095,10 @@ async function openProject(owner: string) {
     void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {
     if (generation !== projectGeneration) return
+    projectLoadFailed.value = true
     error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (generation === projectGeneration) projectLoading.value = false
   }
 }
 
@@ -4982,8 +4990,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       </section>
       <section v-else-if="projectOwner" class="memory-onboarding">
         <div>
-          <h1>还没有对话</h1>
-          <button :disabled="projectActionPending" @click="startNewConversation">新建对话</button>
+          <h1>{{ projectLoading ? '正在加载对话' : projectLoadFailed ? '对话加载失败' : '还没有对话' }}</h1>
+          <button v-if="projectLoadFailed" :disabled="projectLoading" @click="openProject(projectOwner)">重新加载对话</button>
+          <button v-else :disabled="projectLoading || projectActionPending" @click="startNewConversation">新建对话</button>
           <p v-if="error" class="memory-onboarding-error">{{ error }}</p>
         </div>
       </section>

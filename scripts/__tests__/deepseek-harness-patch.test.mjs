@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
@@ -119,7 +119,13 @@ test('Harness installs dependent session methods on a fresh SDK layout', t => {
     assert.ok(once.includes('...productionSource(params, rec.handle.agent)'))
     for (const [pkg, hook] of [['dsh-tool-fs-search', 'argv = await productionSearchArguments'], ['dsh-goal-round-driver', 'productionGoalAllowed(state.agent) &&'], ['dsh-agent-loop', 'await prepareProductionStep(this, claimed, signal)']]) assert.ok(readFileSync(join(sdk, pkg, 'lib/index.js'), 'utf8').includes(hook))
     for (const method of ['cancelSession', 'updateQueue', 'permission', 'approval']) assert.ok(once.includes(`async ${method}(params)`), method)
+    const files = ['dsh-sdk-client', 'dsh-sdk-jsonrpc-server', 'dsh-skill', 'dsh-tool-fs-search', 'dsh-goal-round-driver', 'dsh-agent-loop']
+      .map(pkg => join(sdk, pkg, 'lib/index.js'))
+    // 固定到过去，避免文件系统时间精度把无效重写漏判为幂等。
+    for (const file of files) utimesSync(file, 1_000, 1_000)
+    const modified = files.map(file => statSync(file).mtimeMs)
     run()
     assert.equal(readFileSync(target, 'utf8'), once)
+    assert.deepEqual(files.map(file => statSync(file).mtimeMs), modified, '重复准备不得触发 Tauri 资源变更重启')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

@@ -9,6 +9,7 @@ import {
   deepSeekAssistantText,
   deepSeekContentBlocks,
   deepSeekFailureText,
+  deepSeekExitText,
   deepSeekHandoffTurns,
   deepSeekMessageUsage,
   deepSeekTurnUsage,
@@ -36,6 +37,13 @@ import {
   deepSeekTurnError,
   DEEPSEEK_PROCESS_RESULT_LIMIT,
 } from '@/services/deepSeekHarness'
+
+test('Harness exit reports the exit status even without stderr', () => {
+  assert.equal(deepSeekExitText({ exitCode: 0, stderr: [] }), 'DeepSeek Harness 已退出（退出码：0）')
+  assert.equal(deepSeekExitText({ signal: 'SIGTERM', stderr: [] }), 'DeepSeek Harness 已退出（信号：SIGTERM）')
+  assert.equal(deepSeekExitText({ exitCode: 1, stderr: ['startup failed'] }), 'DeepSeek Harness 已退出（退出码：1）\nstartup failed')
+  assert.equal(deepSeekExitText({ stderr: [] }), 'DeepSeek Harness 已退出')
+})
 
 test('explicit MCP selection reaches the model as execution intent, not only a mounted tool list', () => {
   assert.equal(deepSeekMcpPrompt('只讨论构图', []), '只讨论构图')

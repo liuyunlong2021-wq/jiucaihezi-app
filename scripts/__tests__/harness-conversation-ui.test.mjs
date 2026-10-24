@@ -76,8 +76,14 @@ test('legacy preference imports cannot replace official user titles, recent pref
   assert.equal(f.backing.get('jc-v1-old').hidden, true)
 })
 
+test('legacy imports retain the historical 3D preference', async () => {
+  const f = fixture()
+  await f.request({ action: 'import', entries: [{ workspaceKey: '/project', conversationId: 'old', scene3d: { enabled: true } }] })
+  assert.deepEqual(f.backing.get('jc-v1-old').scene3d, { enabled: true })
+})
+
 test('real SDK lists, creates, renames and hides sessions across restarts with no API key or model request', { timeout: 60_000 }, async t => {
-  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import('node:fs')
   const { join } = await import('node:path')
   const { tmpdir } = await import('node:os')
   const { DeepSeekHarness } = await import('../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js')
@@ -94,15 +100,25 @@ test('real SDK lists, creates, renames and hides sessions across restarts with n
   assert.equal(created.entries[0].sessionId, 'jc-v1-offline-chat')
   await request({ action: 'rename', conversationId: 'offline-chat', title: '持久标题' })
   await request({ action: 'preferences', conversationId: 'offline-chat', preferences: { manju: { enabled: true } } })
-  await harness.close(); harness = new DeepSeekHarness(options)
+  await harness.close()
+  // 真实旧版持久记录：strict schema 漏掉 scene3d 会使整张偏好表加载失败。
+  const preferenceFile = join(options.dshHome, 'storages/jiucaihezi_session_ui/preferences/jc-v1-offline-chat.json')
+  const stored = JSON.parse(readFileSync(preferenceFile, 'utf8'))
+  stored.record.scene3d = { enabled: true }
+  writeFileSync(preferenceFile, JSON.stringify(stored))
+  harness = new DeepSeekHarness(options)
   const restored = (await request({ action: 'list' })).entries[0]
   assert.equal(restored.title, '持久标题')
   assert.deepEqual(restored.manju, { enabled: true })
+  assert.deepEqual(restored.scene3d, { enabled: true })
+  await request({ action: 'preferences', conversationId: 'offline-chat', preferences: { novel: { enabled: false } } })
+  assert.deepEqual(JSON.parse(readFileSync(preferenceFile, 'utf8')).record.scene3d, { enabled: true })
   const snapshot = await harness.client.request('session/read', { sessionId: 'jc-v1-offline-chat' })
   assert.ok(snapshot.events.some(event => event.type === 'session/title' && event.data.title === '持久标题'))
   assert.ok(!snapshot.events.some(event => event.type === 'user/message' || event.type === 'llm/request'))
   await request({ action: 'hide', conversationId: 'offline-chat' })
   await harness.close(); harness = new DeepSeekHarness(options)
   assert.equal((await request({ action: 'list' })).entries.length, 0)
+  assert.deepEqual(JSON.parse(readFileSync(preferenceFile, 'utf8')).record.scene3d, { enabled: true })
   assert.ok((await harness.client.request('session/list', {})).some(row => row.header.id === 'jc-v1-offline-chat'))
 })

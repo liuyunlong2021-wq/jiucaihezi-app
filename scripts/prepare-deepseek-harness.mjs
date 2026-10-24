@@ -80,6 +80,11 @@ for (const target of removable) {
 // LibreOffice 已由上面的既有规则裁掉；它的悬空 bin 链接会使 Tauri 资源打包失败。
 rmSync(join(root, 'node_modules', '.bin', 'dsoffice'), { force: true })
 
+// 内容相同不落盘，否则 Tauri dev watcher 会把重复准备当成资源更新并重启 App。
+function writeChanged(path, content) {
+  if (readFileSync(path, 'utf8') !== content) writeFileSync(path, content)
+}
+
 // SDK client 在无控制台的桌面宿主中仍会再起一个 Node；管道不等于隐藏窗口。
 const clientPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-client', 'lib', 'index.js')
 const client = readFileSync(clientPath, 'utf8')
@@ -87,7 +92,7 @@ const runtimeSpawn = 'const child = spawn(this.runtime.command, this.runtime.arg
 const hiddenRuntimeSpawn = `${runtimeSpawn}\t\t\twindowsHide: true,\n`
 if (!client.includes(hiddenRuntimeSpawn)) {
   if (!client.includes(runtimeSpawn)) throw new Error('Unsupported DeepSeek Harness SDK client spawn layout')
-  writeFileSync(clientPath, client.replace(runtimeSpawn, hiddenRuntimeSpawn))
+  writeChanged(clientPath, client.replace(runtimeSpawn, hiddenRuntimeSpawn))
 }
 
 // 官方 0.2.1 保留恢复、等待和关闭流程；这里只补 SDK 尚未提供的工作台接口。
@@ -294,7 +299,7 @@ const alignedTeardown = `records.map((rec) => Promise.resolve().then(async () =>
 \t\t}))`
 server = server.replace('this.pinnedSkillScopes?.get(rec.handle.agent)?.dispose()', '(await this.nativeWikiScopes?.get(rec.handle.agent))?.()')
 patch(ownedTeardown, alignedTeardown)
-writeFileSync(serverPath, server)
+writeChanged(serverPath, server)
 
 const skillRegistryPath = join(deepseekPackages, 'dsh-skill', 'lib', 'index.js')
 let registry = readFileSync(skillRegistryPath, 'utf8')
@@ -308,7 +313,7 @@ if (!registry.includes(nameGuard)) registry = registry.replace('async get(name, 
 const providerGuard = 'if (!allowsProductionSkill(options.scope, name, match.candidate.provider)) return void 0;'
 if (!registry.includes(providerGuard)) registry = registry.replace('if (match === void 0) return void 0;', 'if (match === void 0) return void 0;\n\t\t' + providerGuard)
 if (!registry.includes('skills: entries.sort') || !registry.includes(nameGuard) || !registry.includes(providerGuard)) throw new Error('官方 Skill 范围补丁锚点不匹配')
-writeFileSync(skillRegistryPath, registry)
+writeChanged(skillRegistryPath, registry)
 
 // Preserve accepted official Inbox entries across a desktop runtime restart.
 const loopPath = join(deepseekPackages, 'dsh-agent-loop', 'lib', 'index.js')
@@ -318,7 +323,7 @@ if (existsSync(loopPath)) {
   const durableDispose = 'machine.cancel({ kind: "disposed" }, { keepInbox: true });'
   if (!loop.includes(durableDispose)) {
     if (!loop.includes(ordinaryDispose)) throw new Error('官方 Inbox 重启保留补丁锚点不匹配')
-    writeFileSync(loopPath, loop.replace(ordinaryDispose, durableDispose))
+    writeChanged(loopPath, loop.replace(ordinaryDispose, durableDispose))
   }
 }
 
@@ -331,7 +336,7 @@ function patchProductionService(packageName, symbol, before, after) {
     if (!text.includes(before)) throw new Error('Unsupported production service layout: ' + packageName)
     text = text.replace(before, after)
   }
-  writeFileSync(file, text)
+  writeChanged(file, text)
 }
 patchProductionService('dsh-tool-fs-search', 'productionSearchArguments',
   'const workdir = exec.agent === void 0 ? process.cwd() : await ctx.workingDirectory.ensure(exec.agent, exec.signal);',
@@ -347,7 +352,7 @@ patchProductionService('dsh-goal-round-driver', 'productionGoalAllowed',
 // Upgrade the previous hook before applying the guarded form; preparation must not consume failed inputs.
 {
   const text = readFileSync(loopPath, 'utf8')
-  writeFileSync(loopPath, text.replace(/^\t{2}await prepareProductionStep\(this, claimed, signal\);\n/m, ''))
+  writeChanged(loopPath, text.replace(/^\t{2}await prepareProductionStep\(this, claimed, signal\);\n/m, ''))
 }
 patchProductionService('dsh-agent-loop', 'prepareProductionStep',
   'const claimed = this.inbox.claim(target, position.turn);\n\t\tconst assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal));',

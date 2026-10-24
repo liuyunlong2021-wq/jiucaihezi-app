@@ -10,6 +10,8 @@ const preferences = defineDomain({
     manju: z.record(z.string(), z.unknown()).optional(),
     novel: z.record(z.string(), z.unknown()).optional(),
     shortDrama: z.record(z.string(), z.unknown()).optional(),
+    // 历史 @3D 偏好必须可读并原样保留，否则 strict 校验会阻断整个项目的会话列表。
+    scene3d: z.record(z.string(), z.unknown()).optional(),
     legacyRawPath: z.string().optional(), migratedAt: z.string().optional(),
   }).strict()) },
 })
@@ -110,7 +112,7 @@ export function createConversationUi(server, { sessionList = new ApiSessionList(
           id = session.id
         }
         id ||= wireId(entry.conversationId)
-        const patch = Object.fromEntries(['manju', 'novel', 'shortDrama', 'legacyRawPath', 'migratedAt']
+        const patch = Object.fromEntries(['manju', 'novel', 'shortDrama', 'scene3d', 'legacyRawPath', 'migratedAt']
           .filter(key => entry[key] !== undefined).map(key => [key, entry[key]]))
         const checked = preferences.tables.preferences.valueSchema.parse(patch)
         // Already migrated or recently edited preferences always win on retry / another WebView origin.

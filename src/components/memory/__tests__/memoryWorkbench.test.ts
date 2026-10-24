@@ -598,6 +598,14 @@ test('iPhone account settings reuse login while hiding commercial entries only',
   }
 })
 
+test('project loading failures are distinct from an empty conversation list and can retry discovery', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /projectLoadFailed\.value = true/)
+  assert.match(workbench, /projectLoading\.value = false/)
+  assert.match(workbench, /projectLoadFailed \? '对话加载失败'/)
+  assert.match(workbench, /v-if="projectLoadFailed"[^>]*@click="openProject\(projectOwner\)"[^>]*>重新加载对话/)
+})
+
 test('Harness conversations open immediately without creating a Raw memory space', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /listHarnessConversationCatalog/)
