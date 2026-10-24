@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
-import { computed, effectScope, nextTick, reactive, ref } from 'vue'
+import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
+import { productionRoute } from '@/runtime/memory/productionSkills'
 import { findComposerSuggestion, replaceComposerSuggestion } from '../composerSuggestions'
 import { useFilteredList } from '@/composables/useFilteredList'
 import { beginMemoryRun, desktopConversationLiveState, desktopConversationRuns, executeDesktopHarnessRun, memoryRunKey, stopRun, type MemoryRun } from '@/services/desktopConversationRuntime'
@@ -2250,6 +2251,7 @@ test('scene instruction waits for manual saves and sends actual selection, camer
   const dependencies = {
     previewResource: ref({ type: 'scene3d', resource: { path: '.raw/jc-media/文档/train.jcscene' } }),
     sceneInstruction: ref('把选中的人坐到座位上'), sceneInstructionSending: ref(false), sending: ref(false), input,
+    blockProductionTool: () => false,
     sceneSaveQueue: new Promise<void>(resolve => { finishSave = resolve }), updateSaveErrors: { scene: '' },
     sceneEditor: ref({ getContext: () => ({ selectedId: 'passenger9', selectedBone: 'Head', camera: { focal: 85 }, time: 0 }) }),
     files: { readText: async () => { order.push('read'); return { revision: { value: 'after-manual-save' } } } },
@@ -2295,7 +2297,7 @@ test('all @ selections preserve the draft after the caret', async () => {
       MANJU_MODE: 'jc-manju-zhizuo', NOVEL_MODE: 'jc-novel', SHORT_DRAMA_MODE: 'jc-duanju', WIKI_MEMORY_SKILL: 'wiki-native',
       selectedSkillNames: ref<string[]>([]), selectedMcpToolNames: ref<string[]>([]), recordSkillUse() {},
       addSessionReference: async () => {}, addProjectFileReference: async () => {}, addProjectMediaReferences: async () => {},
-      insertCommand() {}, saveProductionPreferences() {},
+      insertCommand() {}, saveProductionPreferences() {}, blockProductionTool: () => false,
       input, composerRef: ref({ focus() {} }),
       getCursorPosition: () => caret, findComposerSuggestion, replaceComposerSuggestion,
       enableTool: (id: string) => enabled.push(id),
@@ -2306,7 +2308,7 @@ test('all @ selections preserve the draft after the caret', async () => {
     const select = new Function(...Object.keys(dependencies), `${code}; return selectMention`)(...Object.values(dependencies))
     await select(option)
     assert.equal(dependencies.error.value, '')
-    assert.deepEqual(enabled, option.type === 'tool' && ['scene3d', 'av'].includes(option.id!) ? [option.id] : [])
+    assert.deepEqual(enabled, option.type === 'tool' && ['scene3d', 'av', 'mcp__github'].includes(option.id!) ? [option.id] : [])
     assert.equal(input.value, expected)
     assert.equal(editorText, expected)
   }
@@ -2333,4 +2335,67 @@ test('production buttons represent their route without duplicate Skill chips', (
   }
   const selected = ref(['wiki-native', 'custom'])
   assert.deepEqual(new Function('selectedSkillNames', 'MANJU_MODE', 'NOVEL_MODE', 'SHORT_DRAMA_MODE', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selected, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native'), ['wiki-native', 'custom'])
+})
+
+
+test('production selection clears restored extra chips and blocks enabling them until exit', () => {
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const body = workbench.slice(workbench.indexOf('const productionActive ='), workbench.indexOf('/**', workbench.indexOf('const productionActive =')))
+  const scope = effectScope()
+  const deps = { computed, watch, productionRoute, selectedSkillNames: ref<string[]>([]), selectedMcpToolNames: ref(['mcp__github']), mediaSelected: ref(true), avSelected: ref(true), scene3dSelected: ref(true), contextNotice: ref('') }
+  const block = scope.run(() => new Function(...Object.keys(deps), transformSync(body, { loader: 'ts', target: 'es2022' }).code + '; return blockProductionTool')(...Object.values(deps)))
+  try {
+    assert.equal(block('av'), false)
+    for (const route of ['manju', 'short-drama', 'novel']) {
+      deps.selectedSkillNames.value = [`production:${route}`]
+      assert.deepEqual(deps.selectedMcpToolNames.value, [])
+      assert.equal(deps.mediaSelected.value || deps.avSelected.value || deps.scene3dSelected.value, false)
+      for (const id of ['av', 'media', 'scene3d', 'mcp', 'mcp__github']) assert.equal(block(id), true)
+      assert.equal(block('wiki'), false)
+      deps.avSelected.value = true
+      deps.selectedMcpToolNames.value.push('mcp__restored')
+      assert.equal(deps.avSelected.value, false)
+      assert.deepEqual(deps.selectedMcpToolNames.value, [])
+    }
+    deps.selectedSkillNames.value = []
+    deps.avSelected.value = true
+    assert.equal(block('av'), false)
+    assert.equal(deps.avSelected.value, true)
+  } finally { scope.stop() }
+})
+
+test('ordinary same-name Skill selections retain Office and MCP chips', () => {
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const body = workbench.slice(workbench.indexOf('const productionActive ='), workbench.indexOf('/**', workbench.indexOf('const productionActive =')))
+  const scope = effectScope()
+  const deps = { computed, watch, productionRoute, selectedSkillNames: ref<string[]>([]), selectedMcpToolNames: ref(['mcp__github']), mediaSelected: ref(true), avSelected: ref(false), scene3dSelected: ref(false), contextNotice: ref('') }
+  scope.run(() => new Function(...Object.keys(deps), transformSync(body, { loader: 'ts' }).code)(...Object.values(deps)))
+  try {
+    for (const name of ['jc-novel', 'jc-duanju']) {
+      deps.selectedSkillNames.value = [name]
+      assert.equal(deps.mediaSelected.value, true)
+      assert.deepEqual(deps.selectedMcpToolNames.value, ['mcp__github'])
+    }
+  } finally { scope.stop() }
+})
+
+test('explicit ordinary preferences restore literal Skills while old preferences still migrate route aliases', async () => {
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const [{ restoreManjuSelection }, { restoreNovelSelection }, { restoreShortDramaSelection }, { nativeWikiSelection }, { isProductionSelection }] = await Promise.all([
+    import('@/runtime/memory/manjuProduction'), import('@/runtime/memory/novelProduction'), import('@/runtime/memory/shortDramaProduction'), import('@/runtime/memory/projectWiki'), import('@/runtime/memory/productionSkills'),
+  ])
+  const text = source('src/components/memory/MemoryWorkbench.vue')
+  const body = text.slice(text.indexOf('async function restoreComposerSkills('), text.indexOf('const mentionOpen =', text.indexOf('async function restoreComposerSkills(')))
+  const deps = { availableSkillNamesForComposer: async () => new Set(['jc-novel', 'jc-duanju', 'jc-seedance']), selectedSkillNames: ref<string[]>([]), nativeWikiSelection, isProductionSelection, restoreManjuSelection, restoreNovelSelection, restoreShortDramaSelection, SHORT_DRAMA_MODE: 'production:short-drama' }
+  const restore = new Function(...Object.keys(deps), transformSync(body, { loader: 'ts' }).code + ';return restoreComposerSkills')(...Object.values(deps))
+  for (const name of ['jc-novel', 'jc-duanju', 'jc-seedance']) {
+    await restore([name], { enabled: false }, { enabled: false }, { enabled: false })
+    assert.deepEqual(deps.selectedSkillNames.value, [name])
+  }
+  await restore(['jc-novel'])
+  assert.deepEqual(deps.selectedSkillNames.value, ['production:novel'])
+  await restore(['jc-duanju'])
+  assert.deepEqual(deps.selectedSkillNames.value, ['production:short-drama'])
 })

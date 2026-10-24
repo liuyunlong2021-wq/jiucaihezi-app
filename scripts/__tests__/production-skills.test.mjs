@@ -106,7 +106,7 @@ for (const individual of [false, true]) {
       const discarded = await send('short-drama', 'discard me')
       await client.request('session/update-queue', { sessionId: 'queue', itemId: discarded.messageId, action: { kind: 'remove' } })
       await client.request('session/update-queue', { sessionId: 'queue', itemId: queued.messageId, action: { kind: 'edit', content: [{ type: 'text', text: 'edited queued novel' }] } })
-      await assert.rejects(client.request('session/update-queue', { sessionId: 'queue', itemId: queued.messageId, action: { kind: 'steer' } }), /不同的 Skill/)
+      await assert.rejects(client.request('session/update-queue', { sessionId: 'queue', itemId: queued.messageId, action: { kind: 'steer' } }), /不同的创作能力范围/)
       await client.request('session/cancel', { sessionId: 'queue' })
       const before = (await client.request('session/read', { sessionId: 'queue' })).events
       const pending = before.filter(e => e.type === 'agent/inbox/spliced').flatMap(e => e.data.inserted).findLast(m => m.id === queued.messageId)
@@ -125,7 +125,7 @@ for (const individual of [false, true]) {
     } finally { gate.resolve() }
   })
 
-  test(`simultaneous sessions and official subagents keep their own Skill circles (${individual ? 'individual' : 'production'})`, { timeout: 30000 }, async t => {
+  test(`simultaneous sessions isolate Skill circles and only ordinary scopes can delegate (${individual ? 'individual' : 'production'})`, { timeout: 30000 }, async t => {
     const f = await fixture(t)
     const gate = Promise.withResolvers()
     let delegated = false
@@ -149,11 +149,16 @@ for (const individual of [false, true]) {
       await first
       assert.match(catalog(f.requests[0]), /jc-seedance/)
       await f.run('one', (individual ? 'skills:jc-seedance' : 'manju'), 'DELEGATE_CURRENT')
-      const child = f.requests.find(r => JSON.stringify(r.messages).includes('CHILD_SCOPE_CHECK'))
-      assert.ok(child, 'the official subagent must actually issue a model request')
-      assert.match(catalog(child), /jc-seedance/)
-      assert.doesNotMatch(catalog(child), /outside|jc-novel/)
-      if (individual) assert.doesNotMatch(catalog(child), /h3-prompt-writing/)
+      const child = f.requests.find(r => r.messages.some(m => m.role === 'user' && JSON.stringify(m.content).includes('CHILD_SCOPE_CHECK')))
+      if (individual) {
+        assert.ok(child, 'the official subagent must actually issue a child model request')
+        assert.match(catalog(child), /jc-seedance/)
+        assert.doesNotMatch(catalog(child), /outside|jc-novel|h3-prompt-writing/)
+      } else {
+        assert.equal(child, undefined, 'production must reject delegation before creating a child')
+        assert.ok(!f.requests.at(-1).tools.some(t => t.function.name === 'subagent'))
+        assert.match(JSON.stringify(f.requests.at(-1).messages.filter(m => m.role === 'tool')), /Error:/)
+      }
     } finally { gate.resolve(); await first }
   })
 

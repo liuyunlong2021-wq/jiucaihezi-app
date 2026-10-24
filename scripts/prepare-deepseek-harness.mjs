@@ -173,7 +173,7 @@ const updateQueueMethod = `\tasync updateQueue(params) {
 \t\t\tif (!agent.inbox.remove(params.itemId)) throw new Error("queued item is no longer pending");
 \t\t} else if (action?.kind === "steer") {
 \t\t\tif (target !== "next-turn" || agent.status !== "running") throw new Error("current turn no longer accepts steering");
-\t\t\tif (message.source.productionMode !== undefined && message.source.productionMode !== productionModeFor(agent)) throw new Error("这条消息使用不同的 Skill 范围，请保留在下一轮队列。");
+\t\t\tif ((message.source.productionMode !== undefined && message.source.productionMode !== productionModeFor(agent) || message.source.productionRoute !== undefined && message.source.productionRoute !== productionRouteFor(agent))) throw new Error("这条消息使用不同的创作能力范围，请保留在下一轮队列。");
 \t\t\tif (!agent.inbox.remove(params.itemId)) throw new Error("queued item is no longer pending");
 \t\t\tagent.steer(message);
 \t\t} else throw new Error("unknown queue action");
@@ -219,7 +219,7 @@ const scopedBindingMethod = `\tasync applyNativeCapabilities(rec, content) {
 \t}
 `
 // 删除旧的手势推导/屏蔽链，再安装最小的原生能力挂接。
-server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable|attachWikiRuntime, attachPresent|installProductionSkills, validateProductionMode, productionModeFor) \} from .*;\n/gm, '')
+server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable|attachWikiRuntime, attachPresent|installProductionSkills, (?:validateProductionMode, productionModeFor|productionSource, productionModeFor, productionRouteFor)) \} from .*;\n/gm, '')
 server = server.replace(/\/\*\*\n\* 官方 `dsh-tool-skill`[\s\S]*?\*\/\n/g, '')
 server = server.replace(/^const SKILL_GESTURE = .*;\n/gm, '')
 server = server.replace(/\tasync (?:updateQueue|applyPinnedSkillScope|pinnedSkillNames|applyNativeCapabilities)\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
@@ -227,17 +227,17 @@ server = server.replace('await this.applyPinnedSkillScope(rec, content);', 'awai
 server = server.replace(/\tasync (?:readSession|cancelSession|updateQueue|permission|approval)\(params\) \{[\s\S]*?\n\t\}\n/g, '')
 const imports = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
   + 'import { attachWikiRuntime, attachPresent } from "../../../../wiki-runtime.mjs";\n'
-  + 'import { installProductionSkills, validateProductionMode, productionModeFor } from "../../../../production-skills.mjs";\n'
+  + 'import { installProductionSkills, productionSource, productionModeFor, productionRouteFor } from "../../../../production-skills.mjs";\n'
 patch('import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n', 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n' + imports)
 for (const method of [readSessionMethod, cancelSessionMethod, updateQueueMethod, permissionMethod, scopedBindingMethod]) {
   if (!server.includes(method)) patch('\tassertLiveAgent(rec, sessionId) {', method + '\tassertLiveAgent(rec, sessionId) {')
 }
 server = server.replace(/^\t\t\tcase "session\/(?:runtime-busy|production-scope)":.*\n/gm, '')
-patch('case "session/prompt": return this.prompt(params);', 'case "session/production-scope": return { version: 1 };\n\t\t\tcase "session/runtime-busy": return { busy: [...this.sessions.values()].some(rec => rec.handle.agent.status === "running" || rec.handle.agent.inbox.hasPending) };\n\t\t\tcase "session/prompt": return this.prompt(params);')
+patch('case "session/prompt": return this.prompt(params);', 'case "session/production-scope": return { version: 2 };\n\t\t\tcase "session/runtime-busy": return { busy: [...this.sessions.values()].some(rec => rec.handle.agent.status === "running" || rec.handle.agent.inbox.hasPending) };\n\t\t\tcase "session/prompt": return this.prompt(params);')
 patch('\t\tthis.options = options;', '\t\tthis.options = options;\n\t\tinstallProductionSkills(ctx);')
 patch('\t\tconst message = createUserMessage({', '\t\tawait this.applyNativeCapabilities(rec, content);\n\t\tconst message = createUserMessage({')
-server = server.replace('productionMode: validateProductionMode(params.productionMode)', 'productionMode: validateProductionMode(params.productionMode ?? productionModeFor(rec.handle.agent))')
-patch('source: { kind: "user" }', 'source: { kind: "user", productionMode: validateProductionMode(params.productionMode ?? productionModeFor(rec.handle.agent)) }')
+server = server.replace(/source: \{ kind: "user"(?:, productionMode: validateProductionMode\(params.productionMode(?: \?\? productionModeFor\(rec.handle.agent\))?\))? \}/g, 'source: { kind: "user", ...productionSource(params, rec.handle.agent) }')
+if (!server.includes('source: { kind: "user", ...productionSource(params, rec.handle.agent) }')) throw new Error('Unsupported SDK production source layout')
 patch('\t\trec.handle.agent.followup(message);', '\t\tif (this.stoppingSessions?.has(params.sessionId)) throw new Error("session is stopping");\n\t\trec.handle.agent.followup(message);')
 
 // 保留官方 createSession 的恢复与 failure 状态；兼容 App 的惰性续接和已激活 Agent。
@@ -321,3 +321,46 @@ if (existsSync(loopPath)) {
     writeFileSync(loopPath, loop.replace(ordinaryDispose, durableDispose))
   }
 }
+
+function patchProductionService(packageName, symbol, before, after) {
+  const file = join(root, 'node_modules/@deepseek-ai', packageName, 'lib/index.js')
+  let text = readFileSync(file, 'utf8')
+  const dependency = `import { ${symbol} } from "../../../../production-skills.mjs";\n`
+  if (!text.includes(dependency)) text = dependency + text
+  if (!text.includes(after)) {
+    if (!text.includes(before)) throw new Error('Unsupported production service layout: ' + packageName)
+    text = text.replace(before, after)
+  }
+  writeFileSync(file, text)
+}
+patchProductionService('dsh-tool-fs-search', 'productionSearchArguments',
+  'const workdir = exec.agent === void 0 ? process.cwd() : await ctx.workingDirectory.ensure(exec.agent, exec.signal);',
+  'const workdir = exec.agent === void 0 ? process.cwd() : await ctx.workingDirectory.ensure(exec.agent, exec.signal);\n\targv = await productionSearchArguments(exec.agent, argv, workdir);')
+
+patchProductionService('dsh-goal-round-driver', 'productionGoalAllowed',
+  'return ctx.fiber.state === 2 && !state.stopping',
+  'return productionGoalAllowed(state.agent) && ctx.fiber.state === 2 && !state.stopping')
+patchProductionService('dsh-goal-round-driver', 'productionGoalAllowed',
+  'return ctx.fiber.state === 2 && !state.stopping && attempt',
+  'return productionGoalAllowed(state.agent) && ctx.fiber.state === 2 && !state.stopping && attempt')
+
+// Upgrade the previous hook before applying the guarded form; preparation must not consume failed inputs.
+{
+  const text = readFileSync(loopPath, 'utf8')
+  writeFileSync(loopPath, text.replace(/^\t{2}await prepareProductionStep\(this, claimed, signal\);\n/m, ''))
+}
+patchProductionService('dsh-agent-loop', 'prepareProductionStep',
+  'const claimed = this.inbox.claim(target, position.turn);\n\t\tconst assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal));',
+  `const nextStepCount = this.inbox.nextStep.length;
+\t\tconst claimed = this.inbox.claim(target, position.turn);
+\t\tlet assembly;
+\t\ttry {
+\t\t\tawait prepareProductionStep(this, claimed, signal);
+\t\t\tassembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal));
+\t\t} catch (error) {
+\t\t\tif (!signal.aborted) {
+\t\t\t\tif (nextStepCount) this.inbox.splice("next-step", 0, 0, claimed.slice(0, nextStepCount));
+\t\t\t\tif (claimed.length > nextStepCount) this.inbox.splice("next-turn", 0, 0, claimed.slice(nextStepCount));
+\t\t\t}
+\t\t\tthrow error;
+\t\t}`)

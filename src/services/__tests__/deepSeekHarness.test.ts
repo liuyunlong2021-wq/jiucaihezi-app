@@ -1,4 +1,4 @@
-import { productionMode } from '@/runtime/memory/productionSkills'
+import { productionRoute, productionMode } from '@/runtime/memory/productionSkills'
 import { computerUseEnabledNow } from '@/stores/agentStore'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -460,7 +460,7 @@ test('创作范围由结构化参数传递，保留官方加载器和原生能�
   assert.doesNotMatch(prepare, /tools\.restrict\(\{ deny: \["skill"\]/)
   assert.doesNotMatch(prepare, /async pinnedSkillNames/)
   assert.match(prepare, /installProductionSkills/)
-  assert.match(prepare, /validateProductionMode\(params\.productionMode/)
+  assert.match(prepare, /productionSource\(params, rec\.handle\.agent\)/)
 })
 
 test('重试与失败文案逐字取自官方中文字典', () => {  assert.equal(DEEPSEEK_RETRY_TEXT.active, '正在重试模型请求')
@@ -588,7 +588,7 @@ test('Computer Use mounts the official provider pair behind the same insert seam
   const store = readFileSync('src/stores/agentStore.ts', 'utf8')
   // 官方 Computer Use 是「注册位 + 一个提供方」两条插件，且只能走 `- insert:`：顶层
   // `- name:` 会被官方 applyEntryPatches 按已有行匹配，匹配不到就静默丢掉（MCP 条目踩过）。
-  assert.match(source, /const computerUsePatch = computerUseEnabledNow\(\)\n\s*\? insertPatch\(\[/)
+  assert.match(source, /const computerUsePatch = !isProduction\(input\) && computerUseEnabledNow\(\)\n\s*\? insertPatch\(\[/)
   assert.match(source, /"  name: '@deepseek-ai\/dsh-computer-use'"/)
   assert.match(source, /"  name: '@deepseek-ai\/dsh-experimental-computer-use-cua-driver-native'"/)
   assert.match(source, /\.\.\.computerUsePatch,/)
@@ -1299,7 +1299,7 @@ test('official delivery projection handles Windows paths and keeps separate turn
 
 
 test('creative selections are scope metadata, including old conversation preferences', () => {
-  for (const [selection, expected] of [['production:manju', 'manju'], ['production:short-drama', 'short-drama'], ['production:novel', 'novel'], ['jc-manju-zhizuo', 'manju'], ['jc-duanju', 'short-drama'], ['jc-novel', 'novel']] as const) {
+  for (const [selection, expected] of [['production:manju', 'manju'], ['production:short-drama', 'short-drama'], ['production:novel', 'novel']] as const) {
     assert.equal(productionMode([selection]), expected)
     assert.equal(deepSeekPrompt('当前任务', [selection]), '当前任务')
   }
@@ -1321,5 +1321,21 @@ test('computer operation defaults off and only an explicitly enabled setting loa
   } finally {
     if (original) Object.defineProperty(globalThis, 'localStorage', original)
     else Reflect.deleteProperty(globalThis, 'localStorage')
+  }
+})
+
+test('a selected group Skill preserves its production route, ordinary selection does not acquire one', () => {
+  for (const route of ['manju', 'short-drama', 'novel'] as const) {
+    const names = [`production:${route}`, 'jc-xiangmuziliao']
+    assert.equal(productionMode(names), 'skills:jc-xiangmuziliao')
+    assert.equal(productionRoute(names), route)
+  }
+  assert.equal(productionRoute(['jc-xiangmuziliao']), 'none')
+})
+
+test('new ordinary Skill selections never infer production from legacy business names', () => {
+  for (const name of ['jc-novel', 'jc-duanju', 'jc-manju-zhizuo', 'jc-manju-minimaxh3']) {
+    assert.equal(productionRoute([name]), 'none')
+    assert.equal(productionMode([name]), `skills:${name}`)
   }
 })

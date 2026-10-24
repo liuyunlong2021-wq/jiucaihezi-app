@@ -103,5 +103,5 @@ test('runner 只在开关打开时补链接，且由路由侧把开关传下来'
   assert.match(runner, /import \{ ensureProfilePluginLinks \} from '\.\/profile-plugins\.mjs'/)
 
   const route = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
-  assert.match(route, /computerUse: computerUseEnabledNow\(\),/)
+  assert.match(route, /computerUse: !isProduction\(input\) && computerUseEnabledNow\(\),/)
 })

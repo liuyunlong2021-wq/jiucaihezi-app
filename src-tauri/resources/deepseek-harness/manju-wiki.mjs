@@ -670,17 +670,21 @@ export function selectWikiSource(agent, args) {
   return selected
 }
 
-export function createWikiArtifactTool(ctx, contract, sourceAgent) {
+export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none') {
   if (!ctx.fs || !ctx.tools) throw new Error('Wiki 归档工具缺少 Harness 文件或工具服务')
   if (ctx.fs.sandboxMode !== undefined && !ctx.get('sandboxPolicy'))
     throw new Error('Wiki 归档工具缺少 Harness 沙箱策略')
-  return defineTool({
+  const kinds = Object.keys(contract.types).filter(kind => route === 'none' || contract.types[kind].production_routes?.includes(route))
+  const hidden = route === 'none' ? [] : route === 'novel'
+    ? ['episode_number', 'video_model', 'segment', 'research_version']
+    : ['chapter_number', 'chapter_title', 'user_confirmed']
+  const tool = {
     name: 'wiki_save_artifact',
     description: '把已完成、按当前创作路线规则应归档或用户要求保存的短剧、漫剧或小说产物，按固定类型写入当前项目统一 Wiki 并更新直属索引。不得接收任意路径。小说章节先保存草稿，只有用户明确确认后才能追加到原文。',
     parameters: {
       artifact_kind: {
         type: 'string', required: true,
-        enum: Object.keys(contract.types),
+        enum: kinds,
         description: '产物类型，决定唯一保存目录。',
       },
       content: { type: 'string', description: '本次完成的 Markdown 正文。小说章节传章节正文，不含工具自动生成的章标题。' },
@@ -705,6 +709,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent) {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     async execute(args, exec) {
+      if (!kinds.includes(args.artifact_kind) || hidden.some(key => Object.hasOwn(args, key))) throw new Error('归档类型或字段不属于当前创作路线')
       if (args.artifact_kind === 'source_material') {
         if (args.write_mode && args.write_mode !== 'create') throw new Error('原始来源只允许创建，不覆盖已有原文')
         args = { ...args, content: selectWikiSource(sourceAgent, args) }
@@ -712,5 +717,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent) {
       const value = await saveArtifact(ctx, args, exec, contract)
       return { status: value.status, path: value.path, operation: value.operation, warnings: value.warnings }
     },
-  })
+  }
+  for (const key of hidden) delete tool.parameters[key]
+  return defineTool(tool)
 }

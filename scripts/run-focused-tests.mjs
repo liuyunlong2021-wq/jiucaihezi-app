@@ -209,6 +209,7 @@ const externalNodeTests = [
   'scripts/__tests__/deepseek-session-lifecycle.test.mjs',
   'scripts/__tests__/harness-native-tools.test.mjs',
   'scripts/__tests__/manju-skill-scope.test.mjs',
+  'scripts/__tests__/production-capabilities.test.mjs',
   'scripts/__tests__/production-skills.test.mjs',
   'scripts/__tests__/novel-skill-routing.test.mjs',
   'scripts/__tests__/character-skill-resources.test.mjs',

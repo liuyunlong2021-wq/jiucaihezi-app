@@ -52,8 +52,8 @@ import {
   type ConversationSplitPlan,
   type ConversationSplitResult,
 } from '@/runtime/memory/conversationSplit'
-import { productionMode, isProductionSelection } from '@/runtime/memory/productionSkills'
-import { needsProjectWiki } from '@/runtime/memory/projectWiki'
+import { productionRoute, productionMode, isProductionSelection } from '@/runtime/memory/productionSkills'
+import { nativeWikiSelection, needsProjectWiki } from '@/runtime/memory/projectWiki'
 import { buildWikiMemoryIndexContext, runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
@@ -418,6 +418,21 @@ const mcpStore = useMcpStore()
 const mediaSelected = ref(false)
 const avSelected = ref(false)
 const scene3dSelected = ref(false)
+const productionActive = computed(() => productionRoute(selectedSkillNames.value) !== 'none')
+function blockProductionTool(id: string): boolean {
+  if (!productionActive.value || !(['media', 'av', 'scene3d', 'mcp'].includes(id) || id.startsWith('mcp__'))) return false
+  contextNotice.value = '当前创作路线只启用本路线 Skill 和文件归档工具；请退出创作模式后使用其他工具。'
+  return true
+}
+// Also sanitize restored drafts/history without touching the global computer setting.
+watch([productionActive, selectedMcpToolNames, mediaSelected, avSelected, scene3dSelected], () => {
+  if (!productionActive.value) return
+  if (selectedMcpToolNames.value.length) selectedMcpToolNames.value = []
+  mediaSelected.value = false
+  avSelected.value = false
+  scene3dSelected.value = false
+}, { deep: true, flush: 'sync' })
+
 /**
  * 本工作区的沙箱档位（官方三档）。
  *
@@ -626,6 +641,11 @@ async function restoreComposerSkills(
   shortDramaPreference?: ShortDramaPreference,
 ) {
   const available = await availableSkillNamesForComposer()
+  if ([manjuPreference, novelPreference, shortDramaPreference].every(preference => preference?.enabled === false)
+    && !(names || []).some(isProductionSelection)) {
+    selectedSkillNames.value = nativeWikiSelection(names || []).filter(name => available.has(name))
+    return
+  }
   const legacyShortDrama = !shortDramaPreference && names?.some(name => name === SHORT_DRAMA_MODE || name === 'jc-duanju')
   if (legacyShortDrama) {
     selectedSkillNames.value = restoreShortDramaSelection(names || [], {
@@ -1623,6 +1643,7 @@ async function queueDraft() {
     await queueDeepSeekHarnessMessage({
       ...sessionInput,
       productionMode: productionMode(skillSnapshot),
+      productionRoute: productionRoute(skillSnapshot),
       message: deepSeekPrompt(text || (attachmentSnapshot.length ? '请查看以下附件。' : '请参考引用的会话。'),
         skillSnapshot, [], wikiContext, sessionReferenceSnapshot),
       attachments: materialized,
@@ -2427,6 +2448,7 @@ function navigateQuestion(direction: -1 | 1) {
 }
 
 function insertCommand(command: { id: string; label: string }) {
+  if (blockProductionTool(command.id)) return
   mentionTrigger.value = null
   // `file` 不在这里：它不是一个“往输入框插一句话”的指令，点它走权限菜单（见模板）。
   if (command.id === 'media') mediaSelected.value = true
@@ -2454,6 +2476,7 @@ function insertCommand(command: { id: string; label: string }) {
 }
 
 function enableTool(id: string) {
+  if (blockProductionTool(id)) return
   if (id === 'wiki') {
     if (!selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)) selectedSkillNames.value.push(WIKI_MEMORY_SKILL)
     saveProductionPreferences()
@@ -2908,6 +2931,7 @@ async function send(remoteText?: string) {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
       productionMode: productionMode(skillSnapshot),
+      productionRoute: productionRoute(skillSnapshot),
       message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns, dhWikiContext, activeReferencedSessions),
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
@@ -3581,11 +3605,12 @@ async function selectMention(option: MemoryMentionOption) {
         if (!selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)) selectedSkillNames.value.push(WIKI_MEMORY_SKILL)
         saveProductionPreferences()
       } else if (option.id.startsWith('mcp__')) {
-        if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
+        enableTool(option.id)
       } else if (option.id === 'skill') {
         pickerAfterReplacement = 'skill'
         keepMenuOpen = true
       } else if (option.id === 'mcp') {
+        if (blockProductionTool(option.id)) return
         pickerAfterReplacement = 'mcp'
         keepMenuOpen = true
       } else if (option.id === 'session') {
@@ -3629,6 +3654,7 @@ async function selectMention(option: MemoryMentionOption) {
       if (!selectedSkillNames.value.includes(option.name)) {
         selectedSkillNames.value.push(option.name)
         recordSkillUse(option.name)
+        saveProductionPreferences()
       }
       if (option.name === WIKI_MEMORY_SKILL && !novelSelected.value && !manjuSelected.value && !shortDramaSelected.value) {
         const novelPreference = currentNovelPreference()
@@ -4264,6 +4290,7 @@ async function sendSceneInstruction() {
   sceneInstructionSending.value = true
   const draft = input.value
   try {
+    if (blockProductionTool('scene3d')) return
     await sceneSaveQueue
     if (updateSaveErrors.scene) throw new Error(updateSaveErrors.scene)
     const editor = sceneEditor.value?.getContext() || null

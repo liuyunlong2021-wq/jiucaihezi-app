@@ -115,7 +115,7 @@ async function fixture(t, configured = false, modelGate, { respond, maxTokens = 
     env: { ...process.env, DSH_AGENTS_HOME: join(root, 'agents'), DSH_PRIMARY_RUNTIME: '', JIUCAIHEZI_DH_API_KEY: 'local-test' } }
   const harnesses = []
   const create = (overrides = {}) => { const h = new DeepSeekHarness({ ...options, ...overrides }); harnesses.push(h); return h }
-  const createRunner = () => {
+  const createRunner = (overrides = {}) => {
     const ready = Promise.withResolvers()
     const closed = Promise.withResolvers()
     const pending = new Map()
@@ -123,7 +123,7 @@ async function fixture(t, configured = false, modelGate, { respond, maxTokens = 
     let next = 0
     let stopping
     const runnerPath = fileURLToPath(new URL('../../src-tauri/resources/deepseek-harness/runner.mjs', import.meta.url))
-    const child = spawn(process.execPath, [runnerPath, JSON.stringify({ cwd: root, dshHome: options.dshHome, patchPath: patch, model: 'test' })], { env: options.env, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [runnerPath, JSON.stringify({ cwd: root, dshHome: options.dshHome, patchPath: patch, model: 'test', ...overrides })], { env: options.env, stdio: ['pipe', 'pipe', 'pipe'] })
     child.stderr.resume()
     createInterface({ input: child.stdout }).on('line', line => {
       const frame = JSON.parse(line)
@@ -502,10 +502,11 @@ function lifecycle(createRuntime, harnessControl = async () => ({ busy: false })
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   const start = source.slice(source.indexOf('async function ensureRuntime('), source.indexOf('/** Bounded control RPCs'))
   const stop = source.slice(source.indexOf('async function waitForRuntimeClose('))
-  const code = transformSync(start + '\n' + stop.replace('export async function', 'async function'), { loader: 'ts', target: 'es2022' }).code
+  const helpers = source.slice(source.indexOf('function isProduction('), source.indexOf('function workspaceRuntimeKey('))
+  const code = transformSync(helpers + '\n' + start + '\n' + stop.replace('export async function', 'async function'), { loader: 'ts', target: 'es2022' }).code
   const runtimes = new Map()
-  return new Function('runtimes', 'createRuntime', 'refreshCustomModelCapabilities', 'findCustomProvider', 'workspaceRuntimeKey', 'runtimeKey', 'DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS', 'harnessControl', code + '\nreturn { ensureRuntime, stopRuntime, stopDeepSeekHarness };')(
-    runtimes, createRuntime, async () => {}, () => undefined, input => input.cwd, input => input.model, 20, harnessControl,
+  return new Function('runtimes', 'createRuntime', 'refreshCustomModelCapabilities', 'findCustomProvider', 'workspaceRuntimeKey', 'deepSeekModelLimits', 'deepSeekModelInput', 'computerUseEnabledNow', 'DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS', 'harnessControl', code + '\nreturn { ensureRuntime, stopRuntime, stopDeepSeekHarness, productionInput, runtimeKey };')(
+    runtimes, createRuntime, async () => {}, () => undefined, input => input.cwd, () => ({ contextWindow: 262144, maxTokens: 1024 }), () => ['text'], () => true, 20, harnessControl,
   )
 }
 
@@ -562,7 +563,7 @@ test('changing runtime settings never reaps a task still running in another sess
 
 test('changing settings preserves queued SDK work after the frontend turn has settled', async () => {
   let busy = true, creations = 0, reaps = 0
-  const runtime = { productionScopeVersion: 1, taskSessions: new Set(), closed: new Promise(() => {}), transport: { send: async () => {}, close: async () => { reaps++ } } }
+  const runtime = { productionScopeVersion: 2, taskSessions: new Set(), closed: new Promise(() => {}), transport: { send: async () => {}, close: async () => { reaps++ } } }
   const f = lifecycle(async () => { creations++; return runtime }, async (_, command) => {
     assert.equal(command.type, 'runtime-busy')
     return { busy }
@@ -850,5 +851,38 @@ test('GPT stream reaches APP notifications before completion and keeps reasoning
   assert.equal(result.type, 'result', JSON.stringify(result))
   assert.match(JSON.stringify(result), /TRACE_PARTIAL_DONE/)
   assert.doesNotMatch(JSON.stringify(result), /TRACE_REASONING/)
+  assert.equal(f.requests.length, 1)
+})
+
+
+test('production reuses a compatible shared runtime without reaping its ordinary peer', async () => {
+  let creations = 0, reaps = 0
+  const runtime = { productionScopeVersion: 2, taskSessions: new Set(['ordinary-peer']), closed: new Promise(() => {}), transport: { send: async () => {}, close: async () => { reaps++ } } }
+  const f = lifecycle(async () => { creations++; return runtime })
+  const ordinary = { cwd: 'workspace', model: 'same-model', avSelected: true, mcpServerIds: ['server'] }
+  await f.ensureRuntime(ordinary)
+  const production = { ...ordinary, productionMode: 'manju', productionRoute: 'manju' }
+  assert.equal(await f.ensureRuntime(production), runtime)
+  assert.equal(await f.ensureRuntime(ordinary), runtime)
+  assert.equal(creations, 1)
+  assert.equal(reaps, 0)
+  await assert.rejects(f.ensureRuntime({ ...production, model: 'different-model' }), /有任务正在使用原设置/)
+  assert.deepEqual(f.productionInput(production), { ...production, avSelected: false, mediaSelected: false, scene3dSelected: false, mcpServerIds: [] })
+  assert.equal(f.productionInput(ordinary), ordinary)
+  assert.ok(!f.runtimeKey(f.productionInput(production)).split('\0').includes('cua'))
+  assert.ok(f.runtimeKey(ordinary).split('\0').includes('cua'))
+})
+
+
+test('a production turn does not require optional tools inherited from a shared runner configuration', { timeout: 20000 }, async t => {
+  const f = await fixture(t)
+  const runner = f.createRunner({ requiredTools: ['unavailable_optional_tool'] })
+  const ordinary = await runner.request({ type: 'run', sessionId: 'ordinary-required', contentBlocks: [{ type: 'text', text: 'ordinary' }], productionMode: 'none', productionRoute: 'none' })
+  assert.equal(ordinary.type, 'error')
+  assert.match(ordinary.error, /unavailable_optional_tool/)
+  assert.equal(f.requests.length, 0)
+  const production = await runner.request({ type: 'run', sessionId: 'production-no-extras', contentBlocks: [{ type: 'text', text: '制作工程台本' }], productionMode: 'manju', productionRoute: 'manju' })
+  assert.equal(production.type, 'result', JSON.stringify(production))
+  assert.equal(production.text, 'OK')
   assert.equal(f.requests.length, 1)
 })

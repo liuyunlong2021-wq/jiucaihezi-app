@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { test } from 'node:test'
 import { createWikiArtifactTool, setWikiSourceContent } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
-function createHarness(root, { beforeWrite } = {}) {
+function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const files = new Map()
   let version = 0
   const absolute = path => path.startsWith(root) ? path : join(root, path)
@@ -78,7 +78,7 @@ function createHarness(root, { beforeWrite } = {}) {
   }
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
   const sourceAgent = {}
-  const tool = createWikiArtifactTool(ctx, contract, sourceAgent)
+  const tool = createWikiArtifactTool(ctx, contract, sourceAgent, route)
   const exec = { agent: { session: { header: { cwd: root } } }, signal: new AbortController().signal }
   return { tool, exec, files, sourceAgent }
 }
@@ -184,7 +184,7 @@ test('index links carry concise summaries and refresh them when a page is update
 test('novel chapter is saved as a draft first and only appends after an exact confirmed match', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-wiki-novel-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
-  const { tool, exec, files } = createHarness(root)
+  const { tool, exec, files } = createHarness(root, { route: 'novel' })
   const base = { work_name: '星海', chapter_number: 1, chapter_title: '归来' }
   const body = '凌晨三点，林舟推开了旧站台的门。'
   const draft = await tool.execute({ ...base, artifact_kind: 'novel_chapter_draft', content: body }, exec)
@@ -303,4 +303,46 @@ test('long pasted source is sliced verbatim from the current turn, never from mo
   await assert.rejects(tool.execute({ ...args, work_name: '第二本' }, exec), /来源首尾/)
   setWikiSourceContent(sourceAgent, [{ type: 'text', text: original + beginning }])
   await assert.rejects(tool.execute({ ...args, work_name: '歧义来源' }, exec), /不唯一/)
+})
+
+
+test('all 36 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-route-artifacts-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
+  assert.equal(Object.keys(contract.types).length, 36)
+  const counts = { manju: 0, 'short-drama': 0, novel: 0 }
+  for (const [kind, template] of Object.entries(contract.types)) {
+    assert.ok(Array.isArray(template.production_routes) && template.production_routes.length)
+    for (const route of Object.keys(counts)) {
+      const { tool, exec, files, sourceAgent } = createHarness(join(root, route, kind), { route })
+      if (!template.production_routes.includes(route)) {
+        await assert.rejects(tool.execute({ artifact_kind: kind, content: 'forbidden' }, exec), /不属于当前创作路线|artifact_kind.*must be one of/)
+        assert.equal(files.size, 0)
+        continue
+      }
+      counts[route]++
+      const args = { artifact_kind: kind, content: '# 正式产物\n\n回读验证正文。' }
+      if (template.entity) args.entity_name = '角色甲'
+      if (template.episode) args.episode_number = 1
+      if (template.model) args.video_model = template.model[0]
+      if (template.path.includes('{segment}')) args.segment = '片段001'
+      if (template.mode === 'source_selection') {
+        const text = '这是当前用户明确交付的完整原文材料，用于归档回读和索引验证。'
+        setWikiSourceContent(sourceAgent, [{ type: 'text', text }])
+        Object.assign(args, { work_name: '测试作品', source_block: 0, source_start: text.slice(0, 12), source_end: text.slice(-12) })
+      }
+      if (template.mode === 'chapter_source' || template.mode === 'chapter_draft') {
+        Object.assign(args, { work_name: '测试作品', chapter_number: 1, chapter_title: '开篇' })
+        if (template.mode === 'chapter_source') {
+          await tool.execute({ ...args, artifact_kind: 'novel_chapter_draft' }, exec)
+          args.user_confirmed = true
+        }
+      }
+      const result = await tool.execute(args, exec)
+      assert.equal(result.status, 'saved', `${route}/${kind}`)
+      assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
+    }
+  }
+  assert.deepEqual(counts, { manju: 20, 'short-drama': 14, novel: 16 })
 })

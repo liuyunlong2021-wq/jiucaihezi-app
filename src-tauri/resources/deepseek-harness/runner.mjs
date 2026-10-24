@@ -89,10 +89,10 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (command.type === 'queue' || command.type === 'update-queue') {
     const method = command.type === 'queue' ? 'session/prompt' : 'session/update-queue'
     const params = command.type === 'queue'
-      ? { sessionId: command.sessionId, contentBlocks: command.contentBlocks, productionMode: command.productionMode }
+      ? { sessionId: command.sessionId, contentBlocks: command.contentBlocks, productionMode: command.productionMode, productionRoute: command.productionRoute }
       : { sessionId: command.sessionId, itemId: command.itemId, action: command.action }
     void harness.start().then(async () => {
-      if (command.type === 'queue' && command.productionMode !== undefined && (await harness.client.request('session/production-scope', {})).version !== 1) throw new Error('当前运行时不支持创作 Skill 白名单，请重启应用。')
+      if (command.type === 'queue' && (command.productionMode !== undefined || command.productionRoute !== undefined) && (await harness.client.request('session/production-scope', {})).version !== 2) throw new Error('当前运行时不支持创作能力隔离，请重启应用。')
       return harness.client.request(method, params)
     }).then(
       data => send({ type: 'query-result', requestId: command.requestId, data }),
@@ -123,10 +123,12 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (command.type !== 'run') return
   let turnError = ''
   let turnTruncated = false
+  const productionRoute = command.productionRoute ?? (command.productionMode?.startsWith('skills:') ? 'none' : command.productionMode) ?? 'none'
   void runHarnessTask(harness, command.contentBlocks, {
     sessionId: command.sessionId,
     productionMode: command.productionMode,
-    requiredTools: config.requiredTools || [],
+    productionRoute: command.productionRoute,
+    requiredTools: productionRoute === 'none' ? config.requiredTools || [] : [],
     onNotification(notification) {
       // 子代理（subagent）的事件也走这条通知流，而子会话是独立 turn：
       // 只认本会话的 turn/end，否则子会话的失败会顶替本轮的结论——实测一轮 34 分钟正常

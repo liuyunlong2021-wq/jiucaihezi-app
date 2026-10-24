@@ -1,18 +1,18 @@
 import { SdkProtocolError, validatedSessionEvent } from '@deepseek-ai/dsh-sdk-client'
 
 // 官方 run() 在首次 idle 返回；工作台任务要等受管理子任务及根会话汇总结束。
-export async function runHarnessTask(harness, contentBlocks, { sessionId, onNotification, requiredTools = [], productionMode }) {
+export async function runHarnessTask(harness, contentBlocks, { sessionId, onNotification, requiredTools = [], productionMode, productionRoute }) {
   await harness.start()
   const client = harness.client
-  if (productionMode !== undefined && (await client.request('session/production-scope', {})).version !== 1) throw new Error('当前运行时不支持创作 Skill 白名单，请重启应用。')
+  if ((productionMode !== undefined || productionRoute !== undefined) && (await client.request('session/production-scope', {})).version !== 2) throw new Error('当前运行时不支持创作能力隔离，请重启应用。')
   if (requiredTools.length) await client.request('session/check-tools', { names: requiredTools })
   const subscription = client.subscribeSessionTree(sessionId)
   let received = false
   let finalResponse = ''
   try {
-    const messageId = productionMode === undefined
+    const messageId = productionMode === undefined && productionRoute === undefined
       ? await client.prompt(sessionId, contentBlocks)
-      : (await client.request('session/prompt', { sessionId, contentBlocks, productionMode })).messageId
+      : (await client.request('session/prompt', { sessionId, contentBlocks, productionMode, productionRoute })).messageId
     const finished = client.request('session/wait', { sessionId }).then(() => null)
     const collect = notification => {
       const own = notification.params?.sessionId === sessionId

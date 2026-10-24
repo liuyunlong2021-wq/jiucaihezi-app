@@ -1,4 +1,4 @@
-import type { ProductionMode } from '@/runtime/memory/productionSkills'
+import type { ProductionMode, ProductionRoute } from '@/runtime/memory/productionSkills'
 import { discoverCustomProviderModels } from '@/utils/customProviderModels'
 import { findCustomProvider, getCustomProviders, saveCustomProviders } from '@/utils/providerConfig'
 import { deriveTurnTokenUsage } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-token-meter/lib/types/client.js'
@@ -32,7 +32,7 @@ type Runtime = {
   }>
   /** 宿主确认的会话预设，只在 runtime 存活期内保留。 */
   taskSessions: Set<string>
-  productionScopeVersion?: 1
+  productionScopeVersion?: 2
   permissions: Map<string, string>
   permissionListeners: Map<string, (tier: DeepSeekPermissionTier) => void>
   closed: Promise<void>
@@ -61,6 +61,7 @@ export interface DeepSeekHarnessInput {
   avSelected?: boolean
   scene3dSelected?: boolean
   productionMode?: ProductionMode
+  productionRoute?: ProductionRoute
   mcpServerIds?: string[]
   files?: DirectMessageFile[]
   attachments?: ResolvedDirectAttachment[]
@@ -348,9 +349,16 @@ export function deepSeekModelLimits(
   }
 }
 
+function isProduction(input: DeepSeekHarnessInput): boolean {
+  return (input.productionRoute ?? (input.productionMode?.startsWith('skills:') ? 'none' : input.productionMode) ?? 'none') !== 'none'
+}
+function productionInput(input: DeepSeekHarnessInput): DeepSeekHarnessInput {
+  return isProduction(input) ? { ...input, mediaSelected: false, avSelected: false, scene3dSelected: false, mcpServerIds: [] } : input
+}
+
 function runtimeKey(input: DeepSeekHarnessInput): string {
   return [
-    'production-skill-v2',
+    'production-capabilities-v3',
     input.cwd,
     input.apiBase,
     input.apiKey ? 'authenticated' : 'history-only',
@@ -363,7 +371,7 @@ function runtimeKey(input: DeepSeekHarnessInput): string {
     input.scene3dSelected ? '3d' : '',
     // Computer Use 只改路由组合，不改会话；放进键里是为了「切开关 = 换 runtime」——
     // 不然关掉开关后旧 runtime 仍在跑，模型手里还攥着桌面工具。
-    computerUseEnabledNow() ? 'cua' : '',
+    !isProduction(input) && computerUseEnabledNow() ? 'cua' : '',
     [...new Set(input.mcpServerIds || [])].sort().join(','),
   ].join('\0')
 }
@@ -1354,6 +1362,7 @@ async function bundledSkillsDirectory(): Promise<string | undefined> {
 }
 
 async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
+  input = productionInput(input)
   const limits = deepSeekModelLimits(input)
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input.cwd))
   const workspaceKey = [...new Uint8Array(digest)].slice(0, 12).map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -1430,7 +1439,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   // 上游 Cua Driver 的 npm 原生运行时跑在 harness 进程内，用户机器不用另装 CLI。
   // 代价两处，都是官方的已知限制：原生崩溃会带走 harness 进程（要独立进程就用 MCP 那个
   // 提供方），截图走持久化附件、只有声明图片输入的模型路由收得到（见上面的 modelInputLines）。
-  const computerUsePatch = computerUseEnabledNow()
+  const computerUsePatch = !isProduction(input) && computerUseEnabledNow()
     ? insertPatch([
       '- id: computer-use',
       "  name: '@deepseek-ai/dsh-computer-use'",
@@ -1481,7 +1490,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
       dshHome: routeDir,
       // Computer Use 的插件包不在官方 bundle 依赖图里，profile 目录解析不到就只会静默
       // `failed to import`；runner 按这个开关决定要不要把它们挂进 profile（见 runner.mjs）。
-      computerUse: computerUseEnabledNow(),
+      computerUse: !isProduction(input) && computerUseEnabledNow(),
       nativeTools: nativeToolsEnabled,
       requiredTools: [
         ...(needsCreation ? ['get_creation_context'] : []),
@@ -1510,7 +1519,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     transport,
     runs: new Map(),
     taskSessions: new Set(),
-    productionScopeVersion: 1,
+    productionScopeVersion: 2,
     permissions: new Map(),
     permissionListeners: new Map(),
     closed,
@@ -1619,9 +1628,9 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
   const modalities = findCustomProvider(input.modelProviderId)?.modelCapabilities?.[input.model]?.inputModalities
   if (modalities) input.imageInput = modalities.includes('image')
   const workspaceKey = workspaceRuntimeKey(input)
-  const key = runtimeKey(input)
+  const key = runtimeKey(productionInput(input))
   const current = runtimes.get(workspaceKey)
-  if (current && (reuseWorkspace || current.key === key)) {
+  if (current && (reuseWorkspace || current.key === key || isProduction(input) && current.key.split('\0').slice(0, 8).join('\0') === key.split('\0').slice(0, 8).join('\0'))) {
     const active = await current.ready
     if (!active.closing && !active.ended) return active
     await stopRuntime(active)
@@ -1635,7 +1644,7 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
     ready: (async () => {
       if (current) {
         predecessor = await current.ready
-        const sdkBusy = predecessor.productionScopeVersion === 1 && !predecessor.ended && !predecessor.closing
+        const sdkBusy = predecessor.productionScopeVersion === 2 && !predecessor.ended && !predecessor.closing
           ? (await harnessControl(predecessor, { type: 'runtime-busy' }, input.signal)).busy : false
         if (predecessor.taskSessions?.size || sdkBusy) throw new Error('有任务正在使用原设置，请等任务完成后再使用新设置。')
         await stopRuntime(predecessor)
@@ -1733,10 +1742,12 @@ async function alignSessionPermission(active: Runtime, sessionId: string, preset
 }
 
 export async function queueDeepSeekHarnessMessage(input: DeepSeekHarnessInput): Promise<{ messageId: string }> {
+  input = productionInput(input)
   const active = await ensureRuntime(input, true)
   return await harnessControl(active, {
     type: 'queue',
     productionMode: input.productionMode ?? 'none',
+    productionRoute: input.productionRoute,
     sessionId: deepSeekSessionId(input.sessionId, input.cwd),
     contentBlocks: deepSeekContentBlocks(deepSeekMcpPrompt(input.message, input.mcpServerIds), input.attachments, input.files, input.imageInput),
   }, input.signal) as { messageId: string }
@@ -1770,6 +1781,7 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
 }
 
 async function runDeepSeekHarnessTask(input: DeepSeekHarnessInput): Promise<string> {
+  input = productionInput(input)
   if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const wireSessionId = deepSeekSessionId(input.sessionId, input.cwd)
   // 官方把「同一会话的并发 resume」划给调用方排除：resume 要先把会话的写所有权拿到手，
@@ -1916,6 +1928,7 @@ async function runDeepSeekHarnessTurn(
     await active.transport.send({
       type: 'run',
       productionMode: input.productionMode ?? 'none',
+      productionRoute: input.productionRoute,
       requestId,
       sessionId: wireSessionId,
     contentBlocks: deepSeekContentBlocks(deepSeekMcpPrompt(input.message, input.mcpServerIds), input.attachments, input.files, input.imageInput),
