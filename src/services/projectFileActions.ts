@@ -16,7 +16,7 @@ import wikiContract from '../../public/skills/wiki-artifacts.json'
 export const WIKI_TYPES = [
   { id: 'generic', label: '通用 Wiki' },
   { id: 'manju', label: '漫剧制作 Wiki' },
-  { id: 'short-drama', label: '短剧写作 Wiki' },
+  { id: 'short-drama', label: '短剧改编 Wiki' },
   { id: 'novel', label: '小说创作 Wiki' },
 ] as const
 export type WikiType = typeof WIKI_TYPES[number]['id']
@@ -145,6 +145,7 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
           const spec: { path: string; production_routes: readonly string[] } = input.kind === 'manju'
             ? { ...template, ...(wikiContract.manju_layout.types as Record<string, { path: string }>)[kind] } : template
           if (!(spec.production_routes as readonly string[]).includes(input.kind)) continue
+          if (input.kind === 'short-drama' && 'research' in template && template.research) continue
           let directory = ''
           for (const part of spec.path.split('/').slice(0, -1)) {
             if (part.includes('{')) break
@@ -153,6 +154,7 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
           }
         }
         if (input.kind === 'manju') for (const directory of wikiContract.manju_layout.directories) directories.add(directory.path)
+        if (input.kind === 'short-drama') for (const directory of wikiContract.short_drama_layout.directories) directories.add(directory.path)
       }
       const paths = [...directories].sort((a, b) => a.split('/').length - b.split('/').length)
         .map(directory => directory ? `${root}/${directory}` : root)

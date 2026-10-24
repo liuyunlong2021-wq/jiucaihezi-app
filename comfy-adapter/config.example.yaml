@@ -57,6 +57,9 @@ edit:
   max_image_bytes: 20971520
   upload_subfolder: adapter/uploads
   fetch_url_timeout: 30
+  # 拉取 R2/对象存储参考图用的代理。本机直连 Cloudflare R2 不通时填本机代理，
+  # 例如 http://127.0.0.1:7897；留空则沿用 HTTPS_PROXY / HTTP_PROXY 环境变量。
+  fetch_proxy: ""
   default_to_reference_size: true
 
 models:

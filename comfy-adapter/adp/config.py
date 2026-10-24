@@ -87,6 +87,9 @@ class EditCfg:
     upload_subfolder: str = "adapter/uploads"
     #: 拉取远程 http(s) 参考图的超时
     fetch_url_timeout: float = 30.0
+    #: 拉取远程参考图用的代理（如 http://127.0.0.1:7897）。
+    #: 留空时沿用 httpx 默认：读 HTTPS_PROXY/HTTP_PROXY 环境变量；直连不通时优先配这里。
+    fetch_proxy: str = ""
     #: 不指定 size 时，是否沿用第一张参考图的宽高
     default_to_reference_size: bool = True
 

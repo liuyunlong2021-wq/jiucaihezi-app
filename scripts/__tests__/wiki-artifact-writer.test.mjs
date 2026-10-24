@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
+import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
 function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const files = new Map()
@@ -400,11 +400,11 @@ test('long pasted source is sliced verbatim from the current turn, never from mo
 })
 
 
-test('all 40 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
+test('all 42 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-route-artifacts-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
-  assert.equal(Object.keys(contract.types).length, 40)
+  assert.equal(Object.keys(contract.types).length, 42)
   const counts = { manju: 0, 'short-drama': 0, novel: 0 }
   for (const [kind, template] of Object.entries(contract.types)) {
     assert.ok(Array.isArray(template.production_routes) && template.production_routes.length)
@@ -425,6 +425,17 @@ test('all 40 artifact contracts have explicit routes and every allowed kind save
         files.set(join(root, route, kind, '剧本.md'), { content: '# 来源', version: 1 })
         args.content = JSON.stringify({ stage: 'plan', source_path: '剧本.md', outputs: [] })
       }
+      if (['adaptation_cut', 'adaptation_pipeline'].includes(template.mode)) {
+        const cwd = exec.agent.session.header.cwd, path = join(cwd, '原文.md')
+        const body = '这是当前章完整的原文内容，包含人物衣服五官与实际行动，不允许跨入下一章。'
+        files.set(path, { content: `第一章 原文\n${body}`, version: 1 })
+        sourceAgent.session = exec.agent.session
+        resetWikiReads(sourceAgent)
+        recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
+        args.content = JSON.stringify(template.mode === 'adaptation_cut'
+          ? { source_path: '原文.md', chapter_heading: '第一章 原文', cut_start: body.slice(0, 12), cut_end: body.slice(-12) }
+          : { stage: 'source', source_paths: ['原文.md'], outputs: [] })
+      }
       if (template.mode === 'source_selection') {
         const text = '这是当前用户明确交付的完整原文材料，用于归档回读和索引验证。'
         setWikiSourceContent(sourceAgent, [{ type: 'text', text }])
@@ -442,7 +453,7 @@ test('all 40 artifact contracts have explicit routes and every allowed kind save
       assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
     }
   }
-  assert.deepEqual(counts, { manju: 24, 'short-drama': 14, novel: 16 })
+  assert.deepEqual(counts, { manju: 24, 'short-drama': 16, novel: 16 })
 })
 
 test('source links use document-relative targets and summaries contain only readable labels', async t => {
@@ -473,4 +484,48 @@ test('Seedance submits standalone five-module prompts with @ image lines and voi
   assert.throws(() => validateSeedanceReferences(valid.replace('气息稳定；', '')), /九维信息不完整/)
   assert.throws(() => validateSeedanceReferences(valid.replace('@图2：石道，右侧石壁。', '@图2：')), /资产名称与特征/)
   assert.throws(() => validateSeedanceReferences(valid.replace('@图1：莫甘娜', '@图1：莫甘娜 @图3：兔子')), /单独一行/)
+})
+
+
+test('short-drama cuts copy only the chosen real chapter range and reject cross-chapter selection', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-adaptation-cut-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'short-drama' })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  const path = join(root, '小说.md')
+  const first = '顾云舟穿着青色旧袍站在门前，握紧旧剑，听见门外的呼喊。'
+  const second = '莫甘娜穿着暗红长裙站在石阶，金色眼睛直视山门，呼吸平稳。'
+  files.set(path, { content: `\uFEFF第一章 山门\r\n${first}\r\n第二章 石阶\r\n${second}\r\n`, version: 1 })
+  recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
+  const imported = await tool.execute({ artifact_kind: 'source_material', work_name: '原作', content: JSON.stringify({ source_path: '小说.md' }) }, exec)
+  assert.equal(files.get(join(root, imported.path)).content, files.get(path).content)
+  const args = { artifact_kind: 'adaptation_cut', episode_number: 1, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 山门', cut_start: first.slice(0, 12), cut_end: first.slice(-12) }) }
+  const result = await tool.execute(args, exec)
+  const text = files.get(join(root, result.path)).content
+  assert.equal(result.path, 'wiki/改编方案/分集切分/第001集原文.md')
+  assert.ok(text.endsWith(first))
+  assert.ok(!text.includes(second))
+  await assert.rejects(tool.execute({ ...args, episode_number: 2, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 山门', cut_start: first.slice(0, 12), cut_end: second.slice(-12) }) }, exec), /当前章|跨章/)
+  files.set(path, { ...files.get(path), version: 2 })
+  await assert.rejects(tool.execute(args, exec), /修改后重读/)
+  recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 2 }, { ...exec, agent: sourceAgent, name: 'read' })
+  assert.equal((await tool.execute(args, exec)).operation, 'unchanged')
+  const huge = '独特开头用于大章切分测试' + '字'.repeat(340000) + '独特结尾用于大章切分测试'
+  files.set(path, { content: `第一章 大章\n${huge}`, version: 3 })
+  recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 3 }, { ...exec, agent: sourceAgent, name: 'read' })
+  await assert.rejects(tool.execute({ ...args, episode_number: 3, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 大章', cut_start: huge.slice(0, 12), cut_end: huge.slice(-12) }) }, exec), /超过1MB/)
+})
+
+test('short-drama uses chapter planning but preserves an existing legacy episode plan', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-chapter-plan-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const first = createHarness(join(root, 'new'), { route: 'short-drama' })
+  const result = await first.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 逐章规划' }, first.exec)
+  assert.equal(result.path, 'wiki/改编方案/逐章规划.md')
+  const old = createHarness(join(root, 'old'), { route: 'short-drama' })
+  old.files.set(join(root, 'old/wiki/index.md'), { content: '# Wiki', version: 1 })
+  old.files.set(join(root, 'old/wiki/改编方案/分集规划.md'), { content: '# 旧规划', version: 2 })
+  const kept = await old.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 逐章修订' }, old.exec)
+  assert.equal(kept.path, 'wiki/改编方案/分集规划.md')
 })

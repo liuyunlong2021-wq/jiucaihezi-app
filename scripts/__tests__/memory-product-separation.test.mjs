@@ -152,6 +152,7 @@ test('App bundles only the remaining product Skills', () => {
     'h3-prompt-writing',
     'jc-duanju-cehua',
     'jc-duanju-fenji',
+    'jc-duanju-pipeline',
     'jc-duanju-xiezuo',
     'jc-film-style',
     'jc-gongchengjuben',

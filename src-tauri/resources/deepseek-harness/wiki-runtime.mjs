@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import * as present from '@deepseek-ai/dsh-tool-present'
-import { createWikiArtifactTool, pipelineStateFor, resetWikiReads, recordWikiRead } from './manju-wiki.mjs'
+import { createWikiArtifactTool, pipelineStateFor, resetWikiReads, recordWikiRead, adaptationStateFor } from './manju-wiki.mjs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 // 原生能力跟随 Agent；创作 Skill 的选择和释放不再决定 Wiki 工具是否存在。
@@ -47,21 +47,24 @@ export async function attachWikiRuntime(rec, directory = process.env.DSH_BUNDLED
         if (event.type === 'tool/call') {
           let args
           try { args = JSON.parse(event.data.arguments) } catch { return }
-          if (event.data.name === 'wiki_save_artifact' && args.artifact_kind === 'pipeline_checkpoint') checkpointSeen = true
-          if (event.data.name === 'skill' && args.name === 'jc-manju-pipeline'
-            || event.data.name === 'wiki_save_artifact' && args.artifact_kind === 'pipeline_checkpoint') pipelineRequested = true
+          if (event.data.name === 'wiki_save_artifact' && ['pipeline_checkpoint', 'adaptation_checkpoint'].includes(args.artifact_kind)) checkpointSeen = true
+          if (event.data.name === 'skill' && ['jc-manju-pipeline', 'jc-duanju-pipeline'].includes(args.name)
+            || event.data.name === 'wiki_save_artifact' && ['pipeline_checkpoint', 'adaptation_checkpoint'].includes(args.artifact_kind)) pipelineRequested = true
         }
         if (event.type === 'tool/result') failed = event.data.message.isError === true
       })
       ctx.on?.('agent/turn-stopping', ({ signal }) => {
-        if (signal.aborted || !pipelineRequested || failed || scopes.get(agent)?.route !== 'manju') return
-        const state = checkpointSeen ? pipelineStateFor(agent) : undefined
+        const route = scopes.get(agent)?.route
+        if (signal.aborted || !pipelineRequested || failed || !['manju', 'short-drama'].includes(route)) return
+        const shortDrama = route === 'short-drama'
+        const state = checkpointSeen ? (shortDrama ? adaptationStateFor(agent) : pipelineStateFor(agent)) : undefined
+        const skill = shortDrama ? 'jc-duanju-pipeline' : 'jc-manju-pipeline'
         if (state?.stage === 'complete' || state?.status === 'blocked') return
         const revision = JSON.stringify(state)
         if (revision !== progress) { progress = revision; nudges = 0 }
         if (++nudges > 3) throw new Error('流水线连续停止但没有可验证进度，请检查缺失资料或模型执行能力后继续')
-        agent.steer(createUserMessage({ source: { kind: 'jiucaihezi-pipeline', form: 'notice', summary: '继续尚未完成的漫剧提示词流水线' },
-          content: [{ type: 'text', text: `流水线尚未完成。${state ? `当前进度见 @${state.path}，已完成 ${state.stage}。` : '请先保存pipeline_checkpoint的plan阶段。'}按jc-manju-pipeline继续下一阶段并真实保存产物；若缺关键资料，以当前有效阶段保存status=blocked及原因后如实说明。不要用完成宣言代替执行。` }] }))
+        agent.steer(createUserMessage({ source: { kind: 'jiucaihezi-pipeline', form: 'notice', summary: shortDrama ? '继续尚未完成的短剧改编流水线' : '继续尚未完成的漫剧提示词流水线' },
+          content: [{ type: 'text', text: `流水线尚未完成。${state ? `当前进度见 @${state.path}，已完成 ${state.stage}。` : `请先按${skill}保存初始阶段。`}按${skill}继续下一阶段并真实保存产物；若缺关键资料，以当前有效阶段保存status=blocked及原因后如实说明。不要用完成宣言代替执行。` }] }))
       })
       ctx.effect(() => ctx.systemPrompt.section({
         name: 'jiucaihezi:project-wiki', order: 850, interpolate: false,

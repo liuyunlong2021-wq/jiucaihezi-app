@@ -113,14 +113,30 @@ def image_size(data: bytes) -> tuple[int, int] | None:
 # ------------------------------------------------------------------ 归一化
 
 
+#: 参考图下载代理；None 表示沿用 httpx 的环境变量（HTTPS_PROXY / HTTP_PROXY）。
+_fetch_proxy: str | None = None
+
+
+def set_fetch_proxy(value: str | None) -> None:
+    """配置参考图下载代理（config.yaml 的 edit.fetch_proxy，空值走环境变量）。"""
+    global _fetch_proxy
+    _fetch_proxy = (value or "").strip() or None
+
+
 async def _fetch_remote(url: str, timeout: float, max_bytes: int) -> bytes:
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=True, proxy=_fetch_proxy
+        ) as c:
             r = await c.get(url)
             r.raise_for_status()
             data = r.content
     except httpx.HTTPError as e:
-        raise ImageInputError(f"下载参考图失败 {url}: {e}") from e
+        raise ImageInputError(
+            f"下载参考图失败 {url}: {e}"
+            "（本机可能无法直连该域名：请在 config.yaml 的 edit.fetch_proxy 配置本机代理，"
+            "或启动前设置 HTTPS_PROXY 环境变量后重启适配器）"
+        ) from e
     if len(data) > max_bytes:
         raise ImageInputError(f"参考图超过上限 {max_bytes} 字节: {url}")
     return data

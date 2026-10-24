@@ -7,7 +7,7 @@ const groups = JSON.parse(readFileSync('public/skills/production-skills.json', '
 test('production scopes are plain business allowlists with no executable router', () => {
   assert.deepEqual(Object.keys(groups), ['manju', 'short-drama', 'novel'])
   assert.equal(groups.manju.length, 14)
-  assert.equal(groups['short-drama'].length, 4)
+  assert.equal(groups['short-drama'].length, 5)
   assert.deepEqual(groups.novel, ['jc-novel'])
   for (const list of Object.values(groups)) {
     assert.equal(list.length, new Set(list).size)

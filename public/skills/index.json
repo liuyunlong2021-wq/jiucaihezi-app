@@ -65,11 +65,12 @@
     "id": "jc-duanju-cehua",
     "name": "jc-duanju-cehua",
     "displayName": "jc-duanju-cehua",
-    "description": "确定六类可组合换皮方向、核心梗及人物关系背景规则的必要替换资料，默认完整继承原文，不重编平行故事；也承接原创多集的核心设定与整体方案，不写逐集剧本。",
+    "description": "根据原作真实资料与用户改编思路，完善短剧改编方案、人物关系及设定对应，明确允许改变的边界，不写逐章切分或正文。",
     "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md"
+      "SKILL.md",
+      "references/独立写作旧规则.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -78,6 +79,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/独立写作旧规则.md",
+          "kind": "reference"
         }
       ]
     }
@@ -86,7 +91,33 @@
     "id": "jc-duanju-fenji",
     "name": "jc-duanju-fenji",
     "displayName": "jc-duanju-fenji",
-    "description": "根据原文与新皮资料，组合情绪关联、选择强开头和集尾钩子并按体量分集，保留原文全部内容；也承接原创多集规划与已有分集重排，不写正文。",
+    "description": "对照原作每一章真实信息及改编方案，章内确定每集开头结尾并保存真实原文切分；不跨章拼集，不生成改编正文。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/独立写作旧规则.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "references/独立写作旧规则.md",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-duanju-pipeline",
+    "name": "jc-duanju-pipeline",
+    "displayName": "jc-duanju-pipeline",
+    "description": "按用户原文附件或路径及基本改编思路，连续执行原作读取、共用项目资料、改编方案、逐章切分与逐集改编，自检后保存并支持续做；不跨章拼集或挪用邻集内容。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -107,11 +138,12 @@
     "id": "jc-duanju-xiezuo",
     "name": "jc-duanju-xiezuo",
     "displayName": "jc-duanju-xiezuo",
-    "description": "按分集规划直接读取原文、排列组合并用新项目资料换皮，保留全部内容，自检后归档；也承接原创、扩写、续写与润色。不生成工程台本。",
+    "description": "对照每集真实原文切分和改编方案，在切分边界内按动作、对话、OS优先级完成短剧改编，落实关系动机、因果表演与首次登场，自检后逐集保存。",
     "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md"
+      "SKILL.md",
+      "references/独立写作旧规则.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -120,6 +152,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/独立写作旧规则.md",
+          "kind": "reference"
         }
       ]
     }

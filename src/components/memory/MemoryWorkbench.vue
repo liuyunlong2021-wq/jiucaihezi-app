@@ -379,7 +379,7 @@ function toggleShortDramaProduction() {
 
   const wikiMemoryWasSelected = currentWikiMemoryPreference()
   if (selectedSkillNames.value.some(name => !SHORT_DRAMA_SKILLS.includes(name)))
-    contextNotice.value = '已切换到短剧写作路线；本对话使用内置短剧 Skill。'
+    contextNotice.value = '已切换到短剧改编路线；本对话使用内置短剧 Skill。'
   selectedSkillNames.value = [SHORT_DRAMA_MODE, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
   saveProductionPreferences({
     manju: { enabled: false, wikiMemoryWasSelected },
@@ -3624,7 +3624,7 @@ async function selectMention(option: MemoryMentionOption) {
       if (novelSelected.value && !NOVEL_SKILLS.includes(option.name) && option.name !== MANJU_MODE)
         throw new Error('请先退出小说创作，再选择其他路线的 Skill。')
       if (shortDramaSelected.value && !SHORT_DRAMA_SKILLS.includes(option.name))
-        throw new Error('请先退出短剧写作，再选择其他路线的 Skill。')
+        throw new Error('请先退出短剧改编，再选择其他路线的 Skill。')
       if (option.name === MANJU_MODE) {
         const wikiMemoryWasSelected = currentWikiMemoryPreference()
         selectedSkillNames.value = [MANJU_MODE, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
@@ -5184,7 +5184,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 </button>
               </div>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected }" :aria-pressed="manjuSelected" @click="toggleManjuProduction()"><JcIcon name="movie" /><span>漫剧制作</span></button>
-              <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" :aria-pressed="shortDramaSelected" @click="toggleShortDramaProduction()"><JcIcon name="edit-note" /><span>短剧写作</span></button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" :aria-pressed="shortDramaSelected" @click="toggleShortDramaProduction()"><JcIcon name="edit-note" /><span>短剧改编</span></button>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="auto_stories" /><span>小说创作</span></button>
               <button type="button" data-command-id="skill" :title="skillCommand.description" @click="insertCommand(skillCommand)"><JcIcon name="psychology" /><span>@Skill</span></button>
             </div>

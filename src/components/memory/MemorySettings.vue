@@ -390,7 +390,7 @@ async function saveKey() {
             <strong>桌面操作</strong>
             <span>{{ agentStore.computerUseEnabled ? '已开启' : '已关闭' }}</span>
           </div>
-          <p>让模型在本机桌面上截图、点击、输入（官方 Cua Driver，实验性）。关掉后模型的工具表里不会出现这些工具，下一轮对话生效。漫剧制作、短剧写作和小说创作模式内始终停用桌面操作，不改变此设置。</p>
+          <p>让模型在本机桌面上截图、点击、输入（官方 Cua Driver，实验性）。关掉后模型的工具表里不会出现这些工具，下一轮对话生效。漫剧制作、短剧改编和小说创作模式内始终停用桌面操作，不改变此设置。</p>
           <label class="memory-service-switch">
             <span>允许操作本机桌面</span>
             <input

@@ -147,7 +147,7 @@ test('actual SDK saves and replaces creative artifacts, restores autosave scope,
   const f = await fixture(t)
   const cases = [
     ['manju', { artifact_kind: 'engineering_script', episode_number: 1 }, 'wiki/剧本/工程剧本/第1集工程剧本.md'],
-    ['short-drama', { artifact_kind: 'screenplay', episode_number: 1 }, 'wiki/剧本/第001集/分集剧本.md'],
+    ['short-drama', { artifact_kind: 'story_summary', research_version: 'original' }, 'wiki/项目资料/原作/故事梗概.md'],
     ['novel', { artifact_kind: 'novel_outline' }, 'wiki/创作/大纲.md'],
   ]
   for (const [route, artifact, path] of cases) {
@@ -157,7 +157,7 @@ test('actual SDK saves and replaces creative artifacts, restores autosave scope,
     assert.equal(readFileSync(join(f.root, path), 'utf8').trim(), '# 初稿')
     const system = f.requests.at(-1).messages.filter(message => message.role === 'system').map(message => message.content).join('\n')
     assert.match(system, /完整创作产物必须调用 wiki_save_artifact 自动保存/)
-    f.plan([{ name: 'wiki_save_artifact', args: { ...artifact, content: '# 修改稿' } }])
+    f.plan([...(route === 'short-drama' ? [{ name: 'read', args: { file_path: join(f.root, path) } }] : []), { name: 'wiki_save_artifact', args: { ...artifact, content: '# 修改稿' } }])
     await f.run(route, { sessionId: route })
     assert.equal(readFileSync(join(f.root, path), 'utf8').trim(), '# 修改稿')
     assert.match(f.results().at(-1), /"operation":"updated"/)
@@ -241,7 +241,7 @@ test('single-Skill production keeps its route and cold-resumes it without restri
   await f.run('short-drama', { mode: 'skills:jc-xiangmuziliao', harness: recovered })
   assert.deepEqual(f.tools(), core)
   const kinds = f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum
-  assert.equal(kinds.length, 14)
+  assert.equal(kinds.length, 16)
   assert.ok(kinds.includes('screenplay'))
   assert.ok(!kinds.includes('engineering_script'))
   await f.run('none', { harness: recovered })
@@ -308,7 +308,7 @@ test('ordinary single business Skill selection retains general capabilities and 
   assert.match(f.results()[0], /合法改编输入/)
   await f.run('none', { mode: 'skills:jc-novel', sessionId: 'personal-skill' })
   assert.ok(f.tools().includes('bash'))
-  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 40)
+  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 42)
 })
 
 test('old capability handshake fails before a prompt is sent', async () => {
@@ -511,4 +511,66 @@ test('pipeline rejects asset writes without actual Wiki reads and rejects reads 
   f.plan([read('wiki/项目风格/影片比例与风格.md'), read('wiki/项目资料/人物小传/甲.md'), actor])
   await f.run('manju', { sessionId: 'read-gate' })
   assert.match(f.results().at(-1), /"status":"saved"/)
+})
+
+test('short-drama pipeline uses real chapter cuts, enforces reads, continues and completes every target episode', { timeout: 45000 }, async t => {
+  const f = await fixture(t)
+  const a = '顾云舟穿着青色旧袍，手握旧剑站在门前，听见门外的呼喊。'
+  const b = '他看清来者的金色眼睛和暗红长裙，握剑的手慢慢放下，转身逃走。'
+  const outside = '第二章独有的远方援军抵达，此信息绝不进入第一章分集。'
+  writeFileSync(join(f.root, '原作.md'), `第一章 山门\r\n${a}\r\n${b}\r\n第二章 援军\r\n${outside}`)
+  const calls = []
+  const read = path => calls.push({ name: 'read', args: { file_path: join(f.root, path) } })
+  const save = (artifact_kind, content, extra = {}) => calls.push({ name: 'wiki_save_artifact', args: { artifact_kind, content, ...extra } })
+  const checkpoint = input => save('adaptation_checkpoint', JSON.stringify(input))
+  calls.push({ name: 'skill', args: { name: 'jc-duanju-pipeline' } })
+  read('原作.md')
+  save('source_material', JSON.stringify({ source_path: '原作.md' }), { work_name: '原作' })
+  const originalCopy = 'wiki/原始材料/原作/原文.md'
+  read(originalCopy)
+  checkpoint({ stage: 'source', source_paths: [originalCopy], chapters: [{ source_path: originalCopy, chapter_heading: '第一章 山门' }], outputs: [] })
+  save('story_summary', '# 原作梗概\n顾云舟在门前遇到来者后逃走。', { research_version: 'original' })
+  save('character_bio', '# 顾云舟\n青色旧袍，握剑后逃走；五官原文未交代。', { research_version: 'original', entity_name: '顾云舟' })
+  checkpoint({ stage: 'materials', outputs: ['wiki/项目资料/原作/故事梗概.md', 'wiki/项目资料/原作/人物小传/顾云舟.md'] })
+  calls.push(null)
+  read('wiki/项目资料/原作/故事梗概.md')
+  save('project_overview', '# 改编方案\n保持原作事件、服装和认知，以动作表现畏惧。')
+  checkpoint({ stage: 'scheme', outputs: ['wiki/改编方案/项目总纲.md'] })
+  read('wiki/改编方案/项目总纲.md')
+  save('adaptation_episode_plan', '# 逐章规划\n第一章山门：第1集门前呼喊；第2集看清来者后逃走，不取第二章。')
+  for (const [index, body] of [a, b].entries()) save('adaptation_cut', JSON.stringify({ source_path: originalCopy, chapter_heading: '第一章 山门', cut_start: body.slice(0, 12), cut_end: body.slice(-12) }), { episode_number: index + 1 })
+  const cuts = ['wiki/改编方案/分集切分/第001集原文.md', 'wiki/改编方案/分集切分/第002集原文.md']
+  checkpoint({ stage: 'cuts', episodes: [1], outputs: ['wiki/改编方案/逐章规划.md', cuts[0]] })
+  checkpoint({ stage: 'cuts', episodes: [1, 2], outputs: ['wiki/改编方案/逐章规划.md', ...cuts] })
+  save('screenplay', '# 未读切分的错误稿', { episode_number: 1 })
+  read('wiki/改编方案/逐章规划.md')
+  read('wiki/项目资料/原作/人物小传/顾云舟.md')
+  read(cuts[0])
+  save('screenplay', '# 第1集\n顾云舟站在门前，旧袍袖口随握剑的手收紧；呼喊从门外传来。', { episode_number: 1 })
+  read(cuts[1])
+  save('screenplay', '# 第2集\n顾云舟看清金瞳与暗红长裙，慢慢松开握剑的手，转身逃走。', { episode_number: 2 })
+  const scripts = ['wiki/剧本/第001集/分集剧本.md', 'wiki/剧本/第002集/分集剧本.md']
+  checkpoint({ stage: 'writing', outputs: scripts })
+  checkpoint({ stage: 'complete', outputs: [] })
+  f.plan(calls)
+  await f.run('short-drama', { sessionId: 'chapter-pipeline' })
+  const state = JSON.parse(readFileSync(join(f.root, 'wiki/改编方案/执行进度.json'), 'utf8'))
+  assert.equal(state.stage, 'complete')
+  assert.equal(state.status, 'completed')
+  assert.deepEqual(state.episodes, [1, 2])
+  for (const path of cuts) assert.doesNotMatch(readFileSync(join(f.root, path), 'utf8'), /远方援军抵达/)
+  assert.ok(f.results().some(result => /必须先实际read/.test(String(result))))
+  assert.ok(f.results().some(result => /尚有未切分原文/.test(String(result))))
+  assert.ok(f.requests.some(request => JSON.stringify(request.messages).includes('按jc-duanju-pipeline继续')))
+  assert.deepEqual(f.tools(), core)
+  await f.h.close()
+  const restored = f.create()
+  f.plan([{ name: 'read', args: { file_path: join(f.root, 'wiki/改编方案/执行进度.json') } },
+    { name: 'wiki_save_artifact', args: { artifact_kind: 'adaptation_checkpoint', content: JSON.stringify({ stage: 'complete', outputs: [] }) } }])
+  await f.run('short-drama', { sessionId: 'chapter-pipeline', harness: restored })
+  assert.match(f.results().at(-1), /"status":"saved"/)
+  writeFileSync(join(f.root, originalCopy), '第一章 山门\n用户修改后的原作，不再对应旧切分。')
+  f.plan([{ name: 'wiki_save_artifact', args: { artifact_kind: 'adaptation_checkpoint', content: JSON.stringify({ stage: 'complete', outputs: [] }) } }])
+  await f.run('short-drama', { sessionId: 'chapter-pipeline', harness: restored })
+  assert.match(f.results().at(-1), /原作已改变/)
 })

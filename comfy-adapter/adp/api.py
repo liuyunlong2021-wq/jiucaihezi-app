@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .comfy_client import ComfyClient, ComfyError, ComfyTimeout, ComfyUnavailable
 from .config import AppConfig, load_config
-from .images import ImageInputError, ReferenceImage, from_upload, resolve_many
+from .images import ImageInputError, ReferenceImage, from_upload, resolve_many, set_fetch_proxy
 from .service import Busy, GenerationService, GenResult, UnknownModel
 from .storage import ImageStore
 from .tasks import CANCELLED, FAILED, QUEUED, RUNNING, SUCCEEDED, Task, TaskStore
@@ -190,6 +190,7 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        set_fetch_proxy(cfg.edit.fetch_proxy)
         templates = load_templates(cfg.models)
         if not templates:
             log.warning("没有加载到任何模型，请检查 config.yaml 的 models 配置")

@@ -630,7 +630,7 @@ async function saveConfirmedChapter(ctx, args, exec, cwd, workspace, policy, wik
   return { path: sourcePath, operation, warnings }
 }
 
-async function saveArtifact(ctx, args, exec, contract, route) {
+async function saveArtifact(ctx, args, exec, contract, route, sourceAgent) {
   const cwd = exec.agent?.session?.header?.cwd
   if (typeof cwd !== 'string' || !cwd) throw new Error('Wiki 产物必须保存到当前项目，请先打开项目目录。')
   const workspace = await ctx.fs.resolve(cwd, { cwd, signal: exec.signal })
@@ -640,11 +640,12 @@ async function saveArtifact(ctx, args, exec, contract, route) {
   const policy = policyService?.resolve({ session: exec.agent.session })
   const wikiRoot = await chooseWikiRoot(ctx, cwd, exec, workspace, contract)
   let legacySpec
-  if (route === 'manju' && contract.manju_layout) {
+  const layout = route === 'manju' ? contract.manju_layout : route === 'short-drama' ? contract.short_drama_layout : undefined
+  if (layout) {
     try { legacySpec = artifactSpec(args, contract) } catch { /* new layout may not require a legacy segment */ }
     contract = { ...contract, types: Object.fromEntries(Object.entries(contract.types).map(([kind, spec]) =>
-      [kind, { ...spec, ...contract.manju_layout.types[kind] }])),
-      scaffold: { ...contract.scaffold, directories: contract.manju_layout.directories } }
+      [kind, { ...spec, ...layout.types[kind] }])),
+      scaffold: { ...contract.scaffold, directories: layout.directories } }
   }
   let spec
   try { spec = artifactSpec(args, contract) }
@@ -652,7 +653,7 @@ async function saveArtifact(ctx, args, exec, contract, route) {
     if (!legacySpec || !await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${legacySpec.path}`, exec.signal, workspace), exec.signal)) throw error
     spec = legacySpec
   }
-  spec.precise = route === 'manju' && contract.manju_layout !== undefined
+  spec.precise = Boolean(layout)
   if (legacySpec && legacySpec.path !== spec.path) {
     const oldFile = await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${legacySpec.path}`, exec.signal, workspace), exec.signal)
     if (oldFile) {
@@ -662,9 +663,11 @@ async function saveArtifact(ctx, args, exec, contract, route) {
     }
   }
   let content = spec.mode === 'source_selection' ? args.content : normalizedMarkdown(args.content)
-  if (route === 'manju' && !['source_selection', 'pipeline'].includes(spec.mode)) content = normalizeWikiLinks(content, wikiRoot, spec.path)
+  if (route !== 'none' && ['manju', 'short-drama'].includes(route) && !['source_selection', 'pipeline', 'adaptation_cut', 'adaptation_pipeline'].includes(spec.mode)) content = normalizeWikiLinks(content, wikiRoot, spec.path)
   if (spec.mode === 'pipeline') content = await pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spec, content)
-  spec.summary = indexSummary(args.summary, content, spec.label)
+  if (spec.mode === 'adaptation_cut') content = await adaptationCut(ctx, args, exec, sourceAgent, content)
+  if (spec.mode === 'adaptation_pipeline') content = await adaptationCheckpoint(ctx, args, exec, wikiRoot, content, sourceAgent)
+  spec.summary = indexSummary(args.summary || (spec.mode === 'adaptation_cut' ? '单章内真实原文切分，作为本集改编边界。' : undefined), content, spec.label)
 
   let saved
   if (spec.mode === 'chapter_source') {
@@ -877,6 +880,180 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
     files, duration_seconds: duration, segments }, null, 2) + '\n'
 }
 
+const adaptationStates = new WeakMap()
+export const adaptationStateFor = agent => adaptationStates.get(agent)
+const adaptationStages = ['source', 'materials', 'scheme', 'cuts', 'writing', 'complete']
+
+async function adaptationFile(ctx, exec, path, agent, mustRead = false) {
+  if (typeof path !== 'string' || !path) throw new Error('需要真实来源路径')
+  const cwd = exec.agent.session.header.cwd
+  const target = await ctx.fs.resolve(path, { cwd, signal: exec.signal })
+  const info = await ctx.fs.stat(target, exec.signal)
+  if (info?.type !== 'file') throw new Error(`文件不存在：${path}`)
+  const workspace = await ctx.fs.resolve(cwd, { cwd, signal: exec.signal })
+  if (mustRead || !ctx.fs.contains(workspace, target)) {
+    const prior = wikiReads.get(agent)?.get(target.targetKey ?? target)
+    if (!prior || prior.image || JSON.stringify(prior.version) !== JSON.stringify(info.version)) throw new Error(`必须先实际read且修改后重读：${path}`)
+  }
+  const text = await ctx.fs.readText(target, exec.signal)
+  if (JSON.stringify((await ctx.fs.stat(target, exec.signal))?.version) !== JSON.stringify(info.version)) throw new Error(`读取期间文件变化：${path}`)
+  return { text, path: typeof target === 'string' ? target : ctx.fs.processPath(target), hash: createHash('sha256').update(text).digest('hex') }
+}
+
+function chapterRanges(text) {
+  const headings = [...text.matchAll(/^[\uFEFF \t]*(?:#{1,6}[ \t]*)?(?:第[零〇一二三四五六七八九十百千万两0-9]+[章回节集][^\r\n]*|Chapter[ \t]+[0-9]+[^\r\n]*|(?:序章|楔子|尾声)[^\r\n]*)/gmi)]
+  return headings.map((match, index) => ({ heading: match[0].trim().replace(/^#+\s*/, ''), start: match.index + match[0].length,
+    end: headings[index + 1]?.index ?? text.length }))
+}
+function cutRecord(text) {
+  const match = /^---\njc_adaptation_cut: ([^\n]+)\n---\n/.exec(text)
+  if (!match) throw new Error('本集缺少真实切分记录，请先逐章切分')
+  return { ...JSON.parse(match[1]), body: text.slice(match[0].length) }
+}
+async function verifiedCut(ctx, exec, text, agent) {
+  const cut = cutRecord(text)
+  const source = await adaptationFile(ctx, exec, cut.source_path, agent)
+  const chapter = chapterRanges(source.text).find(item => item.heading === cut.chapter_heading)
+  if (source.hash !== cut.source_hash || !chapter || !Number.isSafeInteger(cut.start) || !Number.isSafeInteger(cut.end)
+    || cut.start < chapter.start || cut.end > chapter.end || cut.end <= cut.start
+    || source.text.slice(cut.start, cut.end) !== cut.body) throw new Error('原作或本集切分已变化/越章，请重新核对逐章规划与切分')
+  return cut
+}
+async function adaptationCut(ctx, args, exec, agent, content) {
+  const input = JSON.parse(content)
+  const source = await adaptationFile(ctx, exec, input.source_path, agent, true)
+  const chapters = chapterRanges(source.text).filter(item => item.heading === String(input.chapter_heading || '').replace(/^#+\s*/, ''))
+  if (chapters.length !== 1) throw new Error('无法唯一定位真实章节，请提供原文件中完整章标题，不虚构章节')
+  const chapter = chapters[0], body = source.text.slice(chapter.start, chapter.end)
+  const minimum = Math.min(12, body.trim().length)
+  if (!minimum || typeof input.cut_start !== 'string' || typeof input.cut_end !== 'string'
+    || input.cut_start.length < minimum || input.cut_end.length < minimum) throw new Error('切分首尾须提供当前章至少12字符的唯一原文；短章使用完整正文')
+  const a = body.indexOf(input.cut_start), b = body.indexOf(input.cut_end)
+  if (a < 0 || b < a || body.indexOf(input.cut_start, a + 1) >= 0 || body.indexOf(input.cut_end, b + 1) >= 0) throw new Error('当前章切分首尾缺失、不唯一或跨章，未保存')
+  const record = { source_path: source.path, source_hash: source.hash, chapter_heading: chapter.heading,
+    episode_number: args.episode_number, start: chapter.start + a, end: chapter.start + b + input.cut_end.length }
+  const selected = source.text.slice(record.start, record.end)
+  if (Buffer.byteLength(selected, 'utf8') > 1_000_000) throw new Error('本集原文切分超过1MB，请在当前章内选择自然切点拆分')
+  return `---\njc_adaptation_cut: ${JSON.stringify(record)}\n---\n${selected}`
+}
+
+async function requireAdaptationReads(ctx, args, exec, contract, agent) {
+  if (!wikiReads.has(agent) || ['source_material', 'adaptation_cut', 'adaptation_checkpoint', 'production_progress'].includes(args.artifact_kind)) return
+  const cwd = exec.agent.session.header.cwd, workspace = await ctx.fs.resolve(cwd, { cwd, signal: exec.signal })
+  const root = await chooseWikiRoot(ctx, cwd, exec, workspace, contract)
+  const types = Object.fromEntries(Object.entries(contract.types).map(([kind, spec]) => [kind, { ...spec, ...contract.short_drama_layout?.types[kind] }]))
+  let spec = artifactSpec(args, { ...contract, types })
+  const legacy = artifactSpec(args, contract)
+  const exists = async path => (await ctx.fs.stat(await ctx.fs.resolve(path, { cwd, signal: exec.signal }), exec.signal))?.type === 'file'
+  if (legacy.path !== spec.path && await exists(`${root}/${legacy.path}`)) spec = legacy
+  if (await exists(`${root}/${spec.path}`)) await adaptationFile(ctx, exec, `${root}/${spec.path}`, agent, true)
+  if (spec.template.research && !['original', 'adapted'].includes(args.research_version)) throw new Error('短剧改编资料须明确research_version=original或adapted；旧库沿实际索引读取，不混用版本')
+  if (args.artifact_kind === 'project_overview') {
+    const summary = await exists(`${root}/项目资料/原作/故事梗概.md`) ? `${root}/项目资料/原作/故事梗概.md` : `${root}/项目资料/故事梗概.md`
+    await adaptationFile(ctx, exec, summary, agent, true)
+  }
+  if (['adaptation_episode_plan', 'screenplay'].includes(args.artifact_kind)) await adaptationFile(ctx, exec, `${root}/改编方案/项目总纲.md`, agent, true)
+  if (['project_overview', 'adaptation_episode_plan', 'screenplay'].includes(args.artifact_kind)) {
+    for (const category of ['人物小传', '场景', '道具']) {
+      const selected = new Map()
+      for (const version of ['', '原作/', '改编版/']) {
+        const directory = `${root}/项目资料/${version}${category}`
+        const target = await ctx.fs.resolve(directory, { cwd, signal: exec.signal })
+        if ((await ctx.fs.stat(target, exec.signal))?.type !== 'directory') continue
+        for (const item of await ctx.fs.listDir(target, exec.signal)) {
+          if (item.type !== 'file' || !item.name.endsWith('.md') || item.name === 'index.md') continue
+          const name = item.name.slice(0, -3)
+          if (String(args.content || '').includes(name)) selected.set(name, `${directory}/${item.name}`)
+        }
+      }
+      for (const path of selected.values()) await adaptationFile(ctx, exec, path, agent, true)
+    }
+  }
+  if (args.artifact_kind !== 'screenplay') return
+  const plan = await exists(`${root}/改编方案/逐章规划.md`) ? `${root}/改编方案/逐章规划.md` : `${root}/改编方案/分集规划.md`
+  await adaptationFile(ctx, exec, plan, agent, true)
+  const cut = await adaptationFile(ctx, exec, `${root}/改编方案/分集切分/${episodeFolder(args.episode_number)}原文.md`, agent, true)
+  const record = await verifiedCut(ctx, exec, cut.text, agent)
+  if (record.episode_number !== args.episode_number) throw new Error('切分记录与当前集号不一致')
+}
+
+async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
+  const input = JSON.parse(content), stage = adaptationStages.indexOf(input.stage)
+  if (stage < 0 || !Array.isArray(input.outputs)) throw new Error('短剧进度需要有效stage与outputs')
+  const cwd = exec.agent.session.header.cwd, target = await ctx.fs.resolve(`${root}/改编方案/执行进度.json`, { cwd, signal: exec.signal })
+  const previous = await ctx.fs.stat(target, exec.signal) ? JSON.parse(await ctx.fs.readText(target, exec.signal)) : undefined
+  if (stage && (!previous || ![stage - 1, stage].includes(adaptationStages.indexOf(previous.stage)))) throw new Error('短剧流水线不能跳过前置阶段')
+  if (input.status !== undefined && !['running', 'blocked', ...(stage === 5 ? ['completed'] : [])].includes(input.status)) throw new Error('短剧状态无效')
+  if (input.status === 'blocked' && (!String(input.reason || '').trim() || stage === 5)) throw new Error('阻塞须说明原因，完成阶段不能阻塞')
+  const state = stage ? previous : {}, sources = stage ? state.sources : {}
+  let chapters = state.chapters
+  if (!stage) {
+    if (!Array.isArray(input.source_paths) || !input.source_paths.length) throw new Error('首次进度必须登记实际原作source_paths')
+    const available = []
+    for (const path of input.source_paths) {
+      const file = await adaptationFile(ctx, exec, path, agent, true); sources[file.path] = file.hash
+      for (const chapter of chapterRanges(file.text)) available.push({ source_path: file.path, chapter_heading: chapter.heading })
+    }
+    chapters = input.chapters === undefined ? available : []
+    if (input.chapters !== undefined) {
+      if (!Array.isArray(input.chapters)) throw new Error('chapters须为真实章范围数组')
+      for (const selected of input.chapters) {
+        const file = await adaptationFile(ctx, exec, selected.source_path, agent, true)
+        const matches = available.filter(item => item.source_path === file.path && item.chapter_heading === selected.chapter_heading)
+        if (matches.length !== 1) throw new Error('目标章范围不存在或不唯一')
+        chapters.push(matches[0])
+      }
+    }
+    if (!chapters.length || new Set(chapters.map(item => `${item.source_path}\0${item.chapter_heading}`)).size !== chapters.length) throw new Error('原作缺少清晰章节或目标章范围重复')
+  }
+  for (const [path, hash] of Object.entries(sources)) if ((await adaptationFile(ctx, exec, path, agent)).hash !== hash) throw new Error('原作已改变，请重新规划')
+  const files = Object.fromEntries(Object.entries(state.files || {}).filter(([name]) => adaptationStages.indexOf(name) < stage))
+  for (const group of Object.values(files)) for (const [path, hash] of Object.entries(group))
+    if ((await adaptationFile(ctx, exec, path, agent)).hash !== hash) throw new Error(`前置产物已改变，请重新规划：${path}`)
+  const outputs = {}
+  for (const path of input.outputs) {
+    if (typeof path !== 'string' || !path.startsWith(`${root}/`) || path.split('/').some(part => ['.', '..'].includes(part))) throw new Error('产物必须在当前Wiki')
+    outputs[path] = (await adaptationFile(ctx, exec, path, agent)).hash
+  }
+  if (stage > 0 && stage < 5 && !Object.keys(outputs).length) throw new Error('阶段没有实际产物')
+  if (stage === 1 && !input.outputs.some(path => /项目资料\/原作\/故事梗概\.md$/.test(path))) throw new Error('资料阶段缺少原作梗概')
+  if (stage === 2 && !outputs[`${root}/改编方案/项目总纲.md`]) throw new Error('方案阶段缺少项目总纲')
+  const episodes = stage === 3 ? input.episodes : state.episodes
+  if (stage >= 3) {
+    if (!Array.isArray(episodes) || !episodes.length || episodes.some((number, index) => !Number.isSafeInteger(number) || number < 1 || number > 9999 || index && number !== episodes[index - 1] + 1)) throw new Error('需要连续且不重复的目标episodes集号')
+    const groups = new Map()
+    for (const number of episodes) {
+      const path = `${root}/改编方案/分集切分/${episodeFolder(number)}原文.md`
+      const cut = await verifiedCut(ctx, exec, (await adaptationFile(ctx, exec, path, agent)).text, agent)
+      if (cut.episode_number !== number || sources[cut.source_path] !== cut.source_hash) throw new Error('切分与原作或集号不一致')
+      const key = `${cut.source_path}\0${cut.chapter_heading}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(cut)
+      if (stage === 3 && !outputs[path]) throw new Error('切分阶段须登记每集真实原文切分')
+      if (stage >= 4) {
+        const script = `${root}/剧本/${episodeFolder(number)}/分集剧本.md`
+        await adaptationFile(ctx, exec, script, agent)
+        if (stage === 4 && !outputs[script]) throw new Error('逐集阶段须登记所有目标剧本')
+      }
+    }
+    const expected = new Set(chapters.map(item => `${item.source_path}\0${item.chapter_heading}`))
+    if (groups.size !== expected.size || [...groups.keys()].some(key => !expected.has(key))) throw new Error('切分未覆盖目标章节，或混入范围外章节')
+    for (const cuts of groups.values()) {
+      const source = await adaptationFile(ctx, exec, cuts[0].source_path, agent)
+      const chapter = chapterRanges(source.text).find(item => item.heading === cuts[0].chapter_heading)
+      let cursor = chapter.start
+      for (const cut of cuts) {
+        if (cut.start < cursor || source.text.slice(cursor, cut.start).trim()) throw new Error('同章切分重叠、逆序或遗漏原文')
+        cursor = cut.end
+      }
+      if (source.text.slice(cursor, chapter.end).trim()) throw new Error('该章尚有未切分原文，不能完成切分')
+    }
+    if (stage === 3 && !input.outputs.some(path => /改编方案\/(?:逐章规划|分集规划)\.md$/.test(path))) throw new Error('切分阶段缺少逐章规划')
+  }
+  files[input.stage] = outputs
+  return JSON.stringify({ stage: input.stage, status: stage === 5 ? 'completed' : input.status || 'running', reason: stage === 5 ? '' : input.reason || '', sources, chapters, files, episodes }, null, 2) + '\n'
+}
+
 export function setWikiSourceContent(agent, blocks) {
   sourceMessages.set(agent, blocks.filter(block => block.type === 'text').map(block => block.text))
 }
@@ -916,7 +1093,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
         enum: kinds,
         description: '产物类型，决定唯一保存目录。',
       },
-      content: { type: 'string', description: '完成的正文；pipeline_checkpoint传JSON：stage、outputs路径数组、plan的source_path、engineering的duration_seconds、prompts的segments[{path,start_seconds,end_seconds}]。' },
+      content: { type: 'string', description: '完成的正文；adaptation_cut/checkpoint按短剧流水线Skill传JSON；pipeline_checkpoint传JSON：stage、outputs路径数组、plan的source_path、engineering的duration_seconds、prompts的segments[{path,start_seconds,end_seconds}]。' },
       source_block: { type: 'integer', description: 'source_material 必填，当前用户消息文本块序号，从0开始。' },
       source_start: { type: 'string', description: '来源开始处至少12字符的唯一原文，包含在保存内容中。' },
       source_end: { type: 'string', description: '来源结束处至少12字符的唯一原文，包含在保存内容中。' },
@@ -943,14 +1120,22 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
       if (!kinds.includes(args.artifact_kind) || hidden.some(key => Object.hasOwn(args, key))) throw new Error('归档类型或字段不属于当前创作路线')
       if (args.artifact_kind === 'source_material') {
         if (args.write_mode && args.write_mode !== 'create') throw new Error('原始来源只允许创建，不覆盖已有原文')
-        args = { ...args, content: selectWikiSource(sourceAgent, args) }
+        const content = route === 'short-drama' && args.source_block === undefined
+          ? (await adaptationFile(ctx, exec, JSON.parse(args.content).source_path, sourceAgent, true)).text
+          : selectWikiSource(sourceAgent, args)
+        args = { ...args, content }
       }
+      if (route === 'short-drama') await requireAdaptationReads(ctx, args, exec, contract, sourceAgent)
       if (route === 'manju') await requirePipelineReads(ctx, args, exec, sourceAgent)
-      const value = await saveArtifact(ctx, args, exec, contract, route)
+      const value = await saveArtifact(ctx, args, exec, contract, route, sourceAgent)
       if (args.artifact_kind === 'pipeline_checkpoint') {
         const workspace = await ctx.fs.resolve(exec.agent.session.header.cwd, { cwd: exec.agent.session.header.cwd, signal: exec.signal })
         const target = await projectTarget(ctx, exec.agent.session.header.cwd, value.path, exec.signal, workspace)
         pipelineStates.set(sourceAgent, { ...JSON.parse(await ctx.fs.readText(target, exec.signal)), path: value.path })
+      }
+      if (args.artifact_kind === 'adaptation_checkpoint') {
+        const target = await ctx.fs.resolve(value.path, { cwd: exec.agent.session.header.cwd, signal: exec.signal })
+        adaptationStates.set(sourceAgent, { ...JSON.parse(await ctx.fs.readText(target, exec.signal)), path: value.path })
       }
       return { status: value.status, path: value.path, operation: value.operation, warnings: value.warnings }
     },

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { createProjectFileActions } from '../projectFileActions'
+import { createProjectFileActions, WIKI_TYPES } from '../projectFileActions'
 import { createProjectFileService, type ProjectFileAdapter } from '../projectFileService'
 
 function wikiFilesFixture(initial: Record<string, string> = {}) {
@@ -95,9 +95,14 @@ test('failed index registration preserves imported files and reports partial suc
 })
 
 test('three creative Wiki templates create their real artifact directories and progressively merge into one root', async () => {
+  assert.deepEqual(WIKI_TYPES.find(type => type.id === 'short-drama'), { id: 'short-drama', label: '短剧改编 Wiki' })
   const state = wikiFilesFixture()
   await state.actions.createProductionWiki({ owner: '/project', kind: 'short-drama' })
   assert.ok(state.contents.has('wiki/项目资料/index.md'))
+  assert.ok(state.contents.has('wiki/项目资料/原作/人物小传/index.md'))
+  assert.ok(state.contents.has('wiki/项目资料/改编版/场景/index.md'))
+  assert.ok(!state.contents.has('wiki/项目资料/人物小传/index.md'))
+  assert.ok(state.contents.has('wiki/改编方案/分集切分/index.md'))
   assert.ok(state.contents.has('wiki/剧本/index.md'))
   assert.ok(!state.contents.has('wiki/创作/章节草稿/index.md'))
   assert.ok(!state.contents.has('wiki/资产/声音/index.md'))

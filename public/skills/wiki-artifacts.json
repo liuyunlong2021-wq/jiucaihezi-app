@@ -454,6 +454,25 @@
       "production_routes": [
         "manju"
       ]
+    },
+    "adaptation_cut": {
+      "path": "改编方案/分集切分/{episode}原文.md",
+      "index": "改编方案/分集切分/index.md",
+      "label": "{episode}原文切分",
+      "episode": true,
+      "mode": "adaptation_cut",
+      "production_routes": [
+        "short-drama"
+      ]
+    },
+    "adaptation_checkpoint": {
+      "path": "改编方案/执行进度.json",
+      "index": "改编方案/index.md",
+      "label": "短剧改编执行进度",
+      "mode": "adaptation_pipeline",
+      "production_routes": [
+        "short-drama"
+      ]
     }
   },
   "manju_layout": {
@@ -595,6 +614,71 @@
       {
         "path": "剧本/视频提示词/Seedance",
         "purpose": "保存Seedance的对应资料与产物。"
+      }
+    ]
+  },
+  "short_drama_layout": {
+    "types": {
+      "adaptation_episode_plan": {
+        "path": "改编方案/逐章规划.md",
+        "index": "改编方案/index.md"
+      },
+      "screenplay": {
+        "index": "剧本/{episode}/index.md"
+      }
+    },
+    "directories": [
+      {
+        "path": "原始材料",
+        "purpose": "保存原始材料及对应索引。"
+      },
+      {
+        "path": "项目资料",
+        "purpose": "保存项目资料及对应索引。"
+      },
+      {
+        "path": "改编方案",
+        "purpose": "保存改编方案及对应索引。"
+      },
+      {
+        "path": "改编方案/分集切分",
+        "purpose": "保存分集切分及对应索引。"
+      },
+      {
+        "path": "剧本",
+        "purpose": "保存剧本及对应索引。"
+      },
+      {
+        "path": "项目资料/原作",
+        "purpose": "保存原作及对应索引。"
+      },
+      {
+        "path": "项目资料/原作/人物小传",
+        "purpose": "保存人物小传及对应索引。"
+      },
+      {
+        "path": "项目资料/原作/场景",
+        "purpose": "保存场景及对应索引。"
+      },
+      {
+        "path": "项目资料/原作/道具",
+        "purpose": "保存道具及对应索引。"
+      },
+      {
+        "path": "项目资料/改编版",
+        "purpose": "保存改编版及对应索引。"
+      },
+      {
+        "path": "项目资料/改编版/人物小传",
+        "purpose": "保存人物小传及对应索引。"
+      },
+      {
+        "path": "项目资料/改编版/场景",
+        "purpose": "保存场景及对应索引。"
+      },
+      {
+        "path": "项目资料/改编版/道具",
+        "purpose": "保存道具及对应索引。"
       }
     ]
   }
