@@ -1279,7 +1279,7 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
   )
 })
 
-test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频按次、图片按张', () => {
+test('灵动 0.4.1 两个公开名与插件、定价清单逐字一致，视频按次、图片按张', () => {
   const plugin = readFileSync('newapi-plugins/lingdong.plugin.js', 'utf8')
   const quoted = (line: string) => [...line.matchAll(/'([^']+)'/g)].map(match => match[1])
   const pluginModels = [
@@ -1288,10 +1288,10 @@ test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频�
   ]
   const pricing = JSON.parse(readFileSync('newapi-plugins/lingdong-pricing-2026-10-14.json', 'utf8'))
 
-  const videoId = 'newapi/lingdong/灵动-sd2.5-满血-301010'
+  const videoId = 'newapi/lingdong/ld-2.5特价-1-720'
   const perCall = buildCreationRunPlan({
     modelId: videoId,
-    params: { prompt: '海边日落，镜头缓推', ratio: '21:9', resolution: '720p', duration: 15 },
+    params: { prompt: '海边日落，镜头缓推', ratio: '16:9', resolution: '720p', duration: 15 },
   })
   assert.equal(perCall.route, 'newapi-direct')
   assert.equal(perCall.endpoint, '/v1/videos')
@@ -1299,24 +1299,24 @@ test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频�
   assert.equal(perCall.assetFlow, 'newapi-upload')
   assert.equal(perCall.mode, 'text-to-video')
 
-  // 官方 `GET /api/pricing`：4–30 秒，30 图 / 10 视频 / 10 音频。
-  assert.throws(() => buildCreationRunPlan({ modelId: videoId, params: { prompt: '太短', duration: 3 } }), /时长\(秒\)不能小于 4/)
-  assert.throws(() => buildCreationRunPlan({ modelId: videoId, params: { prompt: '太长', duration: 31 } }), /时长\(秒\)不能大于 30/)
+  // 官方特价型号：5/10/15/30秒，30图/5视频/10音频。
+  assert.throws(() => buildCreationRunPlan({ modelId: videoId, params: { prompt: '太短', duration: 3 } }), /时长/)
+  assert.throws(() => buildCreationRunPlan({ modelId: videoId, params: { prompt: '太长', duration: 31 } }), /时长/)
   assert.throws(() => buildCreationRunPlan({
     modelId: videoId,
     params: { prompt: '超限', images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`) },
   }), /参考图最多支持 30 个/)
   assert.throws(() => buildCreationRunPlan({
     modelId: videoId,
-    params: { prompt: '超限', videos: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.mp4`) },
-  }), /视频最多支持 10 个/)
+    params: { prompt: '超限', videos: Array.from({ length: 6 }, (_, index) => `https://example.com/${index}.mp4`) },
+  }), /视频最多支持 5 个/)
   assert.throws(() => buildCreationRunPlan({
     modelId: videoId,
     params: { prompt: '超限', audios: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.mp3`) },
   }), /音频最多支持 10 个/)
 
   // 图片走同步 OpenAI Images 合同；App 暂不提交参考图，避免走到插件拒绝的 multipart 编辑接口。
-  const imageId = 'newapi/lingdong/灵动-gpt-image-2.5-flare'
+  const imageId = 'newapi/lingdong/ld-gpt-image-2.5-flare'
   const imagePlan = buildCreationRunPlan({
     modelId: imageId,
     params: { prompt: '电商产品主图', ratio: '9:16', resolution: '1k' },
@@ -1338,10 +1338,8 @@ test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频�
     .filter(model => model.id.startsWith('newapi/lingdong/'))
     .map(model => [model.id, model.model, displayModelLabel(model.label), model.price, model.task])
   assert.deepEqual(ids, [
-    ['newapi/lingdong/灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010', 'Sd 2.5 满血 301010', '6/次', 'video'],
-    ['newapi/lingdong/灵动-sd2.5-满血-301010-2', '灵动-sd2.5-满血-301010-2', 'Sd 2.5 满血 301010-2', '8/次', 'video'],
-    ['newapi/lingdong/灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-flare', 'GPT Image 2.5 Flare', '0.08/张', 'image'],
-    ['newapi/lingdong/灵动-gpt-image-2.5-sunburst', '灵动-gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '0.1/张', 'image'],
+    ['newapi/lingdong/ld-2.5特价-1-720', 'ld-2.5特价-1-720', 'ld-2.5特价-1-720', '4/次', 'video'],
+    ['newapi/lingdong/ld-gpt-image-2.5-flare', 'ld-gpt-image-2.5-flare', 'ld-gpt-image-2.5-flare', '0.08/张', 'image'],
   ])
   // 面板公开名必须与插件 `meta.models` 逐字一致，否则渠道按名字找不到模型。
   assert.deepEqual(ids.map(row => row[1]), pluginModels)
@@ -1360,20 +1358,12 @@ test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频�
   }
 })
 
-test('FK九个Seedance型号与插件0.3.5一致，旧型号保留历史注册', () => {
+test('FK当前Seedance型号规格与执行目录一致', () => {
   const expected = [
-    ['ft-video-v1-89e87205d3be4eb2cf3fda249569e693', [30], 9, 0, 0, '¥3/次'],
-    ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [15, 30], 9, 0, 0, '¥5/次'],
-    ['ft-video-v1-bdf45387433ac0a9042ebab3fae0299d', [30], 30, 10, 10, '¥3/次'],
     ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '¥0.5/秒'],
     ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '¥0.5/秒'],
     ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1/秒 · 视频参考 ¥31.5/百万Token'],
-    ['ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', [4, 15], 9, 3, 3, '¥0.4/秒 · 视频参考 ¥10.5/百万Token'],
-    ['ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', [4, 15], 9, 3, 3, '¥0.6/秒 · 视频参考 ¥16.5/百万Token'],
-    ['ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', [4, 15], 9, 3, 3, '¥0.7/秒 · 视频参考 ¥21/百万Token'],
   ] as const
-  const active = listCreationModels({ task: 'video' }).filter(model => creationModelFamily(model) === 'FK · Seedance 2.5')
-  assert.deepEqual(active.map(model => model.id.replace('newapi/fk/', '')).sort(), expected.map(([id]) => id).sort())
   const plugin = readFileSync('newapi-plugins/fk.plugin.js', 'utf8')
   const availability = readFileSync('scripts/creation-models/server.mjs', 'utf8')
   for (const [id, duration, images, videos, audios, price] of expected) {
@@ -1396,14 +1386,9 @@ test('FK九个Seedance型号与插件0.3.5一致，旧型号保留历史注册',
     assert.ok(plugin.includes(`'${id}':`))
     assert.ok(availability.includes(spec.label))
   }
-  for (const id of ['fe82aee0b8ce5ee1d790a56291dc5563', '69ef4c70291248a25c8198cd1c7c9c1f', '7393b0529b788d532d031dcac5e820cb', '9f4e77de6c05f3c360c1c0b9938a44a4']) {
-    assert.equal(getCreationModelSpec(`newapi/fk/ft-video-v1-${id}`)?.hidden, true)
-    assert.equal(getMediaModel(`ft-video-v1-${id}`)?.enabled, false)
-  }
-  assert.ok(listCreationModels({ task: 'video' }).some(model => model.model === 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'))
 })
 
-test('FK 分组排在视频最前，灵动组内首个模型为 Sd 2.5 满血 301010', () => {
+test('FK 分组排在视频最前，灵动组内首个模型为 ld-2.5特价-1-720', () => {
   // 用户已将 FK 置顶；同时保留灵动组内既有排序。
   const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
   const start = panel.indexOf("cpState.task === 'video'")
@@ -1417,8 +1402,8 @@ test('FK 分组排在视频最前，灵动组内首个模型为 Sd 2.5 满血 30
 
   const lingdong = listCreationModels({ task: 'video' })
     .filter(model => model.id.startsWith('newapi/lingdong/'))
-  assert.equal(lingdong[0].id, 'newapi/lingdong/灵动-sd2.5-满血-301010')
-  assert.equal(displayModelLabel(lingdong[0].label), 'Sd 2.5 满血 301010')
+  assert.equal(lingdong[0].id, 'newapi/lingdong/ld-2.5特价-1-720')
+  assert.equal(displayModelLabel(lingdong[0].label), 'ld-2.5特价-1-720')
 })
 
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
@@ -1603,8 +1588,8 @@ test('four calibrated channels expose only current plugin image/video models', a
   for (const key of ['yihong', 'yuanliu', 'fk', 'lingdong']) {
     const plugin = await import(`../../../../newapi-plugins/${key}.plugin.js`)
     const visible = listCreationModels({ source: 'all' }).filter(item => item.id.startsWith(`newapi/${key}/`))
-    const expected = plugin.meta.models.filter((model: string) => key !== 'fk' || (!model.startsWith('ft-video-') && model !== 'fk-MiniMaxh3') || model === 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746')
-    assert.deepEqual(visible.map(item => item.model).sort(), [...expected].sort(), key)
+    const panelExpected = plugin.meta.models.filter((model: string) => key !== 'fk' || !model.startsWith('ft-video-'))
+    assert.deepEqual(visible.map(item => item.model).sort(), panelExpected.sort(), key)
     if (key === 'yihong') assert.ok(visible.every(item => item.task === 'video'))
   }
 })
@@ -1635,4 +1620,49 @@ test('Yihong six-model durations, references and price labels follow 0.2.0', () 
   }
   assert.throws(() => buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance-2.5-Muse', params: { prompt: 'p', duration: 20 } }))
   assert.throws(() => buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance2.5 Ultra', params: { prompt: 'p', audios: ['https://a/audio.mp3'] } }), /必须同时提供参考图/)
+})
+
+test('FK Wan 3.0 在面板显示公开名、两档售价和独立分组，执行目录对齐规格', () => {
+  const id = 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
+  const spec = getCreationModelSpec(`newapi/fk/${id}`)!
+  assert.equal(spec.model, 'Wan 3.0 720-1080p')
+  assert.equal(spec.price, '720p ¥0.2/秒 · 1080p ¥0.25/秒')
+  assert.equal(creationModelFamily(spec), 'FK · Wan 3.0')
+  assert.ok(listCreationPanelModels({ task: 'video' }).some(model => model.id === spec.id))
+  const executable = getMediaModel(id)!
+  assert.equal(executable.model, spec.model)
+  assert.deepEqual(spec.files, { images: { min: 0, max: 10 }, videos: { min: 0, max: 5 }, audios: { min: 0, max: 5 } })
+  for (const key of ['ratio', 'resolution', 'duration']) {
+    const field = executable.fields.find(field => field.key === key)!
+    const panel = spec.fields.find(field => field.key === key)!
+    assert.deepEqual(field.options, panel.options)
+    assert.equal(field.min, panel.min)
+    assert.equal(field.max, panel.max)
+  }
+  for (const resolution of ['720p', '1080p']) {
+    for (const duration of [2, 30]) assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', resolution, duration } }).model, spec.model)
+  }
+  for (const params of [{ duration: 1 }, { duration: 31 }, { resolution: '480p' }, { ratio: '21:9' }]) {
+    assert.throws(() => buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', ...params } }))
+  }
+})
+
+test('FK six current video choices share public names, specs and content recovery', () => {
+  const mapping = JSON.parse(readFileSync('newapi-plugins/fk-video-model-mapping.json', 'utf8')) as Record<string, string>
+  const visible = listCreationModels({ task: 'video' }).filter(model => model.id.startsWith('newapi/fk/'))
+  assert.equal(visible.length, 6)
+  for (const [name, id] of Object.entries(mapping)) {
+    const spec = getCreationModelSpec(`newapi/fk/${id}`)!
+    assert.equal(spec.model, name)
+    assert.equal(spec.label, name)
+    const executable = getMediaModel(id)!
+    assert.equal(executable.model, name)
+    for (const key of ['resolution', 'ratio']) {
+      assert.deepEqual(executable.fields.find(field => field.key === key)?.options, spec.fields.find(field => field.key === key)?.options)
+    }
+    assert.equal(usesNewApiContentEndpoint({ model: name }), true)
+    const resolution = spec.capabilities.resolutions![0]
+    const duration = spec.capabilities.duration!.min!
+    assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', duration, resolution, ratio: '16:9' } }).model, name)
+  }
 })

@@ -4,6 +4,96 @@ import { test } from 'node:test'
 import { createProjectFileActions } from '../projectFileActions'
 import { createProjectFileService, type ProjectFileAdapter } from '../projectFileService'
 
+function wikiFilesFixture(initial: Record<string, string> = {}) {
+  const contents = new Map(Object.entries(initial))
+  const directories = new Set<string>()
+  const adapter: ProjectFileAdapter = {
+    runtime: 'desktop',
+    async list() {
+      return [
+        ...[...directories].map(path => ({ path, isDirectory: true })),
+        ...[...contents].map(([path, content]) => ({ path, isDirectory: false, content })),
+      ]
+    },
+    async readText(_owner, path) {
+      const content = contents.get(path)
+      if (content === undefined) throw new Error('missing')
+      return { content, size: content.length, truncated: false, revision: { value: content, size: content.length } }
+    },
+    async writeText(_owner, path, content, revision) {
+      const current = contents.get(path)
+      if (current === undefined) return { status: 'missing' }
+      if (revision.value !== current) return { status: 'conflict', current: await this.readText(_owner, path) }
+      contents.set(path, content)
+      return { status: 'saved', revision: { value: content, size: content.length } }
+    },
+    async createFolder(_owner, path) {
+      directories.add(path)
+      return { path, isDirectory: true }
+    },
+    async createText(_owner, path, content) {
+      if (contents.has(path)) throw new Error('文件已存在')
+      contents.set(path, content)
+      return { path, isDirectory: false }
+    },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  const files = createProjectFileService(adapter)
+  return { contents, directories, files, actions: createProjectFileActions(files) }
+}
+
+test('new Wiki folder has its own index and a parent link to that index; retries preserve user text', async () => {
+  const state = wikiFilesFixture({ 'wiki/index.md': '# 我的 Wiki\n\n用户手写说明。\n' })
+  const resource = await state.actions.createWikiFolder({ owner: '/project', parentPath: 'wiki', name: '角色资料' })
+  assert.equal(resource.path, 'wiki/角色资料')
+  assert.ok(state.directories.has(resource.path))
+  assert.match(state.contents.get('wiki/角色资料/index.md') || '', /# 角色资料/)
+  assert.match(state.contents.get('wiki/index.md') || '', /\[\[角色资料\/index\]\]/)
+  state.contents.set('wiki/角色资料/index.md', '# 用户已经编辑的导航\n')
+  await state.actions.createWikiFolder({ owner: '/project', parentPath: 'wiki', name: '角色资料' })
+  assert.equal(state.contents.get('wiki/角色资料/index.md'), '# 用户已经编辑的导航\n')
+  assert.equal(state.contents.get('wiki/index.md')?.match(/\[\[角色资料\/index\]\]/g)?.length, 1)
+  assert.match(state.contents.get('wiki/index.md') || '', /用户手写说明/)
+})
+
+test('new root Wiki folder links from the project index and rejects path-like names before writing', async () => {
+  const state = wikiFilesFixture()
+  for (const name of ['../逃逸', 'a/b', 'a\\b', '.', '..', '']) {
+    await assert.rejects(state.actions.createWikiFolder({ owner: '/project', parentPath: '', name }), /名称/)
+  }
+  assert.equal(state.directories.size, 0)
+  await state.actions.createWikiFolder({ owner: '/project', parentPath: '', name: 'wiki' })
+  assert.match(state.contents.get('index.md') || '', /\[\[wiki\/index\]\]/)
+  assert.ok(state.contents.has('wiki/index.md'))
+})
+
+test('imported Wiki files are indexed at their actual returned paths, without changing their contents', async () => {
+  const state = wikiFilesFixture({
+    'docs/wiki/资料/原稿.md': '# 已存在的原稿',
+    'docs/wiki/资料/原稿 (1).md': '# 新上传的稿件',
+    'docs/wiki/资料/附件.pdf': 'binary-original',
+    'docs/wiki/资料/index.md': '# 自写目录\n\n这段要保留。\n',
+  })
+  const input = { owner: '/project', paths: ['docs/wiki/资料/原稿 (1).md', 'docs/wiki/资料/附件.pdf', 'docs/wiki/资料/index.md'] }
+  await state.actions.indexImportedFiles(input)
+  await state.actions.indexImportedFiles(input)
+  const index = state.contents.get('docs/wiki/资料/index.md') || ''
+  assert.match(index, /这段要保留/)
+  assert.equal(index.match(/\[\[原稿 \(1\)\]\]/g)?.length, 1)
+  assert.equal(index.match(/\[\[附件\.pdf\]\]/g)?.length, 1)
+  assert.doesNotMatch(index, /\[\[index\]\]/)
+  assert.equal(state.contents.get('docs/wiki/资料/原稿.md'), '# 已存在的原稿')
+  assert.equal(state.contents.get('docs/wiki/资料/原稿 (1).md'), '# 新上传的稿件')
+})
+
+test('failed index registration preserves imported files and reports partial success', async () => {
+  const state = wikiFilesFixture({ 'wiki/资料/稿件.md': '# 原件' })
+  state.files.createText = async () => { throw new Error('只读索引') }
+  await assert.rejects(state.actions.indexImportedFiles({ owner: '/project', paths: ['wiki/资料/稿件.md'] }), /已保存.*索引/)
+  assert.equal(state.contents.get('wiki/资料/稿件.md'), '# 原件')
+})
+
 test('shared canvas creation creates a project resource and publishes one event', async () => {
   const files = new Map<string, string>()
   const adapter: ProjectFileAdapter = {

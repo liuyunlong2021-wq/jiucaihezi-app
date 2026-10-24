@@ -129,17 +129,17 @@ const SHANHAI_VIDEO_MODELS: Array<{
     maxImages: 10,
   },
 ]
-// 灵动 API 0.4.0 只发布四个公开名：两个按次视频、两个按张图片。
-// 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-19 实测）—— 比文档准：
-// 文档只写「图·视频·音频参考」，实际视频是 30 图 / 10 视频 / 10 音频、4–30 秒、720P。
+// 灵动 API 0.4.1 只发布两个公开名：一个按次视频、一个按张图片。
+// 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-24 核对）：
+// 文档只写「图·视频·音频参考」，实际视频是 30 图 / 5 视频 / 10 音频、5/10/15/30 秒、720P。
 // `price` 是面板对用户的实付价，改价必须同步 NewAPI 渠道的计费表达式。
-const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517', 'newapi-plugins/lingdong.plugin.js 0.4.0']
+const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517', 'newapi-plugins/lingdong.plugin.js 0.4.1']
 const LINGDONG_CONTRACT_ISSUES = [
-  '插件 0.4.0 的四个公开名已本地登记；生产渠道名单、插件激活与真实出片/扣费尚未验收。',
+  '插件 0.4.1 的两个公开名已本地登记；生产渠道名单、插件激活与真实出片/扣费尚未验收。',
   '带参考视频时，参考视频与生成时长合计最多 25 秒（官方文档限制）。',
 ]
-// 官方 `supported_ratios`（含 21:9）；顺序即面板顺序。
-const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
+// 官方特价型号 supported_ratios；顺序即面板顺序。
+const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
 // 表内**顺序就是面板顺序**，而面板默认模型 = 当前任务第一条可用模型（useCreation 的
 // `availableModels[0]`）。分组顺序由 `CreationPanel.vue` 的 order 表决定。
 const LINGDONG_VIDEO_MODELS: Array<{
@@ -157,27 +157,15 @@ const LINGDONG_VIDEO_MODELS: Array<{
   promptMaxLength?: number
 }> = [
   {
-    model: '灵动-sd2.5-满血-301010',
-    label: 'Sd 2.5 满血 301010 · 灵动',
-    price: '6/次',
+    model: 'ld-2.5特价-1-720',
+    label: 'ld-2.5特价-1-720',
+    price: '4/次',
     ratios: LINGDONG_RATIOS,
     resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
+    duration: { allowedValues: [5, 10, 15, 30] },
+    defaultDuration: 5,
     maxImages: 30,
-    maxVideos: 10,
-    maxAudios: 10,
-  },
-  {
-    model: '灵动-sd2.5-满血-301010-2',
-    label: 'Sd 2.5 满血 301010-2 · 灵动',
-    price: '8/次',
-    ratios: LINGDONG_RATIOS,
-    resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 30,
-    maxVideos: 10,
+    maxVideos: 5,
     maxAudios: 10,
   },
 ]
@@ -185,8 +173,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
 // 图片按张计费。官方 `size_control` 只说明「1K/2K/4K 共 10 种比例」，逐档像素表未列出，
 // 面板沿用本仓通用的比例 × 分辨率换算，默认 1:1 / 1k = 1024x1024（官方声明的默认尺寸）。
 const LINGDONG_IMAGE_MODELS = [
-  { model: '灵动-gpt-image-2.5-flare', label: 'GPT Image 2.5 Flare · 灵动', price: '0.08/张' },
-  { model: '灵动-gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst · 灵动', price: '0.1/张' },
+  { model: 'ld-gpt-image-2.5-flare', label: 'ld-gpt-image-2.5-flare', price: '0.08/张' },
 ] as const
 const LINGDONG_IMAGE_RATIOS = ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 
@@ -342,7 +329,7 @@ export function getYihongGptImageResolutions(ratio: string): string[] {
   return YIHONG_GPT_IMAGE_RESOLUTIONS.filter(resolution => getYihongGptImageSize(ratio, resolution))
 }
 // Fk 渠道：model 必须与已上传 fk Task Plugin 的 meta.models 完全一致。
-// 旧 ID 隐藏但保留注册，历史任务不得被改绑到新型号。
+// 仅登记当前允许新提交的型号；历史任务由已有查询与下载链路恢复。
 const FK_SEEDANCE_MODELS: Array<{
   model: string
   label: string
@@ -358,76 +345,16 @@ const FK_SEEDANCE_MODELS: Array<{
   hidden?: boolean
 }> = [
   {
-    model: 'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563',
-    label: '特价渠道-Seedance2.5满血720p(30图)',
-    hidden: true,
-    price: '0.1/秒',
-    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
-    resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 30,
-  },
-  {
-    model: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
-    label: '特价渠道 Seedance 2.5 满血 720p（可过真人）',
-    price: '¥5/次',
+    model: 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa',
+    label: 'Wan 3.0 720-1080p',
+    price: '720p ¥0.2/秒 · 1080p ¥0.25/秒',
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
-    resolutions: ['720p'],
-    duration: { allowedValues: [15, 30] },
-    defaultDuration: 15,
-    maxImages: 9,
-  },
-  {
-    model: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
-    label: '长期特惠 Seedance 2.5 满血 720p',
-    price: '¥3/次',
-    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
-    resolutions: ['720p'],
-    duration: { allowedValues: [30] },
-    defaultDuration: 30,
-    maxImages: 30,
-    maxVideos: 10,
-    maxAudios: 10,
-    promptMaxLength: 6000,
-  },
-  {
-    model: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f',
-    label: 'XZ-Seedance 2.5 720p(9图参考)',
-    hidden: true,
-    price: '0.1/秒',
-    ratios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
-    resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 9,
-  },
-  {
-    model: 'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
-    label: 'XN1-Seedance 2.5满血 480-720p',
-    hidden: true,
-    price: '480p 0.5/秒 · 720p 1/秒',
-    ratios: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
-    resolutions: ['480p', '720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 30,
-    maxVideos: 10,
-    maxAudios: 10,
-    promptMaxLength: 15000,
-  },
-  {
-    model: 'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
-    label: 'XN2-Seedance 2.5满血 480-720p',
-    hidden: true,
-    price: '480p 0.5/秒 · 720p 0.8/秒',
-    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
-    resolutions: ['480p', '720p'],
-    duration: { min: 4, max: 29 },
-    defaultDuration: 4,
-    maxImages: 30,
-    maxAudios: 10,
-    promptMaxLength: 9999,
+    resolutions: ['720p', '1080p'],
+    duration: { min: 2, max: 30 },
+    defaultDuration: 5,
+    maxImages: 10,
+    maxVideos: 5,
+    maxAudios: 5,
   },
   {
     model: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
@@ -440,16 +367,6 @@ const FK_SEEDANCE_MODELS: Array<{
     maxImages: 30,
     maxVideos: 10,
     maxAudios: 10,
-  },
-  {
-    model: 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
-    label: '特价渠道 Seedance 2.5 满血 720p',
-    price: '¥3/次',
-    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
-    resolutions: ['720p'],
-    duration: { allowedValues: [30] },
-    defaultDuration: 30,
-    maxImages: 9,
   },
   {
     model: 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848',
@@ -476,11 +393,11 @@ const FK_SEEDANCE_MODELS: Array<{
     maxAudios: 10,
     promptMaxLength: 10000,
   },
-  ...[
-    { model: 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', label: '官方渠道-Seedance 2.0 Mini 720p', price: '¥0.4/秒 · 视频参考 ¥10.5/百万Token' },
-    { model: 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', label: '官方渠道-Seedance 2.0 Fast 720p', price: '¥0.6/秒 · 视频参考 ¥16.5/百万Token' },
-    { model: 'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', label: '官方渠道-Seedance 2.0 满血 720p', price: '¥0.7/秒 · 视频参考 ¥21/百万Token' },
-  ].map(model => ({ ...model, ratios: ['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'], resolutions: ['720p'], duration: { min: 4, max: 15 }, defaultDuration: 4, maxImages: 9, maxVideos: 3, maxAudios: 3 })),
+  {
+    model: 'ft-video-v1-43644108aaba72b7cbad4cd322737f6c', label: '特价渠道 Seedance 2.0 满血 480p (933)', price: '¥2/次',
+    ratios: ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], resolutions: ['480p'],
+    duration: { min: 4, max: 15 }, defaultDuration: 4, maxImages: 9, maxVideos: 3, maxAudios: 3,
+  },
 ]
 const FK_IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
 const FK_IMAGE_MODELS: Array<{
@@ -499,7 +416,7 @@ const FK_IMAGE_MODELS: Array<{
   { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'nano-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
 ]
 const FK_SEEDANCE_CONTRACT_ISSUES = [
-  '新版插件 0.3.5、渠道模型与按次/Token 定价需同步激活；真实提交、成片与账单尚未验收。',
+  '新版插件 0.3.9、渠道模型与按次/Token 定价需同步激活；真实提交、成片与账单尚未验收。',
 ]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
@@ -1586,15 +1503,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...(model.resolutions
         ? [{ key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: model.resolutions[0], options: options(model.resolutions) }]
         : []),
-      {
-        key: 'duration',
-        label: '时长(秒)',
-        kind: 'number',
-        defaultValue: model.defaultDuration ?? model.duration.allowedValues?.[0] ?? model.duration.min,
-        min: model.duration.min,
-        max: model.duration.max,
-        step: 1,
-      },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: model.defaultDuration, options: options(model.duration.allowedValues || []) },
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
       ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
@@ -1744,7 +1653,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractIssues: ['NewAPI rc.40 需应用易红同步图片 32 MiB 响应补丁；真实生成、失败与扣费尚未验收。', `渠道公开名 yihong-${model} 必须映射到上游 ${model}。`],
     notes: ['易红 GPT Image 新型号（2026-10-16）'],
   })),
-  // ── FK Seedance 2.5：6 个当前型号，4 个旧型号仅供历史记录识别 ──
+  // ── FK 当前 Seedance / Wan 型号（H3 在下方单独登记） ──
   ...FK_SEEDANCE_MODELS.map(model => directVideo({
     id: `newapi/fk/${model.model}`,
     model: model.hidden ? model.model : model.label,
@@ -1776,7 +1685,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ], model.promptMaxLength),
-    notes: ['newapi-plugins/fk.plugin.js', '2026-10-14 用户提供的 FK 官方视频目录；面板价格为用户确认的对外收费价，NewAPI 表达式系数与人民币同数值。'],
+    notes: ['newapi-plugins/fk.plugin.js', '2026-10-24 用户提供的 FK 官方视频目录；面板价格为用户确认的对外收费价，NewAPI 表达式系数与人民币同数值。'],
   })),
   // ── FK 图片：模型编号来自当前账号目录；fk Task Plugin 负责异步轮询与结果 URL ──
   ...FK_IMAGE_MODELS.map(model => directImage({
@@ -1807,9 +1716,9 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   })),
   directVideo({
     id: 'newapi/fk/ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
-    model: 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
-    label: '特价渠道 MiniMax H3-768p',
-    price: '0.08/秒',
+    model: '特价渠道 MiniMax H3 480p-1080p',
+    label: '特价渠道 MiniMax H3 480p-1080p',
+    price: '480p/768p ¥0.08/秒 · 1080p ¥0.25/秒',
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'text-to-video',
@@ -1818,7 +1727,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'partial',
     contractIssues: ['面板参数已按用户提供的上游目录登记；真实生成与扣费尚未验收。'],
     ratios: ['16:9', '4:3', '1:1', '3:4', '9:16'],
-    resolutions: ['768p'],
+    resolutions: ['768p', '480p', '1080p'],
     duration: { min: 1, max: 15 },
     files: {
       images: { min: 0, max: 9 },
@@ -1826,7 +1735,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '4:3', '1:1', '3:4', '9:16']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '768p', options: options(['768p']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '768p', options: options(['768p', '480p', '1080p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 1, min: 1, max: 15, step: 1 },
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
       { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' },
@@ -3094,6 +3003,7 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   if (spec.id.startsWith('newapi/zx/seedance-')) return 'ZX · Seedance'
   if (spec.id.startsWith('newapi/fk/ft-image-v1-')) return 'FK-Image'
   if (spec.id === 'newapi/fk/ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746') return 'FK · H3'
+  if (spec.id === 'newapi/fk/ft-video-v1-9cf6b90d6d04866453951fc3a26720aa') return 'FK · Wan 3.0'
   if (spec.id.startsWith('newapi/fk/')) return 'FK · Seedance 2.5'
   // 菠萝线路（aimanplay.cn + 独立 MiniMax 适配器）单独成组：视频两项 + 图片两项
   // （gpt-image-2 菠萝 / gpt-image-2.5 菠萝）。面板顺序见 `CreationPanel.vue` 的 order 数组。

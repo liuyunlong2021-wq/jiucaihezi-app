@@ -83,6 +83,27 @@ test('FK 面板中文模型名进入实际 NewAPI 请求体', { concurrency: fal
   }
 })
 
+test('FK Wan 3.0 两档分辨率与公开名进入实际 NewAPI 请求体', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    assert.equal(JSON.parse(String(init?.body)).model, 'Wan 3.0 720-1080p')
+    assert.ok(['720p', '1080p'].includes(JSON.parse(String(init?.body)).resolution))
+    return Response.json({ video_url: 'https://cdn.example.test/fk.mp4' })
+  }
+  try {
+    for (const resolution of ['720p', '1080p']) {
+      const plan = buildCreationRunPlan({ modelId: 'newapi/fk/ft-video-v1-9cf6b90d6d04866453951fc3a26720aa', params: { prompt: 'p', duration: 2, resolution, ratio: '9:16' } })
+      const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+      assert.equal(result.url, 'https://cdn.example.test/fk.mp4')
+    }
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 function r2Fixture(ext = 'png') {
   const root = `https://d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com/jiucaihezi-media-test/creation-temp/17/0123456789abcdef0123456789abcdef.${ext}`
   const signed = (ttl: number, signature: string) => `${root}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20261021T000000Z&X-Amz-Credential=test&X-Amz-SignedHeaders=${ttl === 300 ? 'content-length%3Bcontent-type%3Bhost' : 'host'}&X-Amz-Expires=${ttl}&X-Amz-Signature=${signature.repeat(64)}`
@@ -1770,7 +1791,7 @@ test('Lingdong reference image stays JSON generations and decodes through curren
   const oldFetch = globalThis.fetch
   const plugin = await import(pathToFileURL(`${process.cwd()}/newapi-plugins/lingdong.plugin.js`).href)
   try {
-    for (const model of ['灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst']) {
+    for (const model of ['ld-gpt-image-2.5-flare']) {
       globalThis.fetch = async (input, init) => {
         assert.ok(String(input).endsWith('/v1/images/generations'))
         assert.ok(!(init?.body instanceof FormData))

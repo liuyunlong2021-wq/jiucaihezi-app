@@ -131,11 +131,10 @@ function options(values: Array<string | number | boolean>): MediaFieldOption[] {
 }
 
 export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
-  // 灵动 0.4.0 只发布四个公开名：两个按次视频、两个按张图片；
-  // 素材上限来自官方 `GET /api/pricing`（30 图 / 10 视频 / 10 音频）。
+  // 灵动 0.4.1 只发布两个公开名：一个按次视频、一个按张图片；
+  // 素材上限来自官方 `GET /api/pricing`（30 图 / 5 视频 / 10 音频）。
   ...[
-    ['灵动-sd2.5-满血-301010', 30, 10, 10],
-    ['灵动-sd2.5-满血-301010-2', 30, 10, 10],
+    ['ld-2.5特价-1-720', 30, 5, 10],
   ].map(([model, images, videos, audios]) => ({
     id: String(model), model: String(model), label: String(model), task: 'video' as const,
     provider: 'gateway-video' as const,
@@ -143,6 +142,9 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     acceptedFiles: ['image' as const, ...(videos ? ['video' as const] : []), ...(audios ? ['audio' as const] : [])],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt' as const, required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'select' as const, defaultValue: 5, options: options([5, 10, 15, 30]) },
+      { key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: '720p', options: options(['720p']) },
+      { key: 'ratio', label: '比例', kind: 'select' as const, defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '4:3', '3:4']) },
       { key: 'images', label: `参考图 (0-${images}张)`, kind: 'images' as const },
       ...(videos ? [{ key: 'videos', label: `参考视频 (0-${videos}段)`, kind: 'video' as const }] : []),
       ...(audios ? [{ key: 'audios', label: `参考音频 (0-${audios}段)`, kind: 'audio' as const }] : []),
@@ -632,83 +634,18 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'audios', label: '参考音频 (0-3段；素材总数≤10)', kind: 'audio' },
     ],
   },
-  // FK 0.3.5官方2.0三型号，执行目录与面板使用相同公开名。
-  ...[
-    ['ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', '官方渠道-Seedance 2.0 Mini 720p'],
-    ['ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', '官方渠道-Seedance 2.0 Fast 720p'],
-    ['ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', '官方渠道-Seedance 2.0 满血 720p'],
-  ].map(([id, label]) => ({
-    id, label, model: label, task: 'video' as const, provider: 'gateway-video' as const,
-    maxFiles: 15, acceptedFiles: ['image', 'video', 'audio'] as ('image' | 'video' | 'audio')[],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt' as const, required: true },
-      { key: 'ratio', label: '比例', kind: 'select' as const, defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']) },
-      { key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'number' as const, defaultValue: 4, min: 4, max: 15, step: 1 },
-      { key: 'images', label: '参考图 (0-9张)', kind: 'images' as const },
-      { key: 'videos', label: '参考视频 (0-3段)', kind: 'video' as const },
-      { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' as const },
-    ],
-  })),
-  // FK 2026-10-14 官方 Seedance 2.5 目录；旧型号禁用新提交，历史 ID 保留。
-  ...[
-    ['ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563', '特价渠道-Seedance2.5满血720p(30图)'],
-    ['ft-video-v1-7393b0529b788d532d031dcac5e820cb', 'XN1-Seedance 2.5满血 480-720p'],
-    ['ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4', 'XN2-Seedance 2.5满血 480-720p'],
-  ].map(([id, label]) => ({ id, model: id, label, task: 'video' as const, provider: 'gateway-video' as const, enabled: false, fields: [] })),
   {
-    id: 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
-    label: '特价渠道 Seedance 2.5 满血 720p',
-    task: 'video', model: '特价渠道 Seedance 2.5 满血 720p', provider: 'gateway-video',
-    maxFiles: 9, acceptedFiles: ['image'],
+    id: 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa', label: 'Wan 3.0 720-1080p',
+    task: 'video', model: 'Wan 3.0 720-1080p', provider: 'gateway-video',
+    maxFiles: 20, acceptedFiles: ['image', 'video', 'audio'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
-      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
-    ],
-  },
-  {
-    id: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
-    label: '特价渠道 Seedance 2.5 满血 720p（可过真人）',
-    task: 'video', model: '特价渠道 Seedance 2.5 满血 720p（可过真人）', provider: 'gateway-video',
-    maxFiles: 9, acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 15, options: options([15, 30]) },
-      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
-    ],
-  },
-  {
-    id: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
-    label: '长期特惠 Seedance 2.5 满血 720p',
-    task: 'video', model: '长期特惠 Seedance 2.5 满血 720p', provider: 'gateway-video',
-    maxFiles: 50, acceptedFiles: ['image', 'video', 'audio'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 6000 },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
-      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
-      { key: 'videos', label: '参考视频 (0-10段)', kind: 'video' },
-      { key: 'audios', label: '参考音频 (0-10段)', kind: 'audio' },
-    ],
-  },
-  {
-    id: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f',
-    label: 'XZ-Seedance 2.5 720p(9图参考)',
-    enabled: false,
-    task: 'video', model: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f', provider: 'gateway-video',
-    maxFiles: 9, acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['9:16', '16:9', '1:1', '4:3', '3:4']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 4, min: 4, max: 30, step: 1 },
-      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '1080p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 2, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-10张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (0-5段)', kind: 'video' },
+      { key: 'audios', label: '参考音频 (0-5段)', kind: 'audio' },
     ],
   },
   {
@@ -757,15 +694,28 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
   },
   {
     id: 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
-    label: '特价渠道 MiniMax H3-768p',
-    task: 'video', model: 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746', provider: 'gateway-video',
+    label: '特价渠道 MiniMax H3 480p-1080p',
+    task: 'video', model: '特价渠道 MiniMax H3 480p-1080p', provider: 'gateway-video',
     maxFiles: 12, acceptedFiles: ['image', 'audio'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '4:3', '1:1', '3:4', '9:16']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '768p', options: options(['768p']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '768p', options: options(['768p', '480p', '1080p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 1, min: 1, max: 15, step: 1 },
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'ft-video-v1-43644108aaba72b7cbad4cd322737f6c', label: '特价渠道 Seedance 2.0 满血 480p (933)', model: '特价渠道 Seedance 2.0 满血 480p (933)', task: 'video', provider: 'gateway-video',
+    maxFiles: 15, acceptedFiles: ['image', 'video', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '4:3', '3:4', '1:1', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['480p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 4, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (0-3段)', kind: 'video' },
       { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' },
     ],
   },

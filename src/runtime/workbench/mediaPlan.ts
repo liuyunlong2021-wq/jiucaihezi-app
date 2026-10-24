@@ -73,6 +73,9 @@ export function buildMediaPlanPolicy(referencePolicy = ''): string {
         model.label,
         model.mode,
         imageLimit ? `参考图 ${imageLimit.min || 0}-${imageLimit.max ?? '不限'}` : '不支持参考图',
+        spec.files?.videos ? `参考视频 ${spec.files.videos.min || 0}-${spec.files.videos.max ?? '不限'}` : '',
+        spec.files?.audios ? `参考音频 ${spec.files.audios.min || 0}-${spec.files.audios.max ?? '不限'}` : '',
+        spec.capabilities.resolutions?.length ? `分辨率 ${spec.capabilities.resolutions.join('/')}` : '',
         duration
           ? `时长 ${duration.allowedValues?.join('/') || `${duration.min ?? 0}-${duration.max ?? '不限'}`}s`
           : '',

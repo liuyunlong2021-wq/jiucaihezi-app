@@ -32,8 +32,8 @@ const RH_TARGET_MODELS = [
 ]
 
 test('FK 中文请求仅匹配登记了中文公开名的渠道，真实 ID 不替代公开名路由', () => {
-  const name = '长期特惠 Seedance 2.5 满血 720p'
-  for (const model of [name, 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d']) {
+  const name = 'Seedance 2.5 满血 480-720p'
+  for (const model of [name, 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848']) {
     const result = buildCreationModelAvailability([{ id: 1, name: 'FK', status: 1, models: [model] }])
     assert.equal(result.find(item => item.id === name)?.status, model === name ? 'enabled' : 'disabled')
   }
@@ -270,7 +270,7 @@ test('calibrated yihong, yuanliu and FK official routes match exact public chann
     ['newapi/yihong/yh-wan3.0-video', 'yh-wan3.0-video'],
     ['newapi/yuanliu/yl_seedance-2-5_6caffaca7390', 'yl_seedance-2-5_6caffaca7390'],
     ['newapi/yuanliu/yl_seedance-2-5_0fab2f1b1f10', 'yl_seedance-2-5_0fab2f1b1f10'],
-    ...['Mini', 'Fast', '满血'].map(name => [`官方渠道-Seedance 2.0 ${name} 720p`, `官方渠道-Seedance 2.0 ${name} 720p`]),
+    ['官方渠道-Seedance 2.5 满血 720p', '官方渠道-Seedance 2.5 满血 720p'],
   ]
   for (const [id, model] of cases) {
     assert.equal(buildCreationModelAvailability([{ id: 1, name: 'fixture', status: 1, models: [model] }]).find(item => item.id === id)?.status, 'enabled')

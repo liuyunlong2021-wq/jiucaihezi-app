@@ -312,3 +312,20 @@ test('★ 默认模型永远落在面板可见的型号上（隐藏型号不能�
     assert.equal(listCreationModels().some(model => model.id === id), true, `${kind} → ${id} 不在可见目录`)
   }
 })
+
+test('@影音 Wan 3.0 与创作面板匹配名称、价格、分辨率、时长和素材限制', () => {
+  const modelId = 'newapi/fk/ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
+  const row = buildMediaPlanPolicy().split('\n').find(line => line.startsWith(modelId + ' |'))!
+  assert.ok(row)
+  for (const value of ['Wan 3.0 720-1080p', '分辨率 720p/1080p', '参考图 0-10', '参考视频 0-5', '参考音频 0-5', '时长 2-30s', '0.2/秒', '0.25/秒']) assert.ok(row.includes(value), value)
+  const plan = { kind: 'video' as const, title: 'Wan视频', prompt: '镜头缓缓推进', modelId }
+  const controls = getMediaPlanEditorControls(plan)
+  assert.ok(controls.models.some(model => model.value === modelId && model.label === 'Wan 3.0 720-1080p'))
+  assert.deepEqual(controls.resolutions.map(option => option.value), ['720p', '1080p'])
+  assert.deepEqual(controls.durationRange, { min: 2, max: 30, step: 1 })
+  for (const resolution of ['720p', '1080p']) {
+    const updated = updateMediaPlanParameters(plan, { modelId, resolution, duration: 30 })
+    assert.equal(updated.modelId, modelId)
+    assert.doesNotThrow(() => validateMediaPlan(updated))
+  }
+})

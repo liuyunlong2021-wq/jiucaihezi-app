@@ -4164,7 +4164,7 @@ const modelGroups = computed(() => {
     : cpState.task === 'video'
       ? [
           // FK Seedance 2.5 置顶；H3 保留独立分组。
-          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'ZX · Seedance', '菠萝',
+          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'FK · Wan 3.0', 'ZX · Seedance', '菠萝',
           'Seedance 2.5', '易红 API', '源流 AI', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
           'jc 本机',

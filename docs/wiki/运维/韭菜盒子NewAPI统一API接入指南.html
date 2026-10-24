@@ -41,7 +41,7 @@ footer{padding:24px 8px;color:var(--muted);font-size:13px;text-align:center}
 <div class="eyebrow">JIUCAIHEZI · NEWAPI PUBLIC API</div>
 <h1>韭菜盒子 API 接入统一指南</h1>
 <p>用一套 API Key 接入聊天、图片、视频、音频与视频提示词增强模型。本文说明公共地址、认证方式、模型发现、请求格式、任务处理，以及各条模型线路的专属参数。</p>
-<span class="stamp">整理日期：2026-10-11 · 可独立保存和投放的 HTML</span>
+<span class="stamp">更新日期：2026-10-23 · 可独立保存和投放的 HTML</span>
 </header>
 
 <nav class="nav" aria-label="目录">
@@ -104,7 +104,7 @@ footer{padding:24px 8px;color:var(--muted);font-size:13px;text-align:center}
 <p class="tiny muted">历史目录包含多个别名、质量档与渠道型号。具体型号的权限、别名映射和参数以当前模型列表及对应 API 校验结果为准。</p>
 
 <h3>视频模型</h3>
-<h4>Fk Seedance / MiniMax H3（完整 model ID）</h4>
+<h4>Fk Seedance / MiniMax H3 / Wan 3.0</h4>
 <div class="table-scroll">
 <table>
 <thead><tr><th>model ID</th><th>规格摘要</th><th>支持画幅</th><th>参考素材上限</th></tr></thead>
@@ -119,7 +119,30 @@ footer{padding:24px 8px;color:var(--muted);font-size:13px;text-align:center}
 </tbody>
 </table>
 </div>
-<p class="tiny muted">2026-10-14 源码目录为六个 Seedance 2.5 型号与既有 H3，共 7 个视频 ID；插件 0.3.0、渠道映射与计费表达式尚待生产激活，可用型号以 /v1/models 为准。官方 Seedance 2.5 有视频参考时按 Token 结算；等待结果时不要重复提交。分辨率、画幅、时长及素材组合必须按具体 ID 匹配。</p>
+<p class="tiny muted">2026-10-23：FK 插件源码已更新至 0.3.8；新增 Wan 3.0，公开名、渠道映射与价格需同步激活。面板隐藏的型号不等于 API 已停用，可用型号以同一 API Key 的 <code>GET /v1/models</code> 为准。官方 Seedance 2.5 有视频参考时按 Token 结算；等待结果时不要重复提交。</p>
+
+<h4>Fk Wan 3.0 720-1080p</h4>
+<p>公开模型名：<code>Wan 3.0 720-1080p</code>。使用 <code>POST /v1/videos</code> 创建，保存 NewAPI 返回的任务 <code>id</code>，再通过 <code>GET /v1/videos/{id}</code> 查询、<code>GET /v1/videos/{id}/content</code> 取回结果。调用方使用平台 API Key，无需供应商 Key。</p>
+<div class="table-scroll"><table>
+<thead><tr><th>参数</th><th>支持范围</th></tr></thead><tbody>
+<tr><td><code>resolution</code></td><td><code>720p</code>、<code>1080p</code></td></tr>
+<tr><td><code>duration</code></td><td>2–30 秒，整数</td></tr>
+<tr><td><code>ratio</code></td><td>16:9、9:16、1:1、4:3、3:4</td></tr>
+<tr><td>参考素材</td><td><code>imageUrls</code> 最多 10 张；<code>videoUrls</code> 最多 5 段；<code>audioUrls</code> 最多 5 段。素材必须是可公开访问的 HTTPS URL。</td></tr>
+<tr><td><code>prompt_extend</code></td><td>默认 <code>false</code>；插件保留显式布尔值，生效范围以上线宿主实际透传为准。</td></tr>
+<tr><td>售价</td><td>720p：¥0.2/秒；1080p：¥0.25/秒。5 秒分别为 ¥1、¥1.25；实际扣费还受账户分组倍率与结算记录影响。</td></tr>
+</tbody></table></div>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/videos' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "model": "Wan 3.0 720-1080p",
+    "prompt": "雨后街道，镜头缓缓推进",
+    "ratio": "16:9",
+    "duration": 5,
+    "resolution": "1080p"
+  }'</code></pre>
+<p class="tiny muted">示例为请求合同，不是已执行的生产响应。插件 0.3.8、渠道与价格激活后方可调用；本轮仅完成本地验证，真实生成、结果下载与实际扣费尚未验收。已有任务继续查询原任务，勿重复创建。</p>
 
 <h4>山 / 海 Seedance 2.5</h4>
 <div class="table-scroll"><table><thead><tr><th>model</th><th>规格</th><th>素材</th></tr></thead><tbody>
@@ -380,7 +403,7 @@ const body = {
 <div class="notice good"><strong>最短接入流程：</strong>创建 API Key → 调用 <code>/v1/models</code> → 按模型类型选择接口 → 提交请求 → 按对应协议读取同步结果或轮询任务 → 及时保存媒体结果。</div>
 </section>
 
-<footer>韭菜盒子 NewAPI · 对外 API 接入指南 · 2026-10-11<br>模型目录与线路参数可能变更；以 API Key 实际可见模型及对应接口返回为准。</footer>
+<footer>韭菜盒子 NewAPI · 对外 API 接入指南 · 2026-10-23<br>模型目录与线路参数可能变更；以 API Key 实际可见模型及对应接口返回为准。</footer>
 </div>
 </body>
 </html>

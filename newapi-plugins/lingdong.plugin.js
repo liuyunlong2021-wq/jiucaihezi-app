@@ -1,15 +1,15 @@
 // NewAPI Task Plugin v1 — 灵动图片与视频。
 // 合同：https://www.lingdongapi.com/docs/api/?v=20260517
 // 图片使用 JSON + 公网 images URL；视频保留已验证的 /v1/videos 别名。
-// 仅发布下列四个名称；上游请求自动移除「灵动-」，不必手工配置同名映射。
-const VIDEO_MODELS = ['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2']
-const IMAGE_MODELS = ['灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst']
+// 仅发布下列两个名称；上游请求自动移除「ld-」，不必手工配置同名映射。
+const VIDEO_MODELS = ['ld-2.5特价-1-720']
+const IMAGE_MODELS = ['ld-gpt-image-2.5-flare']
 
 export const meta = {
   apiVersion: 1,
   key: 'lingdong',
   name: '灵动 API',
-  version: '0.4.0',
+  version: '0.4.1',
   author: { name: 'jiucaihezi' },
   description: { en: 'Lingdong image and video API', zh: '灵动图片按张、视频按次计费' },
   models: [...VIDEO_MODELS, ...IMAGE_MODELS],
@@ -172,7 +172,7 @@ export function parseTaskResult(ctx, body) {
 }
 
 export function listArtifacts(task) {
-  return task.status === 'SUCCESS' && VIDEO_MODELS.includes(task.model) ? [{ key: 'video', type: 'video', mimeType: 'video/mp4' }] : []
+  return task.status === 'SUCCESS' && (VIDEO_MODELS.includes(task.model) || ['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2'].includes(task.model)) ? [{ key: 'video', type: 'video', mimeType: 'video/mp4' }] : []
 }
 
 export function buildContentRequest(ctx) {

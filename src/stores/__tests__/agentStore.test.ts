@@ -25,8 +25,7 @@ test(
   { concurrency: false },
   () => {
     const mediaModelIds = [
-      '灵动-sd2.5-满血-301010',
-      '灵动-sd2.5-满血-301010-2',
+      'ld-2.5特价-1-720',
       'minimax_h3_zm_u24',
       'MiniMaxH3-720p-sec',
       'omni-fast',
@@ -44,7 +43,7 @@ test(
       ...mediaModelIds.map(id => ({ id, label: id, providerId: 'jiucaihezi', capability: 'text' })),
     ]
     const storage = installLocalStorage({
-      jcModel: '灵动-sd2.5-满血-301010',
+      jcModel: 'ld-2.5特价-1-720',
       jc_models_cache: JSON.stringify(cachedModels),
     })
 

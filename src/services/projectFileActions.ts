@@ -10,6 +10,7 @@ import type { CanvasDocumentV3 } from '@/types/canvas'
 import type { ProjectResource, ProjectResourceRevision, ProjectTextRead } from '@/utils/projectResource'
 import { isMemoryMediaFilePath, MEMORY_MEDIA_DIRECTORY } from '@/utils/memoryProjectPaths'
 import type { ImportProjectExternalFilesInput, ProjectFileService, ProjectFileWriteResult } from './projectFileService'
+import { appendProjectDirectoryIndex } from './projectFileService'
 
 export interface CreateProjectCanvasInput {
   owner: string
@@ -112,6 +113,42 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
   }
 
   return {
+    async createWikiFolder(input: { owner: string; parentPath: string; name: string }): Promise<ProjectResource> {
+      const name = input.name.trim()
+      if (!name || name === '.' || name === '..' || /[\\/\0\[\]#|]/.test(name)) throw new Error('Wiki 文件夹名称无效')
+      const path = input.parentPath ? `${input.parentPath}/${name}` : name
+      const folder = await projectFiles.createFolder(input.owner, path)
+      try {
+        const entries = await projectFiles.listDirectory(input.owner, path)
+        if (entries.some(entry => entry.name === 'index.md' && entry.isDirectory)) throw new Error('index.md 已被目录占用')
+        if (!entries.some(entry => entry.name === 'index.md'))
+          await projectFiles.createText(input.owner, `${path}/index.md`, `# ${name}\n\n## 页面\n`)
+        await appendProjectDirectoryIndex(projectFiles, input.owner, input.parentPath, `${path}/index.md`)
+      } catch (cause) {
+        throw new Error(`文件夹 ${path} 已创建，但索引未完成：${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+      return folder
+    },
+    async indexImportedFiles(input: { owner: string; paths: string[] }): Promise<void> {
+      let resources: Map<string, ProjectResource>
+      try {
+        resources = new Map((await projectFiles.list(input.owner)).map(resource => [resource.path, resource]))
+      } catch (cause) {
+        throw new Error(`上传文件已保存，但索引登记未完成：${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+      const failures: string[] = []
+      for (const path of new Set(input.paths)) {
+        try {
+          const resource = resources.get(path)
+          if (!resource || resource.isDirectory) throw new Error('找不到已导入文件')
+          const slash = path.lastIndexOf('/')
+          await appendProjectDirectoryIndex(projectFiles, input.owner, slash < 0 ? '' : path.slice(0, slash), path)
+        } catch (cause) {
+          failures.push(`${path}：${cause instanceof Error ? cause.message : String(cause)}`)
+        }
+      }
+      if (failures.length) throw new Error(`上传文件已保存，但索引登记未完成：${failures.join('；')}`)
+    },
     async createCanvas(input: CreateProjectCanvasInput): Promise<ProjectCanvasOpenResult> {
       const name = nextCanvasFileName((await listCanvases(input.owner)).map(resource => resource.name))
       const document = createCanvasDocument({ canvasId: crypto.randomUUID(), scene: [], assets: {} })

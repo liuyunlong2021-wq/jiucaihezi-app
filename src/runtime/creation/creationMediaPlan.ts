@@ -33,9 +33,9 @@ export function usesNewApiContentEndpoint(
   if (apiStyle === 'comfy-video' || apiStyle === 'comfy-first-frame' || apiStyle === 'comfy-first-last') return true
   const model = String(target.model || '').trim().toLowerCase()
   // 四个Task Plugin的成片由宿主鉴权content交付，恢复下载沿用同一判据。
-  if (model.startsWith('yh-') || model.startsWith('yl_seedance-') || model.startsWith('灵动-sd') || model.startsWith('ft-video-v1-')) return true
+  if (model.startsWith('yh-') || model.startsWith('yl_seedance-') || model.startsWith('灵动-sd') || model === 'ld-2.5特价-1-720' || model.startsWith('ft-video-v1-')) return true
   if ([
-    'fk-minimaxh3',
+    'wan 3.0 720-1080p', 'fk-minimaxh3', '特价渠道 minimax h3 480p-1080p', '特价渠道 seedance 2.0 满血 480p (933)',
     '特价渠道 seedance 2.5 满血 720p', '特价渠道 seedance 2.5 满血 720p（可过真人）',
     '长期特惠 seedance 2.5 满血 720p', 'seedance 2.5 满血 480-720p', 'xn2-seedance 2.5 满血 480-720p',
     '官方渠道-seedance 2.5 满血 720p', '官方渠道-seedance 2.0 mini 720p',

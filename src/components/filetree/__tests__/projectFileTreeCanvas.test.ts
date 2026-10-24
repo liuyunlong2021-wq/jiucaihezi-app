@@ -3,6 +3,40 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
+test('Wiki upload keeps the right-clicked destination, ordinary uploads keep the media flow', async () => {
+  const source = readFileSync('src/components/filetree/ProjectFileTree.vue', 'utf8')
+  const start = source.indexOf('function ctxUploadFiles() {')
+  const bodyStart = source.indexOf('{', start)
+  const body = source.slice(bodyStart + 1, source.indexOf('\n}', bodyStart))
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const run = new AsyncFunction('ctxMenu', 'projectDir', 'isDesktop', 'projectFiles', 'closeCtxMenu',
+    'importDesktopFiles', 'openFileUpload', 'errorMsg', 'MEMORY_MEDIA_DIRECTORY', 'isProtectedMemoryPath', body)
+  for (const [path, entries, expected] of [
+    ['wiki/人物', [], { owner: '/project', path: 'wiki/人物' }],
+    ['docs/wiki/资料', [], { owner: '/project', path: 'docs/wiki/资料' }],
+    ['自建资料', [{ name: 'index.md', isDirectory: false }], { owner: '/project', path: '自建资料' }],
+    ['普通文件夹', [], 'ordinary'],
+  ] as const) {
+    const calls: unknown[] = []
+    const ctxMenu = { value: { node: { path, isDir: true } as unknown } }
+    const error = { value: '' }
+    await run(ctxMenu, { value: '/project' }, true, { listDirectory: async () => entries },
+      () => { ctxMenu.value.node = null }, async (target: unknown) => calls.push(target),
+      () => calls.push('ordinary'), error, '.raw/jc-media', () => false)
+    assert.deepEqual(calls, [expected], path)
+    assert.equal(error.value, '')
+  }
+})
+
+test('Wiki directory menus expose creation and native uploads forward the selected target', () => {
+  const source = readFileSync('src/components/filetree/ProjectFileTree.vue', 'utf8')
+  assert.equal(source.match(/@click="ctxNewWikiFolder"/g)?.length, 2)
+  assert.match(source, /projectFileActions\.createWikiFolder/)
+  assert.match(source, /targetRelativePath: importTarget/)
+  assert.match(source, /target\?\.path \?\? MEMORY_MEDIA_DIRECTORIES\.document/)
+  assert.match(source, /projectFileActions\.indexImportedFiles\(\{ owner, paths: imported \}\)/)
+})
+
 test('project file tree exposes canvas create, copy, rename, and delete actions', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
@@ -367,7 +401,7 @@ test('desktop exposes memory file import and project export without the old fold
     'utf8',
   )
 
-  assert.match(source, /async function importDesktopFiles\(\)/)
+  assert.match(source, /async function importDesktopFiles\(target\?:/)
   assert.match(source, /async function exportDesktopProject\(\)/)
   assert.match(source, /dev_import_project_files/)
   assert.match(source, /dev_export_project/)

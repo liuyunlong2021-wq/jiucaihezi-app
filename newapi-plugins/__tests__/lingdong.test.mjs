@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import * as plugin from '../lingdong.plugin.js'
 
-const VIDEO = ['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2']
-const IMAGE = ['灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst']
+const VIDEO = ['ld-2.5特价-1-720']
+const IMAGE = ['ld-gpt-image-2.5-flare']
 const BASE = 'https://www.lingdongapi.com'
 const ctx = (model = VIDEO[0], extra = {}) => ({ model, upstreamModel: model, baseUrl: BASE, apiKey: 'test-key', requestBody: { model, prompt: '海边' }, ...extra })
 const decode = (model, value = {}, kind = 'json') => plugin.protocols[IMAGE.includes(model) ? 'openai_image' : 'openai_video'].decodeRequest({ model, body: { kind, value: { model, prompt: '海边', ...value } } })
 
-test('只保留四个前缀公开名，按图片与视频绑定协议', () => {
-  assert.equal(plugin.meta.version, '0.4.0')
+test('只保留两个前缀公开名，按图片与视频绑定协议', () => {
+  assert.equal(plugin.meta.version, '0.4.1')
   assert.deepEqual(plugin.meta.models, [...VIDEO, ...IMAGE])
   assert.deepEqual(plugin.meta.protocols, [{ name: 'openai_video', models: VIDEO }, { name: 'openai_image', models: IMAGE }])
   assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'image_count'])
@@ -27,7 +27,7 @@ test('旧名、原始名、跨协议、无提示词和multipart明确拒绝', ()
   assert.throws(() => plugin.protocols.openai_video.decodeRequest({ model: VIDEO[0], body: { kind: 'json', value: [] } }), /object/)
 })
 
-test('自动去掉灵动前缀，上游显式映射优先', () => {
+test('自动去掉ld前缀，上游显式映射优先', () => {
   for (const model of [...VIDEO, ...IMAGE]) for (const upstreamModel of [undefined, model, model.slice(3)]) {
     const request = plugin.buildSubmitRequest(ctx(model, { upstreamModel }))
     assert.equal(request.body.model, model.slice(3))
@@ -97,11 +97,11 @@ test('视频任务查询、状态、产物和HEAD鉴权不退化', () => {
   assert.equal(JSON.stringify(view).includes('test-key'), false)
 })
 
-test('四个指定售价，视频按次、图片按张，视频不按时长加价', () => {
+test('两个指定售价，视频按次、图片按张，视频不按时长加价', () => {
   const pricing = JSON.parse(readFileSync(new URL('../lingdong-pricing-2026-10-14.json', import.meta.url), 'utf8'))
   assert.equal(pricing.version, plugin.meta.version)
   assert.deepEqual(pricing.models.map(row => row.model), plugin.meta.models)
-  const prices = [6, 8, 0.08, 0.1]
+  const prices = [4, 0.08]
   for (const [index, row] of pricing.models.entries()) {
     assert.equal(row.upstreamModel, row.model.slice(3))
     assert.equal(row.salePriceCny, prices[index])
@@ -118,4 +118,16 @@ test('四个指定售价，视频按次、图片按张，视频不按时长加�
 test('宿主同步沙箱语法', () => {
   const source = readFileSync(new URL('../lingdong.plugin.js', import.meta.url), 'utf8')
   for (const token of ['.async', 'async function', 'await ', 'import ', 'require(', 'import(']) assert.equal(source.includes(token), false, token)
+})
+
+test('新映射与退役名单：只允许两个ld公开名提交，历史视频仍可下载', () => {
+  const mapping = JSON.parse(readFileSync(new URL('../lingdong-model-mapping.json', import.meta.url), 'utf8'))
+  assert.deepEqual(mapping, { 'ld-2.5特价-1-720': '2.5特价-1-720', 'ld-gpt-image-2.5-flare': 'gpt-image-2.5-flare' })
+  for (const model of ['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2', '灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst']) {
+    assert.ok(!plugin.meta.models.includes(model))
+    for (const protocol of Object.values(plugin.protocols)) {
+      assert.throws(() => protocol.decodeRequest({ model, body: { kind: 'json', value: { model, prompt: 'p' } } }), /Unsupported/)
+    }
+  }
+  assert.equal(plugin.listArtifacts({ model: '灵动-sd2.5-满血-301010', status: 'SUCCESS' })[0].key, 'video')
 })

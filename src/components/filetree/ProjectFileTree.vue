@@ -1640,6 +1640,22 @@ async function ctxNewFolder() {
     errorMsg.value = `创建文件夹失败: ${e instanceof Error ? e.message : String(e)}`
   }
 }
+async function ctxNewWikiFolder() {
+  const parentNode = ctxMenu.value.node
+  const parentPath = parentNode?.isDir ? parentNode.path : ''
+  const owner = projectKey.value
+  closeCtxMenu()
+  if (!owner) return
+  const name = parentPath ? '新资料' : 'wiki'
+  try {
+    const folder = await projectFileActions.createWikiFolder({ owner, parentPath, name })
+    if (projectKey.value !== owner) return
+    await refreshLoadedDirectories()
+    statusMsg.value = `已创建 Wiki 文件夹：${folder.path}，索引已登记`
+  } catch (cause) {
+    errorMsg.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
 async function createFileAt(relPath: string) {
   try {
     const resource = await projectFiles.createText(projectKey.value, relPath, '')
@@ -1994,20 +2010,27 @@ async function uploadWebFiles(files: File[]) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
-async function importDesktopFiles() {
-  const owner = projectDir.value
+async function importDesktopFiles(target?: { owner: string; path: string }) {
+  const owner = target?.owner ?? projectDir.value
   if (!owner) return
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    const importTarget = MEMORY_MEDIA_DIRECTORIES.document
+    const importTarget = target?.path ?? MEMORY_MEDIA_DIRECTORIES.document
     const imported = await invoke<string[] | null>('dev_import_project_files', {
       input: { root: owner, targetRelativePath: importTarget },
     })
-    if (imported && owner === projectDir.value) {
-      await classifyImportedMemoryFiles(owner, imported)
+    if (imported?.length) {
+      if (target) {
+        await projectFileActions.indexImportedFiles({ owner, paths: imported })
+        if (owner === projectDir.value) statusMsg.value = `已上传 ${imported.length} 个文件到 ${target.path}，索引已登记`
+      } else if (owner === projectDir.value) {
+        await classifyImportedMemoryFiles(owner, imported)
+      }
     }
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    if (target && owner === projectDir.value) await refreshLoadedDirectories()
   }
 }
 async function classifyImportedMemoryFiles(owner: string, importedPaths: string[]) {
@@ -2313,8 +2336,25 @@ async function onDirectoryInputChange(event: Event) {
     errorMsg.value = `导入失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
-function ctxUploadFiles() {
+async function ctxUploadFiles() {
+  const node = ctxMenu.value.node
+  const owner = projectDir.value
   closeCtxMenu()
+  if (isDesktop && owner && node?.isDir && !isProtectedMemoryPath(node.path)
+    && !node.path.startsWith(MEMORY_MEDIA_DIRECTORY)) {
+    try {
+      const wikiDirectory = /^(?:wiki|docs\/wiki)(?:\/|$)/.test(node.path)
+        || (await projectFiles.listDirectory(owner, node.path)).some(entry => entry.name === 'index.md' && !entry.isDirectory)
+      if (owner !== projectDir.value) return
+      if (wikiDirectory) {
+        await importDesktopFiles({ owner, path: node.path })
+        return
+      }
+    } catch (cause) {
+      errorMsg.value = `上传失败: ${cause instanceof Error ? cause.message : String(cause)}`
+      return
+    }
+  }
   openFileUpload()
 }
 async function ctxImportProject() {
@@ -3249,6 +3289,9 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxNewFolder">
             <JcIcon name="create-new-folder" /><span>新建文件夹</span>
           </button>
+          <button v-if="isDesktop" class="pft-ctx-item" @click="ctxNewWikiFolder">
+            <JcIcon name="create-new-folder" /><span>新建 Wiki 文件夹</span>
+          </button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxAddProjectFolder">
             <JcIcon name="create-new-folder" /><span>切换项目文件夹...</span>
@@ -3284,6 +3327,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="pft-ctx-item" @click="ctxNewFolder">
             <JcIcon name="create-new-folder" /><span>新建文件夹</span>
+          </button>
+          <button v-if="isDesktop && !isProtectedMemoryPath(ctxMenu.node.path) && !ctxMenu.node.path.startsWith(MEMORY_MEDIA_DIRECTORY)" class="pft-ctx-item" @click="ctxNewWikiFolder">
+            <JcIcon name="create-new-folder" /><span>新建 Wiki 文件夹</span>
           </button>
           <button class="pft-ctx-item" @click="ctxUploadFiles">
             <JcIcon name="upload" /><span>上传文件</span>

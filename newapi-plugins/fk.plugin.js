@@ -5,7 +5,7 @@
 // Seedance 2.0/2.5 使用 /api/open/v1/video/generate 与 /video/status?jobId=。
 // 签名结果由宿主 content 代理免鉴权回收。旧任务仅保留历史兼容查询；H3 同样走标准接口。
 // 事实源：用户提供的 FK 官方视频文档与公开模型映射。价格在 NewAPI Task Usage 中配置。
-// 按次型号使用 calls；按秒型号使用 seconds/seconds_480p/seconds_720p。
+// 按次型号使用 calls；按秒型号使用 seconds 或对应分辨率 seconds_480p/seconds_720p/seconds_768p/seconds_1080p。
 // 官方型号有参考视频时完成用量使用 video_reference_tokens，需同步更新定价表达式。
 
 const LEGACY_VIDEO_IDS = [
@@ -14,33 +14,27 @@ const LEGACY_VIDEO_IDS = [
   'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
   'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
 ]
+const WAN_MODEL = 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
 const H3_MODEL = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
 const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4']
 const VIDEO_SPECS = {
-  [H3_MODEL]: { min: 1, max: 15, refs: [9, 0, 3], resolutions: ['768p'] },
-  'ft-video-v1-89e87205d3be4eb2cf3fda249569e693': { durations: [30], refs: [9, 0, 0], unit: 'request' },
-  'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70': { durations: [15, 30], refs: [9, 0, 0], unit: 'request' },
-  'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d': { durations: [30], refs: [30, 10, 10], wide: true, promptMax: 6000, unit: 'request' },
+  [WAN_MODEL]: { min: 2, max: 30, refs: [10, 5, 5], resolutions: ['720p', '1080p'] },
+  [H3_MODEL]: { min: 1, max: 15, refs: [9, 0, 3], resolutions: ['768p', '480p', '1080p'] },
   'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848': { min: 4, max: 30, refs: [30, 10, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
   'ft-video-v1-756e0feb4b3e1f893726314109762123': { min: 15, max: 30, refs: [30, 0, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
   'ft-video-v1-451adae35b0c4a3d275c2c46394abc98': { min: 4, max: 30, refs: [30, 10, 10], wide: true, tokenWithVideo: true },
-  'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde': { min: 4, max: 15, refs: [9, 3, 3], wide: true, tokenWithVideo: true },
-  'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3': { min: 4, max: 15, refs: [9, 3, 3], wide: true, tokenWithVideo: true },
-  'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30': { min: 4, max: 15, refs: [9, 3, 3], wide: true, tokenWithVideo: true },
+  'ft-video-v1-43644108aaba72b7cbad4cd322737f6c': { min: 4, max: 15, refs: [9, 3, 3], resolutions: ['480p'], wide: true, unit: 'request' },
 }
 const VIDEO_MODEL_IDS = Object.keys(VIDEO_SPECS)
 const VIDEO_MODEL_ALIASES = {
-  'fk-MiniMaxh3': H3_MODEL,
-  '特价渠道 Seedance 2.5 满血 720p': 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
-  '特价渠道 Seedance 2.5 满血 720p（可过真人）': 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
-  '长期特惠 Seedance 2.5 满血 720p': 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
-  'Seedance 2.5 满血 480-720p': 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848',
-  'XN2-Seedance 2.5 满血 480-720p': 'ft-video-v1-756e0feb4b3e1f893726314109762123',
-  '官方渠道-Seedance 2.5 满血 720p': 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
-  '官方渠道-Seedance 2.0 Mini 720p': 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde',
-  '官方渠道-Seedance 2.0 Fast 720p': 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3',
-  '官方渠道-Seedance 2.0 满血 720p': 'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30',
+  "特价渠道 MiniMax H3 480p-1080p": "ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746",
+  "特价渠道 Seedance 2.0 满血 480p (933)": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c",
+  "Wan 3.0 720-1080p": "ft-video-v1-9cf6b90d6d04866453951fc3a26720aa",
+  "Seedance 2.5 满血 480-720p": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848",
+  "XN2-Seedance 2.5 满血 480-720p": "ft-video-v1-756e0feb4b3e1f893726314109762123",
+  "官方渠道-Seedance 2.5 满血 720p": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98"
 }
+
 
 function videoModel(value) {
   const model = String(value || '')
@@ -79,11 +73,11 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.7',
+  version: '0.3.9',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
-    zh: 'Fk渠道图片与 Seedance / MiniMax H3 视频生成',
+    zh: 'Fk渠道图片与 Seedance / Wan 3.0 / MiniMax H3 视频生成',
   },
   models: MODEL_IDS,
   fetchMode: 'per_task',
@@ -102,12 +96,17 @@ export const meta = {
     seconds_480p: {
       type: 'number',
       unit: 'second',
-      description: { en: 'XN 480p video seconds', zh: 'XN模型 480p 计费秒数' },
+      description: { en: '480p video seconds', zh: '480p 计费秒数' },
     },
     seconds_720p: {
       type: 'number',
       unit: 'second',
-      description: { en: 'XN 720p video seconds', zh: 'XN模型 720p 计费秒数' },
+      description: { en: '720p video seconds', zh: '720p 计费秒数' },
+    },
+    seconds_768p: { type: 'number', unit: 'second', description: { en: '768p video seconds', zh: '768p 计费秒数' } },
+    seconds_1080p: {
+      type: 'number', unit: 'second',
+      description: { en: '1080p video seconds', zh: '1080p 计费秒数' },
     },
     image_count: {
       type: 'number',
@@ -125,7 +124,7 @@ export const meta = {
   ].map(example => ({ ...example, facts: { calls: 0, video_reference_tokens: 0, upstream_cost_yuan: 0, ...example.facts } })).concat([
     { label: '按次视频', facts: { calls: 1, video_reference_tokens: 0, upstream_cost_yuan: 0, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
     { label: '官方视频参考结算', facts: { calls: 0, video_reference_tokens: 1000000, upstream_cost_yuan: 31.5, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
-  ]),
+  ]).map(example => ({ ...example, facts: { seconds_768p: 0, seconds_1080p: 0, ...example.facts } })),
 }
 
 const HOST_STATUS = {
@@ -193,6 +192,10 @@ function normalizeRequest(body, fileRefs = []) {
     resolution: String(body.resolution || (spec ? (spec.resolutions || ['720p'])[0] : '768p')),
   }
 
+  if (model === WAN_MODEL) {
+    if (body.prompt_extend !== undefined && typeof body.prompt_extend !== 'boolean') fail('prompt_extend must be a boolean')
+    payload.prompt_extend = body.prompt_extend === undefined ? false : body.prompt_extend
+  }
   const images = mediaUrls(body, ['imageUrls', 'images', 'image_urls', 'imageUrl', 'image_url', 'image'])
   const videos = mediaUrls(body, ['videoUrls', 'videos', 'video_urls', 'video_url', 'videoUrl', 'video'])
   const audios = mediaUrls(body, ['audioUrls', 'audios', 'audio_urls', 'audio_url', 'audioUrl', 'audio'])
@@ -239,6 +242,8 @@ function usageFacts(ctx, duration, body) {
     seconds: billableSeconds,
     seconds_480p: resolution.includes('480') ? billableSeconds : 0,
     seconds_720p: resolution.includes('720') ? billableSeconds : 0,
+    seconds_768p: resolution.includes('768') ? billableSeconds : 0,
+    seconds_1080p: resolution.includes('1080') ? billableSeconds : 0,
     image_count: 0,
   }
 }
@@ -609,7 +614,7 @@ export function buildContentRequest(ctx) {
 export function extractUsage(ctx) {
   const request = snapshot(ctx && ctx.requestBody)
   if (isImageModel(ctx)) {
-    return { seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 1 }
+    return { seconds: 0, seconds_480p: 0, seconds_720p: 0, seconds_1080p: 0, image_count: 1 }
   }
   return usageFacts(ctx, normalizedDuration(request), request)
 }
@@ -617,7 +622,7 @@ export function extractUsage(ctx) {
 export function extractUsageOnComplete(ctx, task, body) {
   if (isImageModel(ctx)) {
     const count = imageResultUrls(snapshot(body)).length
-    return count > 0 ? { image_count: count } : null
+    return count > 0 ? { image_count: count, seconds_1080p: 0 } : null
   }
   const data = snapshot(body && body.data)
   const result = Object.keys(data).length ? data : snapshot(body)
