@@ -12,6 +12,7 @@ import {
   deepSeekHandoffTurns,
   deepSeekMessageUsage,
   deepSeekTurnUsage,
+  deepSeekUsageRows,
   deepSeekSessionUsage,
   deepSeekModelInput,
   deepSeekModelRoute,
@@ -1259,6 +1260,62 @@ test('history uses the same official round totals as live events', () => {
   const events = usageTurn()
   events.splice(1, 0, { type: 'user/message', surfaceOp: 'append', data: { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'go' }] } } as any)
   assert.deepEqual(deepSeekSessionUsage({ session: { id: 's' }, events }).get('u1'), deepSeekTurnUsage(usageTurn()))
+})
+
+test('partial cache disclosure includes charged retries without turning unknown values into zero', () => {
+  const events = usageTurn()
+  events[2]!.data.stream[0].chunk.usage = { ...events[2]!.data.stream[0].chunk.usage }
+  delete events[2]!.data.stream[0].chunk.usage.cacheReadTokens
+  const result = deepSeekTurnUsage(events)!
+  assert.equal(result.cacheReadTokens, undefined)
+  assert.deepEqual(result.reportedUsage?.cacheReadTokens, { tokens: 100, reportedRequests: 2, totalRequests: 3 })
+  assert.deepEqual(deepSeekUsageRows(result).find(row => row.label === '缓存读取'), {
+    label: '缓存读取', value: '已报告 100', coverage: '2/3 次请求提供数据',
+  })
+  assert.deepEqual(deepSeekUsageRows(result).find(row => row.label === '缓存写入'), { label: '缓存写入', value: '未上报' })
+  assert.equal(deepSeekTurnUsage(events.slice(0, -1)), undefined)
+  events.splice(1, 0, { type: 'user/message', surfaceOp: 'append', data: { id: 'partial-u', source: { kind: 'user' }, content: [] } } as any)
+  assert.deepEqual(deepSeekSessionUsage({ session: { id: 'partial' }, events }).get('partial-u'), result)
+})
+
+test('usage display distinguishes exact zero, partial zero and wholly missing optional fields', () => {
+  const exact = usageTurn()
+  for (const event of exact) {
+    const usage = event.data.usage || event.data.stream?.[0]?.chunk?.usage
+    if (usage) { usage.cacheReadTokens = 0; usage.totalTokens = 120 }
+  }
+  assert.deepEqual(deepSeekUsageRows(deepSeekTurnUsage(exact)).find(row => row.label === '缓存读取'), { label: '缓存读取', value: '0' })
+  exact[2]!.data.stream[0].chunk.usage = { ...exact[2]!.data.stream[0].chunk.usage }
+  delete exact[2]!.data.stream[0].chunk.usage.cacheReadTokens
+  assert.deepEqual(deepSeekUsageRows(deepSeekTurnUsage(exact)).find(row => row.label === '缓存读取'), {
+    label: '缓存读取', value: '已报告 0', coverage: '2/3 次请求提供数据',
+  })
+  for (const event of exact) {
+    const usage = event.data.usage || event.data.stream?.[0]?.chunk?.usage
+    if (usage) delete usage.cacheReadTokens
+  }
+  assert.deepEqual(deepSeekUsageRows(deepSeekTurnUsage(exact)).find(row => row.label === '缓存读取'), { label: '缓存读取', value: '未上报' })
+  assert.deepEqual(deepSeekUsageRows(undefined), [])
+})
+
+test('partial disclosure uses final attempt samples and message precedence for all optional buckets', () => {
+  const events = usageTurn()
+  events[2]!.data.stream = [...events[2]!.data.stream, { type: 'chunk', time: 2, chunk: { type: 'usage', usage: {
+    inputTokens: 100, outputTokens: 20, totalTokens: 130, cacheReadTokens: 10, cacheWriteTokens: 0, reasoningTokens: 6,
+  } } }]
+  events[5]!.data.usage = { ...events[5]!.data.usage, cacheWriteTokens: 0, reasoningTokens: 4 }
+  delete events[5]!.data.usage.cacheReadTokens
+  events[5]!.data.stream = [{ type: 'chunk', time: 3, chunk: { type: 'usage', usage: {
+    inputTokens: 0, outputTokens: 20, totalTokens: 9020, cacheReadTokens: 9000,
+  } } }]
+  const result = deepSeekTurnUsage(events)!
+  assert.deepEqual(result.reportedUsage, {
+    cacheReadTokens: { tokens: 60, reportedRequests: 2, totalRequests: 3 },
+    cacheWriteTokens: { tokens: 0, reportedRequests: 2, totalRequests: 3 },
+    reasoningTokens: { tokens: 10, reportedRequests: 2, totalRequests: 3 },
+  })
+  assert.equal(result.inputTokens, 300)
+  assert.equal(result.outputTokens, 60)
 })
 
 test('cloud Claude uses native Messages while custom providers keep their declared OpenAI route', () => {

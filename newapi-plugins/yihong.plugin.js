@@ -1,25 +1,22 @@
-// NewAPI Task Plugin v1 — 易红六个视频型号；无图片或 fast Zeus。
+// NewAPI Task Plugin v1 — 易红三个视频型号；无图片或 fast Zeus。
 // 来源：用户提供的易红20261018文档与 seedance2.5 Ultra 补充合同。
 // 素材必须已上传为URL；本插件不执行文件上传，不改查询频率或收费重试策略。
 const MODELS = {
-  'yh-seedance2.5 Ultra': { min: 10, max: 30, seconds: 30, resolutions: ['720P'], images: 14, videos: 0, audios: 10, layout: 'ultra' },
-  'yh-seedance2.5 super': { min: 5, max: 30, seconds: 5, resolutions: ['720P'], ratios: ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], images: 30, videos: 10, audios: 10, layout: 'super' },
-  'yh-seedance-2.5-Muse': { min: 5, max: 30, allowed: [5, 10, 15, 30], seconds: 30, resolutions: ['720P'], ratios: ['16:9', '9:16'], images: 9, videos: 0, audios: 0 },
-  'yh-kling-omni-4.0': { min: 3, max: 30, seconds: 5, resolutions: ['720P'], ratios: ['1:1', '16:9', '9:16', '21:9'], images: 10, videos: 0, audios: 3 },
-  'yh-seedance2.0 mini Love': { min: 4, max: 15, seconds: 5, resolutions: ['720P', '480P'], ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], images: 9, videos: 0, audios: 3, layout: 'love' },
+  'yh-minimax H3': { min: 4, max: 15, seconds: 10, resolutions: ['768P'], ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], images: 9, videos: 3, audios: 3, layout: 'h3' },
+  'yh-seedance2.5 Ultra': { min: 10, max: 30, seconds: 30, resolutions: ['720P', '480P', '1080P'], images: 14, videos: 0, audios: 10, layout: 'ultra' },
   'yh-wan3.0-video': { min: 2, max: 30, seconds: 5, resolutions: ['480P', '720P', '1080P'], ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1'], images: 10, videos: 5, audios: 5, layout: 'wan' },
 }
 export const meta = {
-  apiVersion: 1, key: 'yihong', name: '易红视频', version: '0.2.0',
+  apiVersion: 1, key: 'yihong', name: '易红视频', version: '0.2.1',
   author: { name: 'jiucaihezi' },
-  description: { en: 'Six Yihong video models with yh- aliases', zh: '易红六个yh-视频型号，公网URL参考，按次或按秒计费' },
+  description: { en: 'Three Yihong video models with yh- aliases', zh: '易红三个yh-视频型号，公网URL参考，按次或按秒计费' },
   baseUrl: 'https://yihongapi.com',
   models: Object.keys(MODELS), fetchMode: 'per_task',
   protocols: [{ name: 'openai_video', models: Object.keys(MODELS) }],
   usageSchema: {
     calls: { type: 'number', unit: 'count', unitLabel: { en: 'call', zh: '次' }, description: { en: 'Video task count', zh: '视频任务数' } },
     seconds: { type: 'number', unit: 'second', description: { en: 'Requested duration', zh: '请求生成秒数' } },
-    resolution: { enum: ['480P', '720P', '1080P'], description: { en: 'Video resolution', zh: '视频分辨率' } },
+    resolution: { enum: ['480P', '720P', '768P', '1080P'], description: { en: 'Video resolution', zh: '视频分辨率' } },
   },
   usageExamples: [
     { label: '720p 10秒', facts: { calls: 1, seconds: 10, resolution: '720P' } },
@@ -66,7 +63,7 @@ function common(body, model) {
     if (groups[kind].length > spec[kind]) fail(kind + ' accepts at most ' + spec[kind] + ' references')
     groups[kind].forEach(entry => urlOf(entry, spec))
   }
-  const extras = spec.layout === 'love' ? ['content', 'input_reference', 'generate_audio', 'seed', 'watermark', 'camera_fixed', 'return_last_frame'] : spec.layout === 'wan' ? ['media', 'prompt_extend'] : spec.layout === 'super' ? ['media'] : []
+  const extras = spec.layout === 'h3' ? ['attachments', 'ai_enhance', 'seed', 'negative_prompt'] : spec.layout === 'love' ? ['content', 'input_reference', 'generate_audio', 'seed', 'watermark', 'camera_fixed', 'return_last_frame'] : spec.layout === 'wan' ? ['media', 'prompt_extend'] : spec.layout === 'super' ? ['media'] : []
   const allowed = ['model', 'prompt', 'seconds', 'duration', 'resolution', 'ratio', 'aspect_ratio', 'aspectRatio', ...Object.values(GROUPS).flat(), ...extras]
   for (const key of Object.keys(body)) if (!allowed.includes(key)) fail('Unsupported field for ' + model + ': ' + key)
   return { spec, prompt, seconds, resolution, ratio, groups }
@@ -132,6 +129,39 @@ function vendorBody(body, model) {
   const { spec, prompt, seconds, resolution, ratio, groups } = common(body, model)
   const request = { model: model.slice(3), prompt, seconds, resolution: spec.layout === 'wan' ? resolution : resolution.toLowerCase() }
   if (ratio !== undefined) request.ratio = ratio
+  if (spec.layout === 'h3') {
+    delete request.seconds
+    request.duration = seconds
+    if (groups.images.length) request.image_urls = groups.images.map(entry => urlOf(entry, spec))
+    if (body.attachments !== undefined && (!Array.isArray(body.attachments) || groups.videos.length || groups.audios.length)) fail('attachments must be an array and cannot be combined with video/audio arrays')
+    const attachments = body.attachments === undefined ? ['videos', 'audios'].flatMap(kind => groups[kind].map(entry => ({ type: kind === 'videos' ? 'video' : 'audio', ...(typeof entry === 'string' ? { url: entry } : entry) }))) : body.attachments
+    const counts = { video: 0, audio: 0 }
+    for (const entry of attachments) {
+      if (!entry || !Object.hasOwn(counts, entry.type)) fail('Unsupported attachment type')
+      mediaURL(entry.url, spec)
+      if (++counts[entry.type] > 3) fail('Too many H3 attachments')
+      if (Object.keys(entry).some(key => !['type', 'url', 'duration_seconds'].includes(key))) fail('Unsupported attachment field')
+      if (entry.type === 'video' || entry.duration_seconds !== undefined) {
+        if (typeof entry.duration_seconds !== 'number' || !Number.isFinite(entry.duration_seconds) || entry.duration_seconds < 2 || entry.duration_seconds > 15) fail('H3 attachments require duration_seconds from 2 to 15')
+      }
+    }
+    if (groups.images.length + attachments.length > 10) fail('H3 accepts at most 10 total references')
+    if (attachments.length) request.attachments = attachments
+    if (body.ai_enhance !== undefined) {
+      if (typeof body.ai_enhance !== 'boolean') fail('ai_enhance must be a boolean')
+      request.ai_enhance = body.ai_enhance
+    }
+    if (body.seed !== undefined) {
+      if (!Number.isSafeInteger(body.seed) || body.seed < 0) fail('seed must be a non-negative integer')
+      request.seed = body.seed
+    }
+    if (body.negative_prompt !== undefined) {
+      if (typeof body.negative_prompt !== 'string') fail('negative_prompt must be a string')
+      request.negative_prompt = body.negative_prompt
+    }
+    return request
+  }
+
   if (spec.layout === 'ultra' && groups.audios.length && !groups.images.length) fail('Ultra audio requires reference images')
   if ((spec.layout === 'super' && body.media !== undefined) || spec.layout === 'wan') {
     const media = typedMedia(body, spec, groups)
@@ -175,7 +205,7 @@ export const protocols = {
       const model = modelOf(ctx)
       if (source.model !== undefined && source.model !== model) fail('Conflicting request model')
       const request = vendorBody(source, model)
-      const hasReferences = ['image_urls', 'video_urls', 'audio_urls', 'images', 'content', 'media'].some(key => request[key]?.length) || Boolean(request.input_reference)
+      const hasReferences = ['image_urls', 'video_urls', 'audio_urls', 'images', 'content', 'media', 'attachments'].some(key => request[key]?.length) || Boolean(request.input_reference)
       return { kind: 'submit', model, action: hasReferences ? 'image_to_video' : 'text_to_video', requestBody: { ...source, model, resolution: request.resolution.toUpperCase() } }
     },
     render(ctx, task) {

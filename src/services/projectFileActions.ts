@@ -11,6 +11,15 @@ import type { ProjectResource, ProjectResourceRevision, ProjectTextRead } from '
 import { isMemoryMediaFilePath, MEMORY_MEDIA_DIRECTORY } from '@/utils/memoryProjectPaths'
 import type { ImportProjectExternalFilesInput, ProjectFileService, ProjectFileWriteResult } from './projectFileService'
 import { appendProjectDirectoryIndex } from './projectFileService'
+import wikiContract from '../../public/skills/wiki-artifacts.json'
+
+export const WIKI_TYPES = [
+  { id: 'generic', label: '通用 Wiki' },
+  { id: 'manju', label: '漫剧制作 Wiki' },
+  { id: 'short-drama', label: '短剧写作 Wiki' },
+  { id: 'novel', label: '小说创作 Wiki' },
+] as const
+export type WikiType = typeof WIKI_TYPES[number]['id']
 
 export interface CreateProjectCanvasInput {
   owner: string
@@ -113,6 +122,59 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
   }
 
   return {
+    async createProductionWiki(input: { owner: string; kind: WikiType }): Promise<ProjectResource> {
+      if (!WIKI_TYPES.some(type => type.id === input.kind)) throw new Error('未知 Wiki 类型')
+      const resources = await projectFiles.list(input.owner)
+      const byPath = new Map(resources.map(resource => [resource.path, resource]))
+      const roots: string[] = []
+      for (const root of wikiContract.rootCandidates) {
+        const children = new Set(resources.filter(resource => resource.path.startsWith(`${root}/`))
+          .map(resource => resource.path.slice(root.length + 1).split('/')[0]))
+        const signature = wikiContract.excludedRootSignatures.find(item => item.root === root)
+        if (signature && byPath.has(`${root}/${signature.path}`)
+          && (await projectFiles.readTextAt(input.owner, `${root}/${signature.path}`)).content.startsWith(signature.startsWith)) continue
+        if (byPath.has(`${root}/${wikiContract.rootIndex}`)
+          || wikiContract.rootMarkers.filter(marker => marker !== wikiContract.rootIndex && children.has(marker)).length >= wikiContract.minimumRootMarkers)
+          roots.push(root)
+      }
+      if (roots.length > 1) throw new Error(`检测到多个 Wiki 根目录：${roots.join('、')}，请先明确选择`)
+      const root = roots[0] || wikiContract.rootCandidates[0]
+      const directories = new Set([''])
+      if (input.kind !== 'generic') {
+        for (const [kind, template] of Object.entries(wikiContract.types)) {
+          const spec: { path: string; production_routes: readonly string[] } = input.kind === 'manju'
+            ? { ...template, ...(wikiContract.manju_layout.types as Record<string, { path: string }>)[kind] } : template
+          if (!(spec.production_routes as readonly string[]).includes(input.kind)) continue
+          let directory = ''
+          for (const part of spec.path.split('/').slice(0, -1)) {
+            if (part.includes('{')) break
+            directory = directory ? `${directory}/${part}` : part
+            directories.add(directory)
+          }
+        }
+        if (input.kind === 'manju') for (const directory of wikiContract.manju_layout.directories) directories.add(directory.path)
+      }
+      const paths = [...directories].sort((a, b) => a.split('/').length - b.split('/').length)
+        .map(directory => directory ? `${root}/${directory}` : root)
+      for (const path of paths) {
+        if (byPath.has(path) && !byPath.get(path)!.isDirectory) throw new Error(`目标目录被文件占用：${path}`)
+        if (byPath.get(`${path}/index.md`)?.isDirectory) throw new Error(`索引被目录占用：${path}/index.md`)
+      }
+      let result: ProjectResource | undefined
+      for (const path of paths) {
+        const slash = path.lastIndexOf('/')
+        const folder = await this.createWikiFolder({ owner: input.owner,
+          parentPath: slash < 0 ? '' : path.slice(0, slash), name: path.slice(slash + 1) })
+        result ??= folder
+      }
+      if (input.kind === 'manju') {
+        const path = `${root}/项目风格/影片比例与风格.md`
+        if (!(await projectFiles.listDirectory(input.owner, `${root}/项目风格`)).some(file => file.path === path))
+          await projectFiles.createText(input.owner, path, '# 影片比例与风格\n\n状态：待填写\n\n画面比例：待填写\n媒介：待填写\n视觉风格：待填写\n色彩与光线：待填写\n声音路线：待填写\n')
+        await appendProjectDirectoryIndex(projectFiles, input.owner, `${root}/项目风格`, path)
+      }
+      return result!
+    },
     async createWikiFolder(input: { owner: string; parentPath: string; name: string }): Promise<ProjectResource> {
       const name = input.name.trim()
       if (!name || name === '.' || name === '..' || /[\\/\0\[\]#|]/.test(name)) throw new Error('Wiki 文件夹名称无效')

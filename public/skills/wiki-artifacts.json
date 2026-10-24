@@ -1,66 +1,601 @@
 {
   "version": 1,
-  "rootCandidates": ["wiki", "docs/wiki"],
-  "rootMarkers": ["index.md", "制作进度.md", "原始材料", "项目资料", "改编方案", "创作", "剧本", "资产"],
+  "rootCandidates": [
+    "wiki",
+    "docs/wiki"
+  ],
+  "rootMarkers": [
+    "index.md",
+    "制作进度.md",
+    "原始材料",
+    "项目资料",
+    "改编方案",
+    "创作",
+    "剧本",
+    "资产"
+  ],
   "rootIndex": "index.md",
   "minimumRootMarkers": 2,
   "excludedRootSignatures": [
-    { "root": "docs/wiki", "path": "CLAUDE.md", "startsWith": "# 通用记忆工作台开发文档" }
+    {
+      "root": "docs/wiki",
+      "path": "CLAUDE.md",
+      "startsWith": "# 通用记忆工作台开发文档"
+    }
   ],
   "scaffold": {
     "rootTitle": "项目 Wiki",
     "progressPath": "制作进度.md",
     "directories": [
-      { "path": "原始材料", "purpose": "保存用户明确授权作为来源的原文与资料。" },
-      { "path": "原始材料/{book}", "purpose": "按作品保存已确认的小说正文与来源材料。" },
-      { "path": "项目资料", "purpose": "保存故事资料与人物小传。" },
-      { "path": "项目资料/人物小传", "purpose": "保存每个人物单独的人物小传。" },
-      { "path": "改编方案", "purpose": "保存已确认的作品改编方向与漫剧视觉和制作总纲。" },
-      { "path": "创作", "purpose": "保存小说规划、章节草稿及写作复盘。" },
-      { "path": "创作/章节草稿", "purpose": "保存等待用户确认的小说章节草稿。" },
-      { "path": "剧本", "purpose": "按集保存漫剧剧本、工程剧本与视频提示词。" },
-      { "path": "资产/声音", "purpose": "每角色一份稳定九维声音身份与录音绑定。" },
-      { "path": "资产/角色", "purpose": "一个角色一份规范档案，保存小传关联、设计及提示词。" },
-      { "path": "资产/场景", "purpose": "保存可复用的场景资料与提示词。" },
-      { "path": "资产/道具", "purpose": "保存可复用的道具资料与提示词。" }
+      {
+        "path": "原始材料",
+        "purpose": "保存用户明确授权作为来源的原文与资料。"
+      },
+      {
+        "path": "原始材料/{book}",
+        "purpose": "按作品保存已确认的小说正文与来源材料。"
+      },
+      {
+        "path": "项目资料",
+        "purpose": "保存故事资料与人物小传。"
+      },
+      {
+        "path": "项目资料/人物小传",
+        "purpose": "保存每个人物单独的人物小传。"
+      },
+      {
+        "path": "改编方案",
+        "purpose": "保存已确认的作品改编方向与漫剧视觉和制作总纲。"
+      },
+      {
+        "path": "创作",
+        "purpose": "保存小说规划、章节草稿及写作复盘。"
+      },
+      {
+        "path": "创作/章节草稿",
+        "purpose": "保存等待用户确认的小说章节草稿。"
+      },
+      {
+        "path": "剧本",
+        "purpose": "按集保存漫剧剧本、工程剧本与视频提示词。"
+      },
+      {
+        "path": "资产/声音",
+        "purpose": "每角色一份稳定九维声音身份与录音绑定。"
+      },
+      {
+        "path": "资产/角色",
+        "purpose": "一个角色一份规范档案，保存小传关联、设计及提示词。"
+      },
+      {
+        "path": "资产/场景",
+        "purpose": "保存可复用的场景资料与提示词。"
+      },
+      {
+        "path": "资产/道具",
+        "purpose": "保存可复用的道具资料与提示词。"
+      }
     ]
   },
   "types": {
-    "story_summary": { "path": "项目资料/故事梗概.md", "index": "项目资料/index.md", "label": "故事梗概", "research": true, "production_routes": ["manju", "short-drama"] },
-    "episode_summaries": { "path": "项目资料/分集梗概.md", "index": "项目资料/index.md", "label": "分集梗概", "research": true, "production_routes": ["manju", "short-drama"] },
-    "story_background": { "path": "项目资料/故事背景.md", "index": "项目资料/index.md", "label": "故事背景", "research": true, "production_routes": ["manju", "short-drama"] },
-    "world_rules": { "path": "项目资料/世界规则.md", "index": "项目资料/index.md", "label": "世界规则", "research": true, "production_routes": ["manju", "short-drama"] },
-    "character_bio": { "path": "项目资料/人物小传/{entity}.md", "index": "项目资料/人物小传/index.md", "label": "{entity}", "entity": true, "research": true, "production_routes": ["manju", "short-drama"] },
-    "project_overview": { "path": "改编方案/项目总纲.md", "index": "改编方案/index.md", "label": "项目总纲", "production_routes": ["manju", "short-drama"] },
-    "screenplay": { "path": "剧本/{episode}/分集剧本.md", "index": "剧本/index.md", "label": "{episode}分集剧本", "episode": true, "production_routes": ["short-drama"] },
-    "engineering_script": { "path": "剧本/{episode}/工程剧本.md", "index": "剧本/index.md", "label": "{episode}工程剧本", "episode": true, "production_routes": ["manju"] },
-    "video_prompt": { "path": "剧本/{episode}/视频提示词/{model}/{segment}.md", "index": "剧本/index.md", "label": "{episode}{model} {segment}", "episode": true, "model": ["H3", "Seedance"], "production_routes": ["manju"] },
-    "storyboard_prompt": { "path": "剧本/{episode}/分镜提示词/{model}/{segment}.md", "index": "剧本/index.md", "label": "{episode}{model}分镜 {segment}", "episode": true, "model": ["H3", "Seedance"], "production_routes": ["manju"] },
-    "character_voice": { "path": "资产/声音/{entity}.md", "index": "资产/声音/index.md", "label": "{entity}声音", "entity": true, "production_routes": ["manju"] },
-    "sound_direction": { "path": "剧本/{episode}/声音导演/{segment}.md", "index": "剧本/index.md", "label": "{episode}声音导演 {segment}", "episode": true, "production_routes": ["manju"] },
-    "character_asset": { "path": "资产/角色/{entity}.md", "index": "资产/角色/index.md", "label": "{entity}", "entity": true, "production_routes": ["manju"] },
-    "scene_asset": { "path": "资产/场景/{entity}.md", "index": "资产/场景/index.md", "label": "{entity}", "entity": true, "production_routes": ["manju"] },
-    "prop_asset": { "path": "资产/道具/{entity}.md", "index": "资产/道具/index.md", "label": "{entity}", "entity": true, "production_routes": ["manju"] },
-    "novel_idea": { "path": "创作/灵感方案.md", "index": "创作/index.md", "label": "灵感方案", "production_routes": ["novel"] },
-    "novel_market_analysis": { "path": "创作/市场分析.md", "index": "创作/index.md", "label": "市场分析", "production_routes": ["novel"] },
-    "novel_core_premise": { "path": "创作/核心梗.md", "index": "创作/index.md", "label": "核心梗", "production_routes": ["novel"] },
-    "novel_world_setting": { "path": "创作/世界设定.md", "index": "创作/index.md", "label": "世界设定", "production_routes": ["novel"] },
-    "novel_outline": { "path": "创作/大纲.md", "index": "创作/index.md", "label": "全书大纲", "production_routes": ["novel"] },
-    "novel_chapter_outline": { "path": "创作/章纲.md", "index": "创作/index.md", "label": "章纲", "production_routes": ["novel"] },
-    "novel_foreshadow": { "path": "创作/伏笔.md", "index": "创作/index.md", "label": "伏笔追踪", "production_routes": ["novel"] },
-    "novel_packaging": { "path": "创作/文案包装.md", "index": "创作/index.md", "label": "文案包装", "production_routes": ["novel"] },
-    "novel_manuscript_review": { "path": "创作/全稿复盘.md", "index": "创作/index.md", "label": "全稿复盘", "production_routes": ["novel"] },
-    "novel_character": { "path": "资产/角色/{entity}.md", "index": "资产/角色/index.md", "label": "{entity}", "entity": true, "production_routes": ["novel"] },
-    "novel_scene": { "path": "资产/场景/{entity}.md", "index": "资产/场景/index.md", "label": "{entity}", "entity": true, "production_routes": ["novel"] },
-    "novel_prop": { "path": "资产/道具/{entity}.md", "index": "资产/道具/index.md", "label": "{entity}", "entity": true, "production_routes": ["novel"] },
-    "novel_chapter_draft": { "path": "创作/章节草稿/{book}/第{chapter}章.md", "index": "创作/章节草稿/{book}/index.md", "label": "{book} 第{chapter}章草稿", "mode": "chapter_draft", "production_routes": ["novel"] },
-    "novel_chapter_source": { "path": "原始材料/{book}/原文.md", "index": "原始材料/{book}/index.md", "label": "{book} 第{chapter}章正文", "mode": "chapter_source", "production_routes": ["novel"] },
-    "scene_research": { "path": "项目资料/场景/{entity}.md", "index": "项目资料/场景/index.md", "label": "{entity}", "research": true, "entity": true, "production_routes": ["manju", "short-drama"] },
-    "prop_research": { "path": "项目资料/道具/{entity}.md", "index": "项目资料/道具/index.md", "label": "{entity}", "research": true, "entity": true, "production_routes": ["manju", "short-drama"] },
-    "event_timeline": { "path": "项目资料/事件线与发展阶段.md", "index": "项目资料/index.md", "label": "事件线与发展阶段", "research": true, "production_routes": ["manju", "short-drama"] },
-    "research_coverage": { "path": "项目资料/阅读覆盖.md", "index": "项目资料/index.md", "label": "阅读覆盖", "research": true, "production_routes": ["manju", "short-drama"] },
-    "adaptation_episode_plan": { "path": "改编方案/分集规划.md", "index": "改编方案/index.md", "label": "分集规划", "production_routes": ["short-drama"] },
-    "production_progress": { "path": "制作进度.md", "index": "index.md", "label": "制作进度", "production_routes": ["manju", "short-drama", "novel"] },
-    "source_material": { "path": "原始材料/{work}/原文.md", "index": "原始材料/{work}/index.md", "label": "{work} 原文", "mode": "source_selection", "production_routes": ["manju", "short-drama", "novel"] }
+    "story_summary": {
+      "path": "项目资料/故事梗概.md",
+      "index": "项目资料/index.md",
+      "label": "故事梗概",
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "episode_summaries": {
+      "path": "项目资料/分集梗概.md",
+      "index": "项目资料/index.md",
+      "label": "分集梗概",
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "story_background": {
+      "path": "项目资料/故事背景.md",
+      "index": "项目资料/index.md",
+      "label": "故事背景",
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "world_rules": {
+      "path": "项目资料/世界规则.md",
+      "index": "项目资料/index.md",
+      "label": "世界规则",
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "character_bio": {
+      "path": "项目资料/人物小传/{entity}.md",
+      "index": "项目资料/人物小传/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "project_overview": {
+      "path": "改编方案/项目总纲.md",
+      "index": "改编方案/index.md",
+      "label": "项目总纲",
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "screenplay": {
+      "path": "剧本/{episode}/分集剧本.md",
+      "index": "剧本/index.md",
+      "label": "{episode}分集剧本",
+      "episode": true,
+      "production_routes": [
+        "short-drama"
+      ]
+    },
+    "engineering_script": {
+      "path": "剧本/{episode}/工程剧本.md",
+      "index": "剧本/index.md",
+      "label": "{episode}工程剧本",
+      "episode": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "video_prompt": {
+      "path": "剧本/{episode}/视频提示词/{model}/{segment}.md",
+      "index": "剧本/index.md",
+      "label": "{episode}{model} {segment}",
+      "episode": true,
+      "model": [
+        "H3",
+        "Seedance"
+      ],
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "storyboard_prompt": {
+      "path": "剧本/{episode}/分镜提示词/{model}/{segment}.md",
+      "index": "剧本/index.md",
+      "label": "{episode}{model}分镜 {segment}",
+      "episode": true,
+      "model": [
+        "H3",
+        "Seedance"
+      ],
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "character_voice": {
+      "path": "资产/声音/{entity}.md",
+      "index": "资产/声音/index.md",
+      "label": "{entity}声音",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "sound_direction": {
+      "path": "剧本/{episode}/声音导演/{segment}.md",
+      "index": "剧本/index.md",
+      "label": "{episode}声音导演 {segment}",
+      "episode": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "character_asset": {
+      "path": "资产/角色/{entity}.md",
+      "index": "资产/角色/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "scene_asset": {
+      "path": "资产/场景/{entity}.md",
+      "index": "资产/场景/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "prop_asset": {
+      "path": "资产/道具/{entity}.md",
+      "index": "资产/道具/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "novel_idea": {
+      "path": "创作/灵感方案.md",
+      "index": "创作/index.md",
+      "label": "灵感方案",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_market_analysis": {
+      "path": "创作/市场分析.md",
+      "index": "创作/index.md",
+      "label": "市场分析",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_core_premise": {
+      "path": "创作/核心梗.md",
+      "index": "创作/index.md",
+      "label": "核心梗",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_world_setting": {
+      "path": "创作/世界设定.md",
+      "index": "创作/index.md",
+      "label": "世界设定",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_outline": {
+      "path": "创作/大纲.md",
+      "index": "创作/index.md",
+      "label": "全书大纲",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_chapter_outline": {
+      "path": "创作/章纲.md",
+      "index": "创作/index.md",
+      "label": "章纲",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_foreshadow": {
+      "path": "创作/伏笔.md",
+      "index": "创作/index.md",
+      "label": "伏笔追踪",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_packaging": {
+      "path": "创作/文案包装.md",
+      "index": "创作/index.md",
+      "label": "文案包装",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_manuscript_review": {
+      "path": "创作/全稿复盘.md",
+      "index": "创作/index.md",
+      "label": "全稿复盘",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_character": {
+      "path": "资产/角色/{entity}.md",
+      "index": "资产/角色/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_scene": {
+      "path": "资产/场景/{entity}.md",
+      "index": "资产/场景/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_prop": {
+      "path": "资产/道具/{entity}.md",
+      "index": "资产/道具/index.md",
+      "label": "{entity}",
+      "entity": true,
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_chapter_draft": {
+      "path": "创作/章节草稿/{book}/第{chapter}章.md",
+      "index": "创作/章节草稿/{book}/index.md",
+      "label": "{book} 第{chapter}章草稿",
+      "mode": "chapter_draft",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "novel_chapter_source": {
+      "path": "原始材料/{book}/原文.md",
+      "index": "原始材料/{book}/index.md",
+      "label": "{book} 第{chapter}章正文",
+      "mode": "chapter_source",
+      "production_routes": [
+        "novel"
+      ]
+    },
+    "scene_research": {
+      "path": "项目资料/场景/{entity}.md",
+      "index": "项目资料/场景/index.md",
+      "label": "{entity}",
+      "research": true,
+      "entity": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "prop_research": {
+      "path": "项目资料/道具/{entity}.md",
+      "index": "项目资料/道具/index.md",
+      "label": "{entity}",
+      "research": true,
+      "entity": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "event_timeline": {
+      "path": "项目资料/事件线与发展阶段.md",
+      "index": "项目资料/index.md",
+      "label": "事件线与发展阶段",
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "research_coverage": {
+      "path": "项目资料/阅读覆盖.md",
+      "index": "项目资料/index.md",
+      "label": "阅读覆盖",
+      "research": true,
+      "production_routes": [
+        "manju",
+        "short-drama"
+      ]
+    },
+    "adaptation_episode_plan": {
+      "path": "改编方案/分集规划.md",
+      "index": "改编方案/index.md",
+      "label": "分集规划",
+      "production_routes": [
+        "short-drama"
+      ]
+    },
+    "production_progress": {
+      "path": "制作进度.md",
+      "index": "index.md",
+      "label": "制作进度",
+      "production_routes": [
+        "manju",
+        "short-drama",
+        "novel"
+      ]
+    },
+    "source_material": {
+      "path": "原始材料/{work}/原文.md",
+      "index": "原始材料/{work}/index.md",
+      "label": "{work} 原文",
+      "mode": "source_selection",
+      "production_routes": [
+        "manju",
+        "short-drama",
+        "novel"
+      ]
+    },
+    "film_style": {
+      "path": "项目风格/影片比例与风格.md",
+      "index": "项目风格/index.md",
+      "label": "影片比例与风格",
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "character_format": {
+      "path": "资产/角色/{entity}/角色生图格式提示词.md",
+      "index": "资产/角色/{entity}/index.md",
+      "label": "{entity}角色生图格式提示词",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "episode_source_script": {
+      "path": "项目资料/分集剧本/第{episode_number}集分集剧本.md",
+      "index": "项目资料/分集剧本/index.md",
+      "label": "第{episode_number}集分集剧本",
+      "episode": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "pipeline_checkpoint": {
+      "path": "制作流水线/{model}/第{episode_number}集进度.json",
+      "index": "制作流水线/{model}/index.md",
+      "label": "第{episode_number}集{model}流水线进度",
+      "episode": true,
+      "model": [
+        "H3",
+        "Seedance"
+      ],
+      "mode": "pipeline",
+      "production_routes": [
+        "manju"
+      ]
+    }
+  },
+  "manju_layout": {
+    "types": {
+      "engineering_script": {
+        "path": "剧本/工程剧本/第{episode_number}集工程剧本.md",
+        "index": "剧本/工程剧本/index.md"
+      },
+      "sound_direction": {
+        "path": "剧本/声音剧本/第{episode_number}集声音剧本.md",
+        "index": "剧本/声音剧本/index.md"
+      },
+      "character_asset": {
+        "path": "资产/角色/{entity}/角色生图提示词.md",
+        "index": "资产/角色/{entity}/index.md"
+      },
+      "character_voice": {
+        "path": "资产/角色/{entity}/声音设计提示词.md",
+        "index": "资产/角色/{entity}/index.md"
+      },
+      "scene_asset": {
+        "path": "资产/场景/{entity}/场景生图提示词.md",
+        "index": "资产/场景/{entity}/index.md"
+      },
+      "prop_asset": {
+        "path": "资产/道具/{entity}/道具生图提示词.md",
+        "index": "资产/道具/{entity}/index.md"
+      },
+      "scene_research": {
+        "path": "项目资料/场景说明/{entity}.md",
+        "index": "项目资料/场景说明/index.md"
+      },
+      "prop_research": {
+        "path": "项目资料/道具说明/{entity}.md",
+        "index": "项目资料/道具说明/index.md"
+      },
+      "video_prompt": {
+        "path": "剧本/视频提示词/{model}/第{episode_number}集{clip}视频提示词.md",
+        "index": "剧本/视频提示词/{model}/index.md"
+      },
+      "storyboard_prompt": {
+        "path": "剧本/分镜提示词/{model}/第{episode_number}集{clip}分镜提示词.md",
+        "index": "剧本/分镜提示词/{model}/index.md"
+      }
+    },
+    "directories": [
+      {
+        "path": "制作流水线",
+        "purpose": "保存制作流水线的对应资料与产物。"
+      },
+      {
+        "path": "剧本",
+        "purpose": "保存剧本的对应资料与产物。"
+      },
+      {
+        "path": "原始材料",
+        "purpose": "保存原始材料的对应资料与产物。"
+      },
+      {
+        "path": "改编方案",
+        "purpose": "保存改编方案的对应资料与产物。"
+      },
+      {
+        "path": "资产",
+        "purpose": "保存资产的对应资料与产物。"
+      },
+      {
+        "path": "项目资料",
+        "purpose": "保存项目资料的对应资料与产物。"
+      },
+      {
+        "path": "项目风格",
+        "purpose": "保存项目风格的对应资料与产物。"
+      },
+      {
+        "path": "制作流水线/H3",
+        "purpose": "保存H3的对应资料与产物。"
+      },
+      {
+        "path": "制作流水线/Seedance",
+        "purpose": "保存Seedance的对应资料与产物。"
+      },
+      {
+        "path": "剧本/分镜提示词",
+        "purpose": "保存分镜提示词的对应资料与产物。"
+      },
+      {
+        "path": "剧本/声音剧本",
+        "purpose": "保存声音剧本的对应资料与产物。"
+      },
+      {
+        "path": "剧本/工程剧本",
+        "purpose": "保存工程剧本的对应资料与产物。"
+      },
+      {
+        "path": "剧本/视频提示词",
+        "purpose": "保存视频提示词的对应资料与产物。"
+      },
+      {
+        "path": "资产/场景",
+        "purpose": "保存场景的对应资料与产物。"
+      },
+      {
+        "path": "资产/角色",
+        "purpose": "保存角色的对应资料与产物。"
+      },
+      {
+        "path": "资产/道具",
+        "purpose": "保存道具的对应资料与产物。"
+      },
+      {
+        "path": "项目资料/人物小传",
+        "purpose": "保存人物小传的对应资料与产物。"
+      },
+      {
+        "path": "项目资料/分集剧本",
+        "purpose": "保存分集剧本的对应资料与产物。"
+      },
+      {
+        "path": "项目资料/场景说明",
+        "purpose": "保存场景说明的对应资料与产物。"
+      },
+      {
+        "path": "项目资料/道具说明",
+        "purpose": "保存道具说明的对应资料与产物。"
+      },
+      {
+        "path": "剧本/分镜提示词/H3",
+        "purpose": "保存H3的对应资料与产物。"
+      },
+      {
+        "path": "剧本/分镜提示词/Seedance",
+        "purpose": "保存Seedance的对应资料与产物。"
+      },
+      {
+        "path": "剧本/视频提示词/H3",
+        "purpose": "保存H3的对应资料与产物。"
+      },
+      {
+        "path": "剧本/视频提示词/Seedance",
+        "purpose": "保存Seedance的对应资料与产物。"
+      }
+    ]
   }
 }

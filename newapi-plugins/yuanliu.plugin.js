@@ -1,9 +1,27 @@
-// NewAPI Task Plugin v1 — 源流 AI OpenAPI Seedance 视频模型。
+// NewAPI Task Plugin v1 — 源流 AI OpenAPI 六个视频型号。
 // 上游协议为异步视频创建、查询和鉴权内容下载，直接由 NewAPI openai_video 宿主承载。
-const MODEL_LIMITS = {
-  'yl_seedance-2-5_6caffaca7390': { images: 30, videos: 0, audios: 0 },
-  'yl_seedance-2-5_0fab2f1b1f10': { images: 30, videos: 10, audios: 10 },
+// 素材上限、时长档位与画幅来自用户 2026-10-24 提供的型号清单；固定时长型号按 min=max 校验。
+// 计费：按次型号用 calls；按秒型号用 seconds，Wan 3.0 另按 resolution 分档（缺省 480p）。
+// 公开模型名（NewAPI 渠道内 UI 显示名）→ 源流上游 model ID。
+// 渠道模型映射即下表；插件也内置同一份别名，即使后台映射留空也能发上游 ID。
+const PUBLIC_NAMES = {
+  'Seedance 2.5(HD)': 'yl_seedance-2-5_6caffaca7390',
+  'Seedance 2.5 480p (QN-10)': 'yl_pp_sz_sd25_30010',
+  'Seedance2.0(HD)': 'yl_seedance-2-0_ba0687ff09f2',
+  'Seedance2.5full (LJ-04)': 'yl_g7zy_seedance_v2_5_full_s',
+  'Wan3.0视频Prime官渠稳定(WP-01)': 'yl_fy_wan3_0_video_prime',
+  'Wan3.0官渠(WP-02)': 'yl_fy_wan3_0_video',
 }
+const RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+const MODEL_SPECS = {
+  'yl_seedance-2-5_6caffaca7390': { refs: [30, 0, 0], unit: 'call', min: 30, max: 30 },
+  'yl_pp_sz_sd25_30010': { refs: [30, 0, 10], unit: 'call', min: 4, max: 30 },
+  'yl_seedance-2-0_ba0687ff09f2': { refs: [9, 0, 0], unit: 'call', min: 10, max: 15 },
+  'yl_g7zy_seedance_v2_5_full_s': { refs: [30, 10, 10], unit: 'second', min: 5, max: 30 },
+  'yl_fy_wan3_0_video_prime': { refs: [10, 5, 5], unit: 'second', min: 2, max: 30, resolutions: ['480p', '720p', '1080p'] },
+  'yl_fy_wan3_0_video': { refs: [10, 5, 5], unit: 'second', min: 2, max: 30, resolutions: ['480p', '720p', '1080p'] },
+}
+const DEFAULT_RESOLUTION = '480p'
 
 const UPSTREAM_STATUS = {
   queued: 'QUEUED',
@@ -25,13 +43,13 @@ export const meta = {
   apiVersion: 1,
   key: 'yuanliu',
   name: '源流 AI',
-  version: '0.1.0',
+  version: '0.2.0',
   author: { name: 'jiucaihezi' },
   description: {
-    en: 'Yuanliu AI Seedance video generation',
-    zh: '源流 AI Seedance 2.5 视频生成',
+    en: 'Yuanliu AI Seedance and Wan video generation',
+    zh: '源流 AI Seedance / Wan 六个视频型号',
   },
-  models: Object.keys(MODEL_LIMITS),
+  models: Object.keys(PUBLIC_NAMES),
   fetchMode: 'per_task',
   protocols: ['openai_video'],
   // Public docs expose /openapi/v1/videos; channel Base URL includes /openapi.
@@ -43,9 +61,12 @@ export const meta = {
       unitLabel: { en: 'call', zh: '次' },
       description: { en: 'Video task count', zh: '视频任务数' },
     },
+    seconds: { type: 'number', unit: 'second', description: { en: 'Billable video seconds', zh: '计费秒数，按次型号为 0' } },
+    resolution: { enum: ['480p', '720p', '1080p'], description: { en: 'Video resolution', zh: '视频分辨率' } },
   },
   usageExamples: [
-    { label: '一次视频任务', facts: { calls: 1 } },
+    { label: '按次任务', facts: { calls: 1, seconds: 0, resolution: '480p' } },
+    { label: '720p 10 秒', facts: { calls: 0, seconds: 10, resolution: '720p' } },
   ],
 }
 
@@ -97,6 +118,23 @@ function durationOf(body) {
   return duration
 }
 
+function specOf(ctx) {
+  const model = String((ctx && (ctx.upstreamModel || ctx.model)) || objectOf(ctx && ctx.requestBody).model || '')
+  return MODEL_SPECS[upstreamModel(model)] || {}
+}
+
+function upstreamModel(value) {
+  return PUBLIC_NAMES[value] || value
+}
+
+function billedResolution(source, spec) {
+  const raw = firstDefined(source, ['resolution'])
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  const allowed = spec.resolutions || []
+  if (allowed.includes(value)) return value
+  return allowed[0] || value || DEFAULT_RESOLUTION
+}
+
 export const protocols = {
   openai_video: {
     decodeRequest(ctx) {
@@ -104,14 +142,25 @@ export const protocols = {
       const body = ctx.body.value
       if (!body || typeof body !== 'object' || Array.isArray(body)) fail('request body must be an object')
       const model = String(body.model || '')
-      const limits = MODEL_LIMITS[model]
-      if (!limits) fail(`Unsupported model: ${model || '(missing)'}`)
+      const spec = MODEL_SPECS[upstreamModel(model)]
+      if (!spec) fail(`Unsupported model: ${model || '(missing)'}`)
       if (!promptOf(body)) fail('prompt is required')
-      durationOf(body)
+      const duration = durationOf(body)
+      if (duration < spec.min || duration > spec.max) fail(`${model} duration must be ${spec.min}-${spec.max} seconds`)
+      const ratio = firstDefined(body, ['aspect_ratio', 'aspectRatio', 'ratio'])
+      if (ratio !== undefined && ratio !== null && String(ratio).trim() && !RATIOS.includes(String(ratio).trim())) fail(`${model} aspect_ratio must be one of ${RATIOS.join(', ')}`)
+      if (spec.resolutions) {
+        const raw = firstDefined(body, ['resolution'])
+        if (raw !== undefined && raw !== null && String(raw).trim()) {
+          const resolution = String(raw).trim().toLowerCase()
+          if (!spec.resolutions.includes(resolution)) fail(`${model} resolution must be one of ${spec.resolutions.join(', ')}`)
+        }
+      }
 
       const inputs = requestInputs(body)
-      for (const kind of ['images', 'videos', 'audios']) {
-        if (inputs[kind].length > limits[kind]) fail(`${kind} accepts at most ${limits[kind]} references for ${model}`)
+      const [images, videos, audios] = spec.refs
+      for (const [kind, limit] of [['images', images], ['videos', videos], ['audios', audios]]) {
+        if (inputs[kind].length > limit) fail(`${kind} accepts at most ${limit} references for ${model}`)
       }
 
       return {
@@ -143,17 +192,21 @@ export const protocols = {
 
 export function buildSubmitRequest(ctx) {
   const source = objectOf(ctx.requestBody)
+  const spec = specOf(ctx)
   const inputs = requestInputs(source)
   const body = {
-    model: String(ctx.upstreamModel || ctx.model),
+    model: upstreamModel(String(ctx.upstreamModel || ctx.model)),
     prompt: promptOf(source),
     duration: durationOf(source),
   }
 
   const aspectRatio = firstDefined(source, ['aspect_ratio', 'aspectRatio', 'ratio'])
   if (typeof aspectRatio === 'string' && aspectRatio.trim()) body.aspect_ratio = aspectRatio.trim()
-  const resolution = firstDefined(source, ['resolution'])
-  if (typeof resolution === 'string' && resolution.trim()) body.resolution = resolution.trim()
+  if (spec.resolutions) body.resolution = billedResolution(source, spec)
+  else {
+    const resolution = firstDefined(source, ['resolution'])
+    if (typeof resolution === 'string' && resolution.trim()) body.resolution = resolution.trim()
+  }
   for (const kind of ['images', 'videos', 'audios']) {
     if (inputs[kind].length) body[kind] = inputs[kind]
   }
@@ -219,10 +272,21 @@ export function buildContentRequest(ctx) {
   }
 }
 
-export function extractUsage() {
-  return { calls: 1 }
+export function extractUsage(ctx) {
+  const source = objectOf(ctx && ctx.requestBody)
+  const spec = specOf({ ...ctx, requestBody: source })
+  const raw = Number(firstDefined(source, ['duration', 'seconds']))
+  return {
+    calls: 1,
+    seconds: spec.unit === 'second' && Number.isInteger(raw) && raw > 0 ? raw : 0,
+    resolution: billedResolution(source, spec),
+  }
 }
 
-export function extractUsageOnComplete() {
-  return { calls: 1 }
+// 完成态沿用同一份事实，避免按秒型号被零用量退款；上游给出实际时长时按实际结算。
+export function extractUsageOnComplete(ctx, task, body) {
+  const usage = extractUsage(ctx)
+  if (!usage.seconds) return usage
+  const actual = Number(firstDefined(objectOf(body), ['duration', 'seconds']))
+  return Number.isInteger(actual) && actual > 0 ? { ...usage, seconds: actual } : usage
 }

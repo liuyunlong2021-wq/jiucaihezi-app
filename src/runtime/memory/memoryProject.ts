@@ -42,10 +42,6 @@ export async function inspectMemoryProject(
   const resources = await files.list(owner)
   const hasTree = (path: string) => resources.some(resource => resource.path === path || resource.path.startsWith(`${path}/`))
   const initialized = hasTree(CONVERSATION_DIRECTORY)
-  if (initialized) {
-    await ensureMemoryDirectories(owner, files, resources)
-    await migrateLegacyMemoryMaterials(owner, files)
-  }
   return {
     initialized,
     conversations: initialized ? await listMemoryConversations(owner, files) : [],

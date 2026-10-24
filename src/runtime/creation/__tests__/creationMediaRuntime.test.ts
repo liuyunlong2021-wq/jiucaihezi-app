@@ -1770,8 +1770,9 @@ test('calibrated four-channel video HTTP bodies pass their actual plugins, inclu
               if (spec.model === 'yh-wan3.0-video' && refs) assert.equal(vendorBody.media.find((item: any) => item.type === 'reference_video').duration_seconds, 3)
             }
             if (key === 'yuanliu') {
-              assert.equal(body.ratio, undefined)
-              assert.equal(body.resolution, undefined)
+              assert.equal(vendorBody.model, spec.id.slice('newapi/yuanliu/'.length))
+              assert.equal(vendorBody.aspect_ratio, body.ratio)
+              assert.ok(body.resolution === undefined || ['480p', '720p', '1080p'].includes(body.resolution), spec.model)
               if (refs) assert.equal(vendorBody.images.length, 1)
             }
             posts++
@@ -1810,7 +1811,7 @@ test('Lingdong reference image stays JSON generations and decodes through curren
   } finally { globalThis.fetch = oldFetch; await restore() }
 })
 
-test('invalid Wan and Love reference durations stop before generation POST', { concurrency: false }, async () => {
+test('invalid Wan reference durations stop before generation POST', { concurrency: false }, async () => {
   const restore = await installGatewaySession()
   const oldFetch = globalThis.fetch
   const oldDocument = globalThis.document
@@ -1821,9 +1822,6 @@ test('invalid Wan and Love reference durations stop before generation POST', { c
   try {
     let plan = buildCreationRunPlan({ modelId: 'newapi/yihong/yh-wan3.0-video', params: { prompt: 'p', videos: ['https://a/1.mp4', 'https://a/2.mp4'] } })
     await assert.rejects(executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /合计不能超过15秒/)
-    duration = 1
-    plan = buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance2.0 mini Love', params: { prompt: 'p', audios: ['https://a/1.mp3'] } })
-    await assert.rejects(executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /2–15秒/)
     assert.equal(posts, 0)
   } finally { globalThis.fetch = oldFetch; globalThis.document = oldDocument; await restore() }
 })

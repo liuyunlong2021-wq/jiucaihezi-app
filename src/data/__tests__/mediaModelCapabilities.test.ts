@@ -88,6 +88,25 @@ test('creation model projection keeps visible Nano Banana id but submits upstrea
   assert.equal(RH_CREATION_MODELS['nano-banana-4k']?.modelName, 'nano-banana-pro-4k')
 })
 
+test('源流六型号在面板都带比例与时长控件，固定时长也显示', () => {
+  const range = (min: number, max: number) => Array.from({ length: max - min + 1 }, (_, index) => min + index)
+  const rows: Array<[string, number[]]> = [
+    ['yl_seedance-2-5_6caffaca7390', [30]],
+    ['yl_pp_sz_sd25_30010', range(4, 30)],
+    ['yl_seedance-2-0_ba0687ff09f2', range(10, 15)],
+    ['yl_g7zy_seedance_v2_5_full_s', range(5, 30)],
+    ['yl_fy_wan3_0_video_prime', range(2, 30)],
+    ['yl_fy_wan3_0_video', range(2, 30)],
+  ]
+  for (const [id, durations] of rows) {
+    const model = RH_CREATION_MODELS[id]
+    assert.deepEqual(model.ar, ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], id)
+    assert.equal(model.defAr, '16:9', id)
+    assert.deepEqual(model.dur, durations, id)
+    assert.ok(model.dur?.includes(model.defDur as number), id)
+  }
+})
+
 test('creation model projection exposes numeric duration ranges for the panel', () => {
   assert.deepEqual(RH_CREATION_MODELS['rh-grok-text-video']?.dur, [
     6, 7, 8, 9, 10, 11, 12, 13, 14, 15,

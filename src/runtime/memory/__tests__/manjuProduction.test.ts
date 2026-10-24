@@ -24,11 +24,12 @@ test('the production bundle includes both video routes and excludes the portrait
   for (const name of MANJU_SKILLS.filter(name => name !== MANJU_MODE)) assert.ok(index.some((entry: { name: string }) => entry.name === name), name)
 })
 
-test('brainstorm is discoverable and remains selected across production session restore', () => {
-  assert.ok(MANJU_SKILLS.includes('jc-manju-brainstorm'))
+test('brainstorm stays independent and is removed from restored production selection', () => {
+  assert.ok(!MANJU_SKILLS.includes('jc-manju-brainstorm'))
+  assert.ok(MANJU_SKILLS.includes('jc-manju-pipeline'))
   const selected = [MANJU_MODE, 'jc-manju-brainstorm', WIKI_MEMORY_SKILL]
-  assert.deepEqual(restoreManjuSelection(selected, { enabled: true }), selected)
-  assert.deepEqual(restoreManjuSelection(selected, undefined), selected)
+  assert.deepEqual(restoreManjuSelection(selected, { enabled: true }), [MANJU_MODE, WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreManjuSelection(selected, undefined), [MANJU_MODE, WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreManjuSelection(selected, { enabled: false }), [WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreManjuSelection(selected, { enabled: false, wikiMemoryWasSelected: false }), [])
 })
@@ -52,7 +53,7 @@ test('brainstorm resources and delegated skills resolve inside the production pa
       const target = resolve(dirname(path), match[1]!)
       assert.ok(existsSync(target), `missing reference: ${target}`)
       const [name, ...parts] = relative(root, target).split(/[\\/]/)
-      assert.ok(MANJU_SKILLS.includes(name!) || name === WIKI_MEMORY_SKILL, `outside route: ${name}`)
+      assert.ok(existsSync(resolve(root, name!, 'SKILL.md')) || name === WIKI_MEMORY_SKILL, `missing independent reference: ${name}`)
       if (name === skill.id) pending.push(parts.join('/'))
     }
   }

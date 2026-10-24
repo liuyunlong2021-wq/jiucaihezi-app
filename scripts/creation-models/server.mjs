@@ -15,15 +15,21 @@ const PSQL_PASSWORD = process.env.NEWAPI_PSQL_PASSWORD || ''
 const PSQL_USER = process.env.NEWAPI_PSQL_USER || 'newapi'
 const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
+// 源流公开模型名 → 上游 model ID；与 newapi-plugins/yuanliu-model-mapping.json 一致。
+const YUANLIU_MODEL_MAPPING = {
+  'Seedance 2.5(HD)': 'yl_seedance-2-5_6caffaca7390',
+  'Seedance 2.5 480p (QN-10)': 'yl_pp_sz_sd25_30010',
+  'Seedance2.0(HD)': 'yl_seedance-2-0_ba0687ff09f2',
+  'Seedance2.5full (LJ-04)': 'yl_g7zy_seedance_v2_5_full_s',
+  'Wan3.0视频Prime官渠稳定(WP-01)': 'yl_fy_wan3_0_video_prime',
+  'Wan3.0官渠(WP-02)': 'yl_fy_wan3_0_video',
+}
+
 export const CREATION_MODEL_ROUTES = [
+  { id: 'newapi/yihong/yh-minimax H3', aliases: ['yh-minimax H3'] },
   { id: 'newapi/yihong/yh-seedance2.5 Ultra', aliases: ['yh-seedance2.5 Ultra'] },
-  { id: 'newapi/yihong/yh-seedance2.5 super', aliases: ['yh-seedance2.5 super'] },
-  { id: 'newapi/yihong/yh-seedance-2.5-Muse', aliases: ['yh-seedance-2.5-Muse'] },
-  { id: 'newapi/yihong/yh-kling-omni-4.0', aliases: ['yh-kling-omni-4.0'] },
-  { id: 'newapi/yihong/yh-seedance2.0 mini Love', aliases: ['yh-seedance2.0 mini Love'] },
   { id: 'newapi/yihong/yh-wan3.0-video', aliases: ['yh-wan3.0-video'] },
-  { id: 'newapi/yuanliu/yl_seedance-2-5_6caffaca7390', aliases: ['yl_seedance-2-5_6caffaca7390'] },
-  { id: 'newapi/yuanliu/yl_seedance-2-5_0fab2f1b1f10', aliases: ['yl_seedance-2-5_0fab2f1b1f10'] },
+  ...Object.entries(YUANLIU_MODEL_MAPPING).map(([publicName, upstream]) => ({ id: `newapi/yuanliu/${upstream}`, aliases: [publicName, upstream] })),
   ...['ld-2.5特价-1-720', 'ld-gpt-image-2.5-flare'].map(model => ({ id: `newapi/lingdong/${model}`, aliases: [model, model.slice(3)] })),
   ...['yihong-gpt-image-2', 'yihong-gpt-image-2.5-flare', 'yihong-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/yihong/${model}`, aliases: [model] })),
   // 小易 0.3.0 起渠道公开名带 xy- 前缀，历史内部名保留兼容。

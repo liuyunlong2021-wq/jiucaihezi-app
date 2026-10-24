@@ -3,6 +3,22 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
+test('user can delete managed project folders through the normal confirmation flow', async () => {
+  const source = readFileSync('src/components/filetree/ProjectFileTree.vue', 'utf8')
+  const start = source.indexOf('async function ctxDelete() {')
+  const bodyStart = source.indexOf('{', start)
+  const body = source.slice(bodyStart + 1, source.indexOf('\n}', bodyStart))
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const run = new AsyncFunction('ctxMenu', 'closeCtxMenu', 'selectedResources', 'isProtectedMemoryPath',
+    'errorMsg', 'deletingResourceKeys', 'resourceKey', 'statusMsg', 'pendingDelete', body)
+  const resources = [{ path: '.raw', isDirectory: true }, { path: 'jc-canvas', isDirectory: true }, { path: 'wiki', isDirectory: true }]
+  const pending = { value: [] as unknown[] }, error = { value: '上一次的提示' }
+  await run({ value: { node: resources[0] } }, () => {}, () => resources, () => true,
+    error, new Set(), (item: { path: string }) => item.path, { value: '' }, pending)
+  assert.deepEqual(pending.value, resources)
+  assert.equal(error.value, '')
+})
+
 test('Wiki upload keeps the right-clicked destination, ordinary uploads keep the media flow', async () => {
   const source = readFileSync('src/components/filetree/ProjectFileTree.vue', 'utf8')
   const start = source.indexOf('function ctxUploadFiles() {')
@@ -30,8 +46,13 @@ test('Wiki upload keeps the right-clicked destination, ordinary uploads keep the
 
 test('Wiki directory menus expose creation and native uploads forward the selected target', () => {
   const source = readFileSync('src/components/filetree/ProjectFileTree.vue', 'utf8')
-  assert.equal(source.match(/@click="ctxNewWikiFolder"/g)?.length, 2)
+  assert.equal(source.match(/@click="ctxNewWikiFolder\(kind.id\)"/g)?.length, 2)
+  assert.match(source, /<details[^>]*class="pft-wiki-menu"/)
+  assert.match(source, /v-for="kind in WIKI_TYPES"/)
   assert.match(source, /projectFileActions\.createWikiFolder/)
+  assert.match(source, /projectFileActions\.createProductionWiki/)
+  const start = source.indexOf('async function ctxNewWikiFolder(')
+  assert.doesNotMatch(source.slice(start, source.indexOf('\n}', start)), /safePrompt/)
   assert.match(source, /targetRelativePath: importTarget/)
   assert.match(source, /target\?\.path \?\? MEMORY_MEDIA_DIRECTORIES\.document/)
   assert.match(source, /projectFileActions\.indexImportedFiles\(\{ owner, paths: imported \}\)/)

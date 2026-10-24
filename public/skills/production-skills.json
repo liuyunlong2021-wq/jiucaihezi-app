@@ -1,6 +1,5 @@
 {
   "manju": [
-    "jc-manju-brainstorm",
     "jc-xiangmuziliao",
     "jc-film-style",
     "jc-juese-sheji",
@@ -13,7 +12,8 @@
     "cinematic-four-panel-frames",
     "seedance-storyboard-assets",
     "jc-shengyin-sheji",
-    "jc-shengyin-daoyan"
+    "jc-shengyin-daoyan",
+    "jc-manju-pipeline"
   ],
   "short-drama": [
     "jc-xiangmuziliao",

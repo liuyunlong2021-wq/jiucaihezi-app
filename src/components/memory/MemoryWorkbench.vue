@@ -75,6 +75,7 @@ import {
   type DeepSeekProcessStep,
   type DeepSeekSessionSnapshot,
   type DeepSeekInboxItem,
+  deepSeekUsageRows,
   type DeepSeekUsage,
   queueDeepSeekHarnessMessage,
   updateDeepSeekHarnessQueue,
@@ -4775,11 +4776,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <details v-if="answerUsageFor(turn)" class="memory-usage memory-answer-usage">
                 <summary>本轮用量</summary>
                 <dl>
-                  <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.inputTokens) }}</dd></div>
-                  <div><dt>缓存读取</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.cacheReadTokens) }}</dd></div>
-                  <div><dt>缓存写入</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.cacheWriteTokens) }}</dd></div>
-                  <div><dt>输出</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.outputTokens) }}</dd></div>
-                  <div><dt>思考</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.reasoningTokens) }}</dd></div>
+                  <div v-for="row in deepSeekUsageRows(answerUsageFor(turn))" :key="row.label">
+                    <dt>{{ row.label }}</dt><dd>{{ row.value }}<small v-if="row.coverage" class="memory-usage-coverage">{{ row.coverage }}</small></dd>
+                  </div>
                 </dl>
               </details>
 
@@ -4957,11 +4956,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <details v-if="!hasFollowingAnswer(turn.id) && harnessUsageFor(turn.id)" class="memory-usage">
             <summary>本轮用量</summary>
             <dl>
-              <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.inputTokens) }}</dd></div>
-              <div><dt>缓存读取</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.cacheReadTokens) }}</dd></div>
-              <div><dt>缓存写入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.cacheWriteTokens) }}</dd></div>
-              <div><dt>输出</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.outputTokens) }}</dd></div>
-              <div><dt>思考</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.reasoningTokens) }}</dd></div>
+              <div v-for="row in deepSeekUsageRows(harnessUsageFor(turn.id))" :key="row.label">
+                <dt>{{ row.label }}</dt><dd>{{ row.value }}<small v-if="row.coverage" class="memory-usage-coverage">{{ row.coverage }}</small></dd>
+              </div>
             </dl>
           </details>
           <!--
@@ -5893,4 +5890,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-image-lightbox-close { position: absolute; top: 14px; right: 18px; display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgb(255 255 255 / 30%); border-radius: 7px; background: rgb(255 255 255 / 10%); color: white; cursor: pointer; }
 .memory-image-lightbox-close .mso { font-size: 20px; }
 @media (prefers-reduced-motion: reduce) { .memory-attachment-progress .spinning { animation: none; } }
+
+.memory-usage-coverage { display: block; font-size: 0.85em; opacity: 0.75; }
 </style>

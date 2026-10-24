@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { createWikiArtifactTool, setWikiSourceContent } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
+import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
 function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const files = new Map()
@@ -82,6 +82,100 @@ function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const exec = { agent: { session: { header: { cwd: root } } }, signal: new AbortController().signal }
   return { tool, exec, files, sourceAgent }
 }
+
+test('Manju precise layout separates film style, character image, format, voice and episode documents', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-manju-layout-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  for (const [args, expected] of [
+    [{ artifact_kind: 'film_style' }, '项目风格/影片比例与风格.md'],
+    [{ artifact_kind: 'character_asset', entity_name: '甲' }, '资产/角色/甲/角色生图提示词.md'],
+    [{ artifact_kind: 'character_format', entity_name: '甲' }, '资产/角色/甲/角色生图格式提示词.md'],
+    [{ artifact_kind: 'character_voice', entity_name: '甲' }, '资产/角色/甲/声音设计提示词.md'],
+    [{ artifact_kind: 'scene_research', entity_name: '山门' }, '项目资料/场景说明/山门.md'],
+    [{ artifact_kind: 'episode_source_script', episode_number: 1 }, '项目资料/分集剧本/第1集分集剧本.md'],
+    [{ artifact_kind: 'engineering_script', episode_number: 1 }, '剧本/工程剧本/第1集工程剧本.md'],
+    [{ artifact_kind: 'sound_direction', episode_number: 1 }, '剧本/声音剧本/第1集声音剧本.md'],
+    [{ artifact_kind: 'video_prompt', episode_number: 1, video_model: 'Seedance', segment: '1' }, '剧本/视频提示词/Seedance/第1集001视频提示词.md'],
+  ]) {
+    const result = await tool.execute({ ...args, content: `# ${expected}` }, exec)
+    assert.equal(result.path, `wiki/${expected}`)
+    assert.equal(result.status, 'saved')
+  }
+  assert.ok(files.has(join(root, 'wiki/资产/角色/甲/index.md')))
+  assert.ok(!files.has(join(root, 'wiki/剧本/第001集/index.md')))
+})
+
+test('Manju keeps an existing legacy artifact at its original path instead of silently duplicating it', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-manju-legacy-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, 'wiki/index.md'), { content: '# Wiki\n', version: 0 })
+  files.set(join(root, 'wiki/资产/角色/甲.md'), { content: '# 旧角色', version: 1 })
+  const result = await tool.execute({ artifact_kind: 'character_asset', entity_name: '甲', content: '# 修订旧角色' }, exec)
+  assert.equal(result.path, 'wiki/资产/角色/甲.md')
+  assert.ok(!files.has(join(root, 'wiki/资产/角色/甲/角色生图提示词.md')))
+})
+
+test('pipeline checkpoints reject missing stages and overlong segments, then complete with verified files', async t => {
+  for (const model of ['H3', 'Seedance']) {
+    const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-check-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const { tool, exec, files } = createHarness(root, { route: 'manju' })
+    files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+    const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: model, episode_number: 1, content: JSON.stringify(input) }, exec)
+    await assert.rejects(checkpoint({ stage: 'complete', outputs: [] }), /前置阶段/)
+    const progress = await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+    const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+    const summary = await save({ artifact_kind: 'story_summary' }, '# 故事梗概\n主角归来')
+    await checkpoint({ stage: 'materials', outputs: [summary] })
+    const style = await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：9:16\n视觉风格：二维')
+    await checkpoint({ stage: 'style', outputs: [style] })
+    const asset = await save({ artifact_kind: 'scene_asset', entity_name: '山门' }, '# 山门提示词')
+    await checkpoint({ stage: 'assets', outputs: [asset] })
+    const engineering = await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：山门\n镜头1')
+    const limit = model === 'H3' ? 15 : 30
+    await checkpoint({ stage: 'engineering', outputs: [engineering], duration_seconds: limit + 1 })
+    const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '# 第一段')
+    await assert.rejects(checkpoint({ stage: 'prompts', outputs: [first], segments: [{ path: first, start_seconds: 0, end_seconds: limit + 1 }] }), /上限/)
+    const second = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '002' }, '# 第二段')
+    await checkpoint({ stage: 'prompts', outputs: [first, second], segments: [
+      { path: first, start_seconds: 0, end_seconds: limit }, { path: second, start_seconds: limit, end_seconds: limit + 1 },
+    ] })
+    files.set(join(root, summary), { content: '# 被用户改过', version: 99 })
+    await assert.rejects(checkpoint({ stage: 'complete', outputs: [] }), /前置产物已修改/)
+    files.set(join(root, summary), { content: '# 故事梗概\n主角归来\n', version: 100 })
+    await assert.rejects(checkpoint({ stage: 'complete', outputs: [], status: 'blocked', reason: '矛盾状态' }), /完成阶段不能同时标记暂停/)
+    await checkpoint({ stage: 'complete', outputs: [] })
+    assert.equal(JSON.parse(files.get(join(root, progress.path)).content).stage, 'complete')
+    assert.equal(JSON.parse(files.get(join(root, progress.path)).content).status, 'completed')
+  }
+})
+
+test('each creative route automatically replaces its own generated artifact in place and keeps one index entry', async t => {
+  for (const [route, artifact] of [
+    ['manju', { artifact_kind: 'engineering_script', episode_number: 1 }],
+    ['short-drama', { artifact_kind: 'screenplay', episode_number: 1 }],
+    ['novel', { artifact_kind: 'novel_chapter_draft', work_name: '星海', chapter_number: 1, chapter_title: '归来' }],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), 'jc-wiki-auto-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const { tool, exec, files } = createHarness(root, { route })
+    const directory = route === 'novel' ? '创作' : '剧本'
+    files.set(join(root, 'wiki/index.md'), { content: `# 用户的 Wiki\n\n- [[${directory}/index]]\n`, version: 0 })
+    const first = await tool.execute({ ...artifact, content: '# 原来的稿件' }, exec)
+    const updated = await tool.execute({ ...artifact, content: '# 用户要求修改后的稿件' }, exec)
+    assert.equal(updated.path, first.path)
+    assert.equal(updated.operation, 'updated')
+    assert.match(files.get(join(root, updated.path)).content, /用户要求修改后的稿件/)
+    const repeated = await tool.execute({ ...artifact, content: '# 用户要求修改后的稿件' }, exec)
+    assert.equal(repeated.operation, 'unchanged')
+    assert.equal(files.get(join(root, 'wiki/index.md')).content.split(`[[${directory}/index`).length - 1, 1)
+    const filename = updated.path.split('/').at(-1).replace(/\.md$/, '')
+    assert.equal(files.get(join(root, dirname(updated.path), 'index.md')).content.split(`[[${filename}|`).length - 1, 1)
+    assert.ok(!files.has(join(root, 'wiki/原始材料/星海/原文.md')))
+  }
+})
 
 test('one shared writer archives Manju artifacts and updates the project indexes', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-wiki-writer-'))
@@ -306,11 +400,11 @@ test('long pasted source is sliced verbatim from the current turn, never from mo
 })
 
 
-test('all 36 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
+test('all 40 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-route-artifacts-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
-  assert.equal(Object.keys(contract.types).length, 36)
+  assert.equal(Object.keys(contract.types).length, 40)
   const counts = { manju: 0, 'short-drama': 0, novel: 0 }
   for (const [kind, template] of Object.entries(contract.types)) {
     assert.ok(Array.isArray(template.production_routes) && template.production_routes.length)
@@ -326,7 +420,11 @@ test('all 36 artifact contracts have explicit routes and every allowed kind save
       if (template.entity) args.entity_name = '角色甲'
       if (template.episode) args.episode_number = 1
       if (template.model) args.video_model = template.model[0]
-      if (template.path.includes('{segment}')) args.segment = '片段001'
+      if (template.path.includes('{segment}')) args.segment = '001'
+      if (template.mode === 'pipeline') {
+        files.set(join(root, route, kind, '剧本.md'), { content: '# 来源', version: 1 })
+        args.content = JSON.stringify({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+      }
       if (template.mode === 'source_selection') {
         const text = '这是当前用户明确交付的完整原文材料，用于归档回读和索引验证。'
         setWikiSourceContent(sourceAgent, [{ type: 'text', text }])
@@ -344,5 +442,35 @@ test('all 36 artifact contracts have explicit routes and every allowed kind save
       assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
     }
   }
-  assert.deepEqual(counts, { manju: 20, 'short-drama': 14, novel: 16 })
+  assert.deepEqual(counts, { manju: 24, 'short-drama': 14, novel: 16 })
+})
+
+test('source links use document-relative targets and summaries contain only readable labels', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-source-link-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  const result = await tool.execute({ artifact_kind: 'character_bio', entity_name: '甲',
+    content: '# 甲\n来源：[[wiki/原始材料/故事/原文.md 第001集]]。\n风格见[[wiki/项目风格/影片比例与风格.md|影片风格]]。' }, exec)
+  const text = files.get(join(root, result.path)).content
+  assert.match(text, /\[\[\.\.\/\.\.\/原始材料\/故事\/原文\.md\|第001集\]\]/)
+  assert.match(text, /\[\[\.\.\/\.\.\/项目风格\/影片比例与风格\.md\|影片风格\]\]/)
+  const index = files.get(join(root, 'wiki/项目资料/人物小传/index.md')).content
+  assert.match(index, /来源：第001集/)
+  assert.doesNotMatch(index, /\[\[wiki\/|\.md 第001集/)
+})
+
+
+test('Seedance submits standalone five-module prompts with @ image lines and voice identity only in character lines', () => {
+  const valid = '古装女子石道追问的电影片段。\n@图1：莫甘娜，银发金瞳。声音九维：年龄感成熟；音高中低；明暗冷亮；厚薄饱满；共鸣胸腔；气息稳定；颗粒感平滑；口音普通话；稳定表达习惯短句尾压低。\n@图2：石道，右侧石壁。\n@图1莫甘娜站在@图2石道左侧，面朝画外右侧。\n【全局设定】\n日间石道，二维平涂，左上日光，表演克制，无字幕。\n【时间戳剧本分镜】\n镜头1【0—1.5秒】：【追问】 ｜ 近景，平视，固定 ｜ @图1莫甘娜站在@图2石道中，轻声问：“真的要走吗？”\n情感解析：她等待对方亲口回答，目光不移开。\n【全局补充】\n保持同侧观察、统一光向，无BGM。'
+  assert.doesNotThrow(() => validateSeedanceReferences(valid))
+  assert.throws(() => validateSeedanceReferences(valid.replace(/^@图.*\n/gm, '')), /参考图占位/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('@图2：', '@图1：')), /连续/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('站在@图2', '站在@图3')), /未定义/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('轻声问', '声音九维：音高中低，轻声问')), /九维/)
+  for (const note of ['待上传', '工程镜63—72对应本段镜1—10', '全片153—179秒，本段26秒预算，以下从0计非实测', '承接上一段'])
+    assert.throws(() => validateSeedanceReferences(valid + '\n' + note), /备注|跨段/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('【全局补充】', '制作总结')), /五模块/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('气息稳定；', '')), /九维信息不完整/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('@图2：石道，右侧石壁。', '@图2：')), /资产名称与特征/)
+  assert.throws(() => validateSeedanceReferences(valid.replace('@图1：莫甘娜', '@图1：莫甘娜 @图3：兔子')), /单独一行/)
 })

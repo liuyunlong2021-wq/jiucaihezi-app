@@ -262,14 +262,12 @@ test('buildCreationModelAvailability still accepts the legacy Xiaoyi names', () 
 
 test('calibrated yihong, yuanliu and FK official routes match exact public channel names', () => {
   const cases = [
+    ['newapi/yihong/yh-minimax H3', 'yh-minimax H3'],
     ['newapi/yihong/yh-seedance2.5 Ultra', 'yh-seedance2.5 Ultra'],
-    ['newapi/yihong/yh-seedance2.5 super', 'yh-seedance2.5 super'],
-    ['newapi/yihong/yh-seedance-2.5-Muse', 'yh-seedance-2.5-Muse'],
-    ['newapi/yihong/yh-kling-omni-4.0', 'yh-kling-omni-4.0'],
-    ['newapi/yihong/yh-seedance2.0 mini Love', 'yh-seedance2.0 mini Love'],
     ['newapi/yihong/yh-wan3.0-video', 'yh-wan3.0-video'],
-    ['newapi/yuanliu/yl_seedance-2-5_6caffaca7390', 'yl_seedance-2-5_6caffaca7390'],
-    ['newapi/yuanliu/yl_seedance-2-5_0fab2f1b1f10', 'yl_seedance-2-5_0fab2f1b1f10'],
+    ['newapi/yuanliu/yl_seedance-2-5_6caffaca7390', 'Seedance 2.5(HD)'],
+    ['newapi/yuanliu/yl_pp_sz_sd25_30010', 'Seedance 2.5 480p (QN-10)'],
+    ['newapi/yuanliu/yl_g7zy_seedance_v2_5_full_s', 'Seedance2.5full (LJ-04)'],
     ['官方渠道-Seedance 2.5 满血 720p', '官方渠道-Seedance 2.5 满血 720p'],
   ]
   for (const [id, model] of cases) {

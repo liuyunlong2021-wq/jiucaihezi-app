@@ -498,12 +498,14 @@ test('2026-10-23 截图点名的十款模型退出面板，jc 本机保持可见
   for (const id of [
     'jc-minimax-h3-ref2v',
     'jc-minimax-h3',
-    'jc-minimax-h3-director8',
     'jc-minimax-h3-first-frame',
     'jc-minimax-h3-first-last',
   ]) {
     assert.equal(videoIds.includes(id), true, id)
   }
+  // 2026-10-24 起导演台 8 步退出面板；规格保留，历史任务仍可解析。
+  assert.equal(videoIds.includes('jc-minimax-h3-director8'), false)
+  assert.ok(getCreationModelSpec('jc-minimax-h3-director8'))
 })
 
 test('Gemini image models use the native Xiaoyi image contract', () => {
@@ -1594,13 +1596,10 @@ test('four calibrated channels expose only current plugin image/video models', a
   }
 })
 
-test('Yihong six-model durations, references and price labels follow 0.2.0', () => {
+test('Yihong three-model durations, references and price labels follow 0.2.1', () => {
   const rows = [
+    ['yh-minimax H3', 4, 15, 9, 0, 3],
     ['yh-seedance2.5 Ultra', 10, 30, 14, 0, 10],
-    ['yh-seedance2.5 super', 5, 30, 30, 10, 10],
-    ['yh-seedance-2.5-Muse', 5, 30, 9, 0, 0],
-    ['yh-kling-omni-4.0', 3, 30, 10, 0, 3],
-    ['yh-seedance2.0 mini Love', 4, 15, 9, 0, 3],
     ['yh-wan3.0-video', 2, 30, 10, 5, 5],
   ] as const
   const prices = JSON.parse(readFileSync('newapi-plugins/yihong-pricing.json', 'utf8')).models

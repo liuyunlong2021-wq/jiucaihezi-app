@@ -54,7 +54,7 @@ import {
   flattenProjectResourceChange,
   onProjectResourceChange,
 } from '@/services/projectFileService'
-import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
+import { createProjectFileActions, mediaMimeForPath, WIKI_TYPES, type WikiType } from '@/services/projectFileActions'
 import { saveSplitTiles } from '@/utils/imageGridSplit'
 import { acquireProjectMediaDisplay, type MediaDisplayLease } from '@/services/projectMediaResolver'
 import { openProjectResource } from '@/services/projectExplorerService'
@@ -1640,18 +1640,19 @@ async function ctxNewFolder() {
     errorMsg.value = `创建文件夹失败: ${e instanceof Error ? e.message : String(e)}`
   }
 }
-async function ctxNewWikiFolder() {
+async function ctxNewWikiFolder(kind: WikiType) {
   const parentNode = ctxMenu.value.node
   const parentPath = parentNode?.isDir ? parentNode.path : ''
   const owner = projectKey.value
   closeCtxMenu()
   if (!owner) return
-  const name = parentPath ? '新资料' : 'wiki'
   try {
-    const folder = await projectFileActions.createWikiFolder({ owner, parentPath, name })
+    const folder = kind === 'generic' && parentPath
+      ? await projectFileActions.createWikiFolder({ owner, parentPath, name: '新资料' })
+      : await projectFileActions.createProductionWiki({ owner, kind })
     if (projectKey.value !== owner) return
     await refreshLoadedDirectories()
-    statusMsg.value = `已创建 Wiki 文件夹：${folder.path}，索引已登记`
+    statusMsg.value = `已创建或补齐${WIKI_TYPES.find(type => type.id === kind)?.label}：${folder.path}，索引已登记`
   } catch (cause) {
     errorMsg.value = cause instanceof Error ? cause.message : String(cause)
   }
@@ -1692,10 +1693,6 @@ async function ctxDelete() {
   if (!n) return
   closeCtxMenu()
   const resources = selectedResources()
-  if (resources.some(resource => isProtectedMemoryPath(resource.path))) {
-    errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
-    return
-  }
   if (
     !resources.length ||
     resources.some(resource => deletingResourceKeys.has(resourceKey(resource)))
@@ -3289,9 +3286,12 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxNewFolder">
             <JcIcon name="create-new-folder" /><span>新建文件夹</span>
           </button>
-          <button v-if="isDesktop" class="pft-ctx-item" @click="ctxNewWikiFolder">
-            <JcIcon name="create-new-folder" /><span>新建 Wiki 文件夹</span>
-          </button>
+          <details v-if="isDesktop" class="pft-wiki-menu">
+            <summary class="pft-ctx-item"><JcIcon name="create-new-folder" /><span>新建 Wiki</span><span class="pft-wiki-arrow">▸</span></summary>
+            <div class="pft-wiki-options">
+              <button v-for="kind in WIKI_TYPES" :key="kind.id" class="pft-ctx-item" @click="ctxNewWikiFolder(kind.id)">{{ kind.label }}</button>
+            </div>
+          </details>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxAddProjectFolder">
             <JcIcon name="create-new-folder" /><span>切换项目文件夹...</span>
@@ -3328,9 +3328,12 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxNewFolder">
             <JcIcon name="create-new-folder" /><span>新建文件夹</span>
           </button>
-          <button v-if="isDesktop && !isProtectedMemoryPath(ctxMenu.node.path) && !ctxMenu.node.path.startsWith(MEMORY_MEDIA_DIRECTORY)" class="pft-ctx-item" @click="ctxNewWikiFolder">
-            <JcIcon name="create-new-folder" /><span>新建 Wiki 文件夹</span>
-          </button>
+          <details v-if="isDesktop && !isProtectedMemoryPath(ctxMenu.node.path) && !ctxMenu.node.path.startsWith(MEMORY_MEDIA_DIRECTORY)" class="pft-wiki-menu">
+            <summary class="pft-ctx-item"><JcIcon name="create-new-folder" /><span>新建 Wiki</span><span class="pft-wiki-arrow">▸</span></summary>
+            <div class="pft-wiki-options">
+              <button v-for="kind in WIKI_TYPES" :key="kind.id" class="pft-ctx-item" @click="ctxNewWikiFolder(kind.id)">{{ kind.label }}</button>
+            </div>
+          </details>
           <button class="pft-ctx-item" @click="ctxUploadFiles">
             <JcIcon name="upload" /><span>上传文件</span>
           </button>
@@ -4302,6 +4305,11 @@ onBeforeUnmount(() => {
   background: var(--olive-pale);
   color: var(--olive-dark);
 }
+.pft-wiki-menu > summary { list-style: none; }
+.pft-wiki-menu > summary::-webkit-details-marker { display: none; }
+.pft-wiki-arrow { margin-left: auto; }
+.pft-wiki-menu[open] .pft-wiki-arrow { transform: rotate(90deg); }
+.pft-wiki-options { padding-left: 24px; }
 .pft-ctx-item:disabled {
   opacity: 0.35;
   cursor: default;

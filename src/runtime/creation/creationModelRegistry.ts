@@ -177,29 +177,92 @@ const LINGDONG_IMAGE_MODELS = [
 ] as const
 const LINGDONG_IMAGE_RATIOS = ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 
-// 源流 AI OpenAPI：模型 ID / 参考素材上限 / 单次售价由用户提供；视频任务协议见其公开 API 文档。
-// `/models` 的模型级限制尚未核对；先不传画幅/分辨率，让上游应用文档默认值，时长 UI 仅校验正整数。
-const YUANLIU_VIDEO_MODELS = [
+// 源流 AI OpenAPI：六个型号的素材上限、时长档位与售价来自用户 2026-10-24 的型号清单。
+// Wan 3.0 两型号按分辨率分档计费；其余型号沿用上游默认画幅 16:9，面板暂不开放画幅。
+const YUANLIU_RESOLUTIONS = ['480p', '720p', '1080p']
+const YUANLIU_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+type YuanliuVideoModel = {
+  model: string
+  publicName: string
+  price: string
+  maxImages: number
+  maxVideos: number
+  maxAudios: number
+  duration: { min: number; max: number }
+  defaultDuration: number
+  resolutions: string[]
+}
+const YUANLIU_VIDEO_MODELS: readonly YuanliuVideoModel[] = [
   {
     model: 'yl_seedance-2-5_6caffaca7390',
-    label: 'Seedance 2.5 HD（仅图参考，可过人脸）',
-    price: '5元/次',
+    publicName: 'Seedance 2.5(HD)',
+    price: '6元/次',
     maxImages: 30,
     maxVideos: 0,
     maxAudios: 0,
+    duration: { min: 30, max: 30 },
+    defaultDuration: 30,
+    resolutions: [],
   },
   {
-    model: 'yl_seedance-2-5_0fab2f1b1f10',
-    label: 'Seedance 2.5 HD（多模态参考，可过人脸）',
-    price: '6元/次',
+    model: 'yl_pp_sz_sd25_30010',
+    publicName: 'Seedance 2.5 480p (QN-10)',
+    price: '9元/次',
+    maxImages: 30,
+    maxVideos: 0,
+    maxAudios: 10,
+    duration: { min: 4, max: 30 },
+    defaultDuration: 5,
+    resolutions: [],
+  },
+  {
+    model: 'yl_seedance-2-0_ba0687ff09f2',
+    publicName: 'Seedance2.0(HD)',
+    price: '4元/次',
+    maxImages: 9,
+    maxVideos: 0,
+    maxAudios: 0,
+    duration: { min: 10, max: 15 },
+    defaultDuration: 10,
+    resolutions: [],
+  },
+  {
+    model: 'yl_g7zy_seedance_v2_5_full_s',
+    publicName: 'Seedance2.5full (LJ-04)',
+    price: '0.5元/秒',
     maxImages: 30,
     maxVideos: 10,
     maxAudios: 10,
+    duration: { min: 5, max: 30 },
+    defaultDuration: 5,
+    resolutions: [],
   },
-] as const
+  {
+    model: 'yl_fy_wan3_0_video_prime',
+    publicName: 'Wan3.0视频Prime官渠稳定(WP-01)',
+    price: '480p ¥0.4/秒 · 720p ¥0.5/秒 · 1080p ¥0.7/秒',
+    maxImages: 10,
+    maxVideos: 5,
+    maxAudios: 5,
+    duration: { min: 2, max: 30 },
+    defaultDuration: 5,
+    resolutions: [...YUANLIU_RESOLUTIONS],
+  },
+  {
+    model: 'yl_fy_wan3_0_video',
+    publicName: 'Wan3.0官渠(WP-02)',
+    price: '480p ¥0.4/秒 · 720p ¥0.5/秒 · 1080p ¥0.6/秒',
+    maxImages: 10,
+    maxVideos: 5,
+    maxAudios: 5,
+    duration: { min: 2, max: 30 },
+    defaultDuration: 5,
+    resolutions: [...YUANLIU_RESOLUTIONS],
+  },
+]
 const YUANLIU_VIDEO_CONTRACT_ISSUES = [
-  '源流 API `/models` 返回的时长档位、画幅和分辨率允许值尚未核对；UI 暂不发送画幅/分辨率，由上游应用文档默认值（16:9、480p），模型级限制需通过授权目录核实。',
-  '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数 5/6；NewAPI 模型/分组倍率及最终扣费尚未验收。',
+  '源流 API `/models` 的 allowed_aspect_ratios、allowed_resolutions 与时长档位是动态配置；面板按用户清单限定时长，画幅给常用六档（默认 16:9），非 Wan 型号不发送分辨率，由上游默认 480p。',
+  '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数（按次 6/9/4，按秒 0.5，Wan 0.4/0.5/0.7 与 0.4/0.5/0.6）；NewAPI 模型/分组倍率及最终扣费尚未验收。',
 ]
 // 易红0.2.0只开放六个yh-视频型号；旧记录保留注册并隐藏，不改绑历史任务。
 const YIHONG_VIDEO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
@@ -295,16 +358,13 @@ const LEGACY_YIHONG_VIDEO_MODELS: Array<{
   },
 ]
 const YIHONG_VIDEO_MODELS: typeof LEGACY_YIHONG_VIDEO_MODELS = [
-  { model: 'yh-seedance2.5 Ultra', label: 'yh-seedance2.5 Ultra', price: '¥8.5/次', duration: { min: 10, max: 30 }, defaultDuration: 30, resolutions: ['720P'], maxImages: 14, maxAudios: 10 },
-  { model: 'yh-seedance2.5 super', label: 'yh-seedance2.5 super', price: '¥0.5/秒', duration: { min: 5, max: 30 }, defaultDuration: 5, resolutions: ['720P'], ratios: ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], maxImages: 30, maxVideos: 10, maxAudios: 10 },
-  { model: 'yh-seedance-2.5-Muse', label: 'yh-seedance-2.5-Muse', price: '¥9/次', duration: { allowedValues: [5, 10, 15, 30] }, defaultDuration: 30, resolutions: ['720P'], ratios: ['16:9', '9:16'], maxImages: 9 },
-  { model: 'yh-kling-omni-4.0', label: 'yh-kling-omni-4.0', price: '¥0.25/秒', duration: { min: 3, max: 30 }, defaultDuration: 5, resolutions: ['720P'], ratios: ['1:1', '16:9', '9:16', '21:9'], maxImages: 10, maxAudios: 3 },
-  { model: 'yh-seedance2.0 mini Love', label: 'yh-seedance2.0 mini Love', price: '480P ¥0.15/秒 · 720P ¥0.25/秒', duration: { min: 4, max: 15 }, defaultDuration: 5, resolutions: ['720P', '480P'], ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], maxImages: 9, maxAudios: 3 },
-  { model: 'yh-wan3.0-video', label: 'yh-wan3.0-video', price: '480P ¥0.2/秒 · 720P ¥0.3/秒 · 1080P ¥0.4/秒', duration: { min: 2, max: 30 }, defaultDuration: 5, resolutions: ['480P', '720P', '1080P'], ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1'], maxImages: 10, maxVideos: 5, maxAudios: 5 },
+  { model: 'yh-minimax H3', label: 'yh-minimax H3', price: '¥0.05/秒', duration: { min: 4, max: 15 }, defaultDuration: 10, resolutions: ['768P'], ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], maxImages: 9, maxAudios: 3 },
+  { model: 'yh-seedance2.5 Ultra', label: 'yh-seedance2.5 Ultra', price: '480P ¥11/次 · 720P ¥15/次 · 1080P ¥18/次', duration: { min: 10, max: 30 }, defaultDuration: 30, resolutions: ['720P', '480P', '1080P'], maxImages: 14, maxAudios: 10 },
+  { model: 'yh-wan3.0-video', label: 'yh-wan3.0-video', price: '480P ¥0.2/秒 · 720P ¥0.4/秒 · 1080P ¥0.5/秒', duration: { min: 2, max: 30 }, defaultDuration: 5, resolutions: ['480P', '720P', '1080P'], ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1'], maxImages: 10, maxVideos: 5, maxAudios: 5 },
 ]
 const YIHONG_VIDEO_CONTRACT_ISSUES = [
-  '按yihong.plugin.js 0.2.0六型号合同提交；参考素材先上传为URL，真实App生成、结果恢复与账单仍待验收。',
-  'Ultra音频必须配图；Love音频每段2–15秒；Wan视频每段1–15秒且合计≤15秒、音频合计≤15秒，提交前读取元数据。',
+  '按yihong.plugin.js 0.2.1三型号合同提交；参考素材先上传为URL，真实App生成、结果恢复与账单仍待验收。',
+  'Ultra音频必须配图；H3素材合计≤10，视频参考需API attachments携带时长；Wan视频每段1–15秒且合计≤15秒、音频合计≤15秒，提交前读取元数据。',
 ]
 const YIHONG_GPT_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as const
 // Match the NewAPI plugin's exact size allowlist so each visible ratio/resolution pair can be submitted.
@@ -935,6 +995,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     apiStyle: 'comfy-video',
     mode: 'image-to-video',
     contractStatus: 'partial',
+    // 2026-10-24 用户要求退出创作面板；保留注册以便历史任务解析，不再出现在模型列表。
+    hidden: true,
     endpoint: '/v1/videos',
     pollKind: 'newapi-task',
     assetFlow: 'newapi-upload',
@@ -1539,8 +1601,9 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── 源流 AI Seedance：NewAPI Task Plugin 直连源流 OpenAPI ──
   ...YUANLIU_VIDEO_MODELS.map(model => directVideo({
     id: `newapi/yuanliu/${model.model}`,
-    model: model.model,
-    label: model.label,
+    model: model.publicName,
+    label: model.publicName,
+    aliases: [model.model],
     price: model.price,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
@@ -1549,16 +1612,20 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     assetFlow: 'newapi-upload',
     contractStatus: 'partial',
     contractIssues: YUANLIU_VIDEO_CONTRACT_ISSUES,
-    ratios: [],
-    resolutions: [],
-    duration: { min: 1 },
+    ratios: [...YUANLIU_RATIOS],
+    resolutions: [...model.resolutions],
+    duration: { ...model.duration },
     files: {
       images: { min: 0, max: model.maxImages },
       ...(model.maxVideos ? { videos: { min: 0, max: model.maxVideos } } : {}),
       ...(model.maxAudios ? { audios: { min: 0, max: model.maxAudios } } : {}),
     },
     fields: promptFields([
-      { key: 'duration', label: '时长(秒)', kind: 'number', required: true, min: 1, step: 1 },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options([...YUANLIU_RATIOS]) },
+      ...(model.resolutions.length
+        ? [{ key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: '480p', options: options([...model.resolutions]) }]
+        : []),
+      { key: 'duration', label: '时长(秒)', kind: 'number', required: true, defaultValue: model.defaultDuration, min: model.duration.min, max: model.duration.max, step: 1 },
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
       ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),

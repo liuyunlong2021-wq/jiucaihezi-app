@@ -41,6 +41,13 @@ export function validateProductionScope(mode = 'none', route) {
   if (route !== 'none' && mode.startsWith('skills:') && mode.slice(7).split(',').some(name => !groupsFor()[route].includes(name))) throw new Error('Skill 不属于当前创作路线')
   return { productionMode: mode, productionRoute: route }
 }
+function storedScope(mode, route) {
+  if (route === 'manju' && mode?.startsWith('skills:') && mode.slice(7).split(',').includes('jc-manju-brainstorm')) {
+    const names = mode.slice(7).split(',').filter(name => name !== 'jc-manju-brainstorm')
+    mode = names.length ? `skills:${names.join(',')}` : 'manju'
+  }
+  return validateProductionScope(mode, route)
+}
 function stateFor(scope) {
   for (const key of scopeChainOf(scope)) if (states.has(key)) return states.get(key)
 }
@@ -65,12 +72,12 @@ export function filterProductionSkills(scope, skills) {
 export function productionGoalAllowed(agent) {
   if (productionRouteFor(agent) !== 'none') return false
   for (const message of [...agent.inbox.nextStep, ...agent.inbox.nextTurn]) {
-    if (message.source.kind === 'user' && validateProductionScope(message.source.productionMode, message.source.productionRoute).productionRoute !== 'none') return false
+    if (message.source.kind === 'user' && storedScope(message.source.productionMode, message.source.productionRoute).productionRoute !== 'none') return false
   }
   for (let seq = agent.session.seq - 1; seq >= 0; seq--) {
     const event = agent.session.eventAt(seq)
     if (event?.type === 'user/message' && event.data.source.kind === 'user')
-      return validateProductionScope(event.data.source.productionMode, event.data.source.productionRoute).productionRoute === 'none'
+      return storedScope(event.data.source.productionMode, event.data.source.productionRoute).productionRoute === 'none'
   }
   return true
 }
@@ -147,7 +154,7 @@ export function installProductionSkills(ctx) {
     try {
       for (const event of observation.events) if (event.type === 'user/message' && event.data.source.kind === 'user' && event.data.source.productionMode !== undefined) {
         const source = event.data.source
-        inherited = validateProductionScope(source.productionMode, source.productionRoute ?? (source.productionMode.startsWith('skills:') ? inherited.productionRoute : undefined))
+        inherited = storedScope(source.productionMode, source.productionRoute ?? (source.productionMode.startsWith('skills:') ? inherited.productionRoute : undefined))
       }
     } finally { observation[Symbol.dispose]() }
     let release, releaseTools
@@ -223,7 +230,7 @@ export function installProductionSkills(ctx) {
         const latest = messages.findLast(message => message.source.kind === 'user')
         if (latest) {
           const source = latest.source
-          const scope = validateProductionScope(source.productionMode ?? state.mode, source.productionRoute ?? (source.productionMode === undefined || source.productionMode.startsWith('skills:') ? state.route : undefined))
+          const scope = storedScope(source.productionMode ?? state.mode, source.productionRoute ?? (source.productionMode === undefined || source.productionMode.startsWith('skills:') ? state.route : undefined))
           await setMode(scope.productionMode, scope.productionRoute, c)
           setWikiSourceContent(agent, latest.content)
         }

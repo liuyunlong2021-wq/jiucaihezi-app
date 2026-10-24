@@ -143,6 +143,35 @@ test('vision adds only read_image and the actual schema stays below the audited 
   if (process.env.JC_SCOPE_AUDIT) writeFileSync(process.env.JC_SCOPE_AUDIT, JSON.stringify(f.requests[0], null, 2))
 })
 
+test('actual SDK saves and replaces creative artifacts, restores autosave scope, and leaves ordinary chat manual', { timeout: 45000 }, async t => {
+  const f = await fixture(t)
+  const cases = [
+    ['manju', { artifact_kind: 'engineering_script', episode_number: 1 }, 'wiki/剧本/工程剧本/第1集工程剧本.md'],
+    ['short-drama', { artifact_kind: 'screenplay', episode_number: 1 }, 'wiki/剧本/第001集/分集剧本.md'],
+    ['novel', { artifact_kind: 'novel_outline' }, 'wiki/创作/大纲.md'],
+  ]
+  for (const [route, artifact, path] of cases) {
+    await f.h.client.request('session/permission', { sessionId: route, preset: 'workspace-write' })
+    f.plan([{ name: 'wiki_save_artifact', args: { ...artifact, content: '# 初稿' } }])
+    await f.run(route, { sessionId: route })
+    assert.equal(readFileSync(join(f.root, path), 'utf8').trim(), '# 初稿')
+    const system = f.requests.at(-1).messages.filter(message => message.role === 'system').map(message => message.content).join('\n')
+    assert.match(system, /完整创作产物必须调用 wiki_save_artifact 自动保存/)
+    f.plan([{ name: 'wiki_save_artifact', args: { ...artifact, content: '# 修改稿' } }])
+    await f.run(route, { sessionId: route })
+    assert.equal(readFileSync(join(f.root, path), 'utf8').trim(), '# 修改稿')
+    assert.match(f.results().at(-1), /"operation":"updated"/)
+    assert.deepEqual(f.tools(), core)
+  }
+  await f.h.close()
+  const restored = f.create()
+  f.plan([{ name: 'wiki_save_artifact', args: { artifact_kind: 'novel_outline', content: '# 冷恢复修订' } }])
+  await f.run('novel', { sessionId: 'novel', harness: restored })
+  assert.match(readFileSync(join(f.root, 'wiki/创作/大纲.md'), 'utf8'), /冷恢复修订/)
+  await f.run('none', { mode: 'none', sessionId: 'ordinary', harness: restored })
+  assert.match(f.requests.at(-1).messages.filter(message => message.role === 'system').map(message => message.content).join('\n'), /普通模式不自动归档/)
+})
+
 test('production scopes deny foreign Skill resources and cross-route artifacts before side effects', { timeout: 30000 }, async t => {
   const f = await fixture(t)
   f.plan([{ name: 'read', args: { file_path: join(skills, 'jc-novel/SKILL.md') } },
@@ -152,7 +181,7 @@ test('production scopes deny foreign Skill resources and cross-route artifacts b
   assert.doesNotMatch(f.results()[0], /小说世界模型/)
   assert.match(f.results()[1], /Error:/)
   const schema = f.requests[0].tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters
-  assert.equal(schema.properties.artifact_kind.enum.length, 20)
+  assert.equal(schema.properties.artifact_kind.enum.length, 24)
   assert.equal(schema.properties.chapter_number, undefined)
   assert.equal(schema.properties.user_confirmed, undefined)
 })
@@ -184,7 +213,7 @@ test('legal tools still load business methods, save notes and archive the engine
     { name: 'write', args: { file_path: '创作记录.md', content: '暂定草稿\n' } },
     { name: 'edit', args: { file_path: '创作记录.md', old_string: '暂定', new_string: '已选' } },
     { name: 'wiki_save_artifact', args: { artifact_kind: 'engineering_script', episode_number: 1, content: '# 工程台本\n\n镜头1：人物进入房间。\n' } },
-    { name: 'present', args: { files: [{ path: 'wiki/剧本/第001集/工程剧本.md' }] } }])
+    { name: 'present', args: { files: [{ path: 'wiki/剧本/工程剧本/第1集工程剧本.md' }] } }])
   await f.run('manju')
   assert.equal(f.results().length, 6)
   for (const result of f.results()) assert.doesNotMatch(result, /^Error:/)
@@ -279,7 +308,7 @@ test('ordinary single business Skill selection retains general capabilities and 
   assert.match(f.results()[0], /合法改编输入/)
   await f.run('none', { mode: 'skills:jc-novel', sessionId: 'personal-skill' })
   assert.ok(f.tools().includes('bash'))
-  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 36)
+  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 40)
 })
 
 test('old capability handshake fails before a prompt is sent', async () => {
@@ -315,7 +344,8 @@ test('every bundled Manju package file and shared Wiki guidance remains readable
     return readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)])
   }
   const paths = groups.manju.flatMap(name => files(join(skills, name)))
-  assert.ok(paths.length >= 49)
+  for (const name of groups.manju) assert.ok(paths.includes(join(skills, name, 'SKILL.md')))
+  assert.ok(paths.length > groups.manju.length)
   f.plan([...paths.map(file_path => ({ name: 'read', args: { file_path, limit: 1 } })), { name: 'wiki_read_guidance', args: { topic: 'overview' } }])
   await f.run('manju')
   assert.equal(f.results().length, paths.length + 1)
@@ -391,4 +421,94 @@ test('explicit ordinary same-name personal Skills load their own bodies without 
     assert.ok(f.tools().includes('bash'))
     assert.match(f.results().at(-1), new RegExp(`PERSONAL_BODY_${name}`))
   }
+})
+
+test('actual SDK resumes a stopped pipeline until verified completion for both models', { timeout: 60000 }, async t => {
+  const f = await fixture(t)
+  writeFileSync(join(f.root, '剧本.md'), '# 来源剧本\n主角归来')
+  for (const model of ['H3', 'Seedance']) {
+    const calls = [{ name: 'skill', args: { name: 'jc-manju-pipeline' } }, null]
+    const save = (args, content) => calls.push({ name: 'wiki_save_artifact', args: { ...args, content } })
+    const checkpoint = data => save({ artifact_kind: 'pipeline_checkpoint', video_model: model, episode_number: 1 }, JSON.stringify(data))
+    checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+    save({ artifact_kind: 'story_summary' }, '# 故事梗概\n主角归来')
+    save({ artifact_kind: 'scene_research', entity_name: '山门' }, '# 山门说明')
+    checkpoint({ stage: 'materials', outputs: ['wiki/项目资料/故事梗概.md', 'wiki/项目资料/场景说明/山门.md'] })
+    calls.push(null) // A model final answer must not end an unfinished pipeline.
+    calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/项目资料/故事梗概.md') } })
+    save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n比例：9:16\n风格：二维动画')
+    checkpoint({ stage: 'style', outputs: ['wiki/项目风格/影片比例与风格.md'] })
+    calls.push(...['wiki/项目风格/影片比例与风格.md', 'wiki/项目资料/场景说明/山门.md'].map(path => ({ name: 'read', args: { file_path: join(f.root, path) } })))
+    save({ artifact_kind: 'scene_asset', entity_name: '山门' }, '# 山门提示词')
+    checkpoint({ stage: 'assets', outputs: ['wiki/资产/场景/山门/场景生图提示词.md'] })
+    calls.push({ name: 'read', args: { file_path: join(f.root, '剧本.md') } })
+    save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n风格：二维动画\n资产清单：山门\n镜头1')
+    checkpoint({ stage: 'engineering', outputs: ['wiki/剧本/工程剧本/第1集工程剧本.md'], duration_seconds: 10 })
+    calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/剧本/工程剧本/第1集工程剧本.md') } })
+    calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/资产/场景/山门/场景生图提示词.md') } })
+    const path = `wiki/剧本/视频提示词/${model}/第1集001视频提示词.md`
+    if (model === 'Seedance') save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '# 第一段\n没有参考图，省略图号')
+    save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '古装宗门云海中的电影片段。\n@图1：山门，青灰石门与云海。\n山门位于画面中央，@图1石台通向门内。\n【全局设定】\n日间，9:16二维动画，左上日光。\n【时间戳剧本分镜】\n镜头1【0—10秒】：【建立】 ｜ 全景，固定 ｜ @图1山门空镜。\n【全局补充】\n保持光向一致，无字幕和BGM。')
+    checkpoint({ stage: 'prompts', outputs: [path], segments: [{ path, start_seconds: 0, end_seconds: 10 }] })
+    checkpoint({ stage: 'complete', outputs: [] })
+    f.plan(calls)
+    await f.run('manju', { sessionId: 'pipeline-both-models' })
+    const progress = JSON.parse(readFileSync(join(f.root, `wiki/制作流水线/${model}/第1集进度.json`), 'utf8'))
+    assert.equal(progress.stage, 'complete')
+    assert.equal(progress.status, 'completed')
+    if (model === 'Seedance') assert.ok(f.results().some(result => /缺少参考图占位/.test(String(result))))
+    assert.ok(f.requests.some(request => JSON.stringify(request.messages).includes('流水线尚未完成')))
+    assert.ok(f.results().every(result => !String(result).includes('前置阶段')))
+  }
+})
+
+test('pipeline resumes saved stage after SDK restart and respects a blocked checkpoint', { timeout: 30000 }, async t => {
+  const f = await fixture(t)
+  writeFileSync(join(f.root, '剧本.md'), '# 来源')
+  const checkpoint = data => ({ name: 'wiki_save_artifact', args: { artifact_kind: 'pipeline_checkpoint', video_model: 'Seedance', episode_number: 1, content: JSON.stringify(data) } })
+  f.plan([checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [], status: 'blocked', reason: '等待确认风格' })])
+  await f.run('manju', { sessionId: 'recover-pipeline' })
+  const progressPath = join(f.root, 'wiki/制作流水线/Seedance/第1集进度.json')
+  assert.equal(JSON.parse(readFileSync(progressPath, 'utf8')).status, 'blocked')
+  await f.h.close()
+  const restored = f.create()
+  await restored.start()
+  f.plan([
+    { name: 'read', args: { file_path: progressPath } },
+    { name: 'wiki_save_artifact', args: { artifact_kind: 'story_summary', content: '# 故事梗概\n主角归来' } },
+    checkpoint({ stage: 'materials', outputs: ['wiki/项目资料/故事梗概.md'], status: 'blocked', reason: '等待用户提供已确认比例' }),
+  ])
+  await f.run('manju', { sessionId: 'recover-pipeline', harness: restored })
+  const saved = JSON.parse(readFileSync(progressPath, 'utf8'))
+  assert.equal(saved.stage, 'materials')
+  assert.equal(saved.status, 'blocked')
+  assert.equal(saved.reason, '等待用户提供已确认比例')
+})
+
+test('pipeline rejects asset writes without actual Wiki reads and rejects reads made stale by an edit', { timeout: 30000 }, async t => {
+  const f = await fixture(t)
+  writeFileSync(join(f.root, '剧本.md'), '# 原文\n甲归来')
+  const save = (artifact_kind, content, extra = {}) => ({ name: 'wiki_save_artifact', args: { artifact_kind, content, ...extra } })
+  const checkpoint = data => save('pipeline_checkpoint', JSON.stringify(data), { episode_number: 1, video_model: 'Seedance' })
+  const read = path => ({ name: 'read', args: { file_path: join(f.root, path) } })
+  const actor = save('character_asset', '# 甲提示词', { entity_name: '甲' })
+  f.plan([
+    checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] }),
+    save('story_summary', '# 故事梗概\n甲归来'),
+    save('character_bio', '# 甲\n主角归来', { entity_name: '甲' }),
+    checkpoint({ stage: 'materials', outputs: ['wiki/项目资料/故事梗概.md', 'wiki/项目资料/人物小传/甲.md'] }),
+    read('wiki/项目资料/故事梗概.md'),
+    save('film_style', '# 影片比例与风格\n比例：9:16\n风格：二维'),
+    checkpoint({ stage: 'style', outputs: ['wiki/项目风格/影片比例与风格.md'] }), actor,
+  ])
+  await f.run('manju', { sessionId: 'read-gate' })
+  assert.match(f.results().at(-1), /精准读取缺失/)
+  assert.throws(() => readFileSync(join(f.root, 'wiki/资产/角色/甲/角色生图提示词.md')))
+  f.plan([read('wiki/项目风格/影片比例与风格.md'), read('wiki/项目资料/人物小传/甲.md'),
+    { name: 'write', args: { file_path: join(f.root, 'wiki/项目资料/人物小传/甲.md'), content: '# 甲\n修改后的设定' } }, actor])
+  await f.run('manju', { sessionId: 'read-gate' })
+  assert.match(f.results().at(-1), /精准读取缺失或已过期/)
+  f.plan([read('wiki/项目风格/影片比例与风格.md'), read('wiki/项目资料/人物小传/甲.md'), actor])
+  await f.run('manju', { sessionId: 'read-gate' })
+  assert.match(f.results().at(-1), /"status":"saved"/)
 })

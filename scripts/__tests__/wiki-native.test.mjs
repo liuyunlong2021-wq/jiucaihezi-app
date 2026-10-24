@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 test('native Wiki resources preserve all existing rules without publishing a Skill', async () => {
-  const { attachWikiRuntime } = await import('../../src-tauri/resources/deepseek-harness/wiki-runtime.mjs')
+  const { attachWikiRuntime, updateWikiProductionRoute } = await import('../../src-tauri/resources/deepseek-harness/wiki-runtime.mjs')
   const tools = new Map(), sections = new Map()
   const releases = []
   const ctx = {
@@ -25,6 +25,14 @@ test('native Wiki resources preserve all existing rules without publishing a Ski
   assert.match(await tools.get('wiki_read_guidance').execute({ topic: 'story' }), /prepare_story_analysis/)
   assert.match(await tools.get('wiki_read_guidance').execute({ topic: 'knowledge' }), /两阶段/)
   assert.match([...sections.values()][0].text, /wiki_read_guidance/)
+  const autosave = sections.get('jiucaihezi:wiki-autosave')
+  assert.equal(typeof autosave?.text, 'function')
+  assert.match(autosave.text(), /普通模式不自动归档/)
+  updateWikiProductionRoute(agent, 'novel')
+  assert.match(autosave.text(), /创作产物必须.*wiki_save_artifact/)
+  assert.match(autosave.text(), /解释、提问.*不自动保存/)
+  updateWikiProductionRoute(agent, 'none')
+  assert.match(autosave.text(), /普通模式不自动归档/)
   assert.ok(!existsSync('public/skills/wiki-memory/SKILL.md'))
   await dispose()
   assert.equal(tools.size, 0)

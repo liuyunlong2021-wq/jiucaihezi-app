@@ -39,6 +39,6 @@ description: "确定六类可组合换皮方向、核心梗及人物关系背景
 
 检查新皮是否能完整承接原作的对白、动作、描述信息、冲突笑点与因果；关键替换有依据，未授权情节没有改变。只输出选定的新皮合同及必要资料，不重复生成自由改编故事大纲。
 
-正式产物自动调用 `wiki_save_artifact`：核心梗、替换关系、改变边界与规格用 `project_overview`；确需建立的新版资料用 `research_version=adapted` 及既有 `story_summary`、`character_bio`、`story_background`、`world_rules`、`scene_research`、`prop_research`，用户确需新版事件线时仍可用 `event_timeline`。已有总纲先完整读取，保留漫剧等无关章节后update，不append。仅讨论／预览／不要保存时不写；保存不等于确认。
+正式产物自动调用 `wiki_save_artifact`：核心梗、替换关系、改变边界与规格用 `project_overview`；确需建立的新版资料用 `research_version=adapted` 及既有 `story_summary`、`character_bio`、`story_background`、`world_rules`、`scene_research`、`prop_research`，用户确需新版事件线时仍可用 `event_timeline`。已有总纲先完整读取，保留漫剧等无关章节后update，不append。解释和未成稿讨论不写；完整预览稿自动保存，明确不要保存时不写；保存不等于确认。
 
 修改已确认新皮先指出受影响规划和剧集，沿授权范围更新，不自动重写旧稿。原创项目继续复用原有资料类型与整体规划能力。

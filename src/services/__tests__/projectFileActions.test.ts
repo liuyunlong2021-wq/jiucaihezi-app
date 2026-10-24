@@ -94,6 +94,50 @@ test('failed index registration preserves imported files and reports partial suc
   assert.equal(state.contents.get('wiki/资料/稿件.md'), '# 原件')
 })
 
+test('three creative Wiki templates create their real artifact directories and progressively merge into one root', async () => {
+  const state = wikiFilesFixture()
+  await state.actions.createProductionWiki({ owner: '/project', kind: 'short-drama' })
+  assert.ok(state.contents.has('wiki/项目资料/index.md'))
+  assert.ok(state.contents.has('wiki/剧本/index.md'))
+  assert.ok(!state.contents.has('wiki/创作/章节草稿/index.md'))
+  assert.ok(!state.contents.has('wiki/资产/声音/index.md'))
+  state.contents.set('wiki/剧本/第001集/分集剧本.md', '# 用户修改的剧本')
+  await state.actions.createProductionWiki({ owner: '/project', kind: 'manju' })
+  assert.ok(state.contents.has('wiki/项目风格/index.md'))
+  assert.ok(state.contents.has('wiki/剧本/视频提示词/Seedance/index.md'))
+  await state.actions.createProductionWiki({ owner: '/project', kind: 'novel' })
+  assert.ok(state.contents.has('wiki/创作/章节草稿/index.md'))
+  assert.equal(state.contents.get('wiki/剧本/第001集/分集剧本.md'), '# 用户修改的剧本')
+  assert.match(state.contents.get('wiki/index.md') || '', /\[\[创作\/index\]\]/)
+  assert.match(state.contents.get('wiki/创作/index.md') || '', /\[\[章节草稿\/index\]\]/)
+  const before = [...state.contents]
+  await state.actions.createProductionWiki({ owner: '/project', kind: 'novel' })
+  assert.deepEqual([...state.contents], before)
+  assert.ok(![...state.contents.keys()].some(path => path.includes('{')))
+})
+
+test('creative templates reuse docs/wiki and reject ambiguous roots before writing', async () => {
+  const state = wikiFilesFixture({ 'docs/wiki/index.md': '# 已有作品\n用户手写说明。' })
+  const root = await state.actions.createProductionWiki({ owner: '/project', kind: 'novel' })
+  assert.equal(root.path, 'docs/wiki')
+  assert.match(state.contents.get('docs/wiki/index.md') || '', /用户手写说明/)
+  assert.ok(state.contents.has('docs/wiki/创作/index.md'))
+  assert.ok(!state.contents.has('wiki/index.md'))
+  const ambiguous = wikiFilesFixture({ 'wiki/index.md': '# A', 'docs/wiki/index.md': '# B' })
+  await assert.rejects(ambiguous.actions.createProductionWiki({ owner: '/project', kind: 'manju' }), /多个 Wiki/)
+  assert.equal(ambiguous.contents.size, 2)
+  assert.equal(ambiguous.directories.size, 0)
+})
+
+test('creative templates exclude the repository development Wiki and preflight occupied paths', async () => {
+  const state = wikiFilesFixture({ 'docs/wiki/index.md': '# 开发导航', 'docs/wiki/CLAUDE.md': '# 通用记忆工作台开发文档\n' })
+  await state.actions.createProductionWiki({ owner: '/project', kind: 'novel' })
+  assert.ok(state.contents.has('wiki/创作/index.md'))
+  const occupied = wikiFilesFixture({ 'wiki/创作': '普通文件' })
+  await assert.rejects(occupied.actions.createProductionWiki({ owner: '/project', kind: 'novel' }), /占用/)
+  assert.equal(occupied.contents.size, 1)
+})
+
 test('shared canvas creation creates a project resource and publishes one event', async () => {
   const files = new Map<string, string>()
   const adapter: ProjectFileAdapter = {

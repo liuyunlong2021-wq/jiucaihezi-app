@@ -10,7 +10,22 @@ import {
   parseConversationTranscript,
   type ConversationTurn,
 } from '../conversationTranscript'
-import { appendMemoryRound, initializeMemoryProject, listMemoryConversations, saveMemoryMarkdown } from '../memoryProject'
+import { appendMemoryRound, initializeMemoryProject, inspectMemoryProject, listMemoryConversations, saveMemoryMarkdown } from '../memoryProject'
+
+test('inspecting an existing project does not recreate directories deleted by the user', async () => {
+  const writes: string[] = []
+  const files = createProjectFileService({
+    runtime: 'desktop',
+    async list() { return [{ path: CONVERSATION_DIRECTORY, isDirectory: true }, { path: 'jc-media/uploads/旧素材.txt', isDirectory: false }] },
+    async readText() { throw new Error('not used') },
+    async createText(_owner, path) { writes.push(path); return { path, isDirectory: false } },
+    async createFolder(_owner, path) { writes.push(path); return { path, isDirectory: true } },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  })
+  assert.equal((await inspectMemoryProject('/project', files)).initialized, true)
+  assert.deepEqual(writes, [])
+})
 
 test('memory project initialization creates the complete protected skeleton', async () => {
   const entries = new Map<string, ProjectFileEntry>()

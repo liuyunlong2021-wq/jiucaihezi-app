@@ -7,7 +7,8 @@ export const WIKI_MEMORY_SKILL = PROJECT_WIKI
 export interface ManjuPreference { enabled: boolean; wikiMemoryWasSelected?: boolean }
 
 export function restoreManjuSelection(names: string[], preference?: ManjuPreference): string[] {
-  const migrated = [...new Set(nativeWikiSelection(names).map(name => ['jc-manju-minimaxh3', 'jc-manju-zhizuo'].includes(name) ? MANJU_MODE : name === 'jc-daoyan-fenjing' ? 'jc-seedance' : name))]
+  let migrated = [...new Set(nativeWikiSelection(names).map(name => ['jc-manju-minimaxh3', 'jc-manju-zhizuo'].includes(name) ? MANJU_MODE : name === 'jc-daoyan-fenjing' ? 'jc-seedance' : name))]
+  if (migrated.includes(MANJU_MODE)) migrated = migrated.filter(name => name !== 'jc-manju-brainstorm')
   if (preference?.enabled) {
     return [MANJU_MODE, ...migrated.filter(name => name !== MANJU_MODE && MANJU_SKILLS.includes(name)), ...migrated.filter(name => name === WIKI_MEMORY_SKILL)]
   }

@@ -157,7 +157,9 @@ export type DeepSeekProcessStep = {
   retry?: DeepSeekRetry
 }
 
-/** 官方 `TokenUsage` 的子集；计数互斥，`inputTokens` 只含未缓存输入。 */
+type OptionalUsageField = 'cacheReadTokens' | 'cacheWriteTokens' | 'reasoningTokens'
+
+/** 官方精确总量与App展示补充；inputTokens只含未缓存输入。 */
 export type DeepSeekUsage = {
   inputTokens: number
   outputTokens: number
@@ -165,6 +167,8 @@ export type DeepSeekUsage = {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+  /** 只存部分请求已报告的值，不能作为整轮精确总量或计费依据。 */
+  reportedUsage?: Partial<Record<OptionalUsageField, { tokens: number; reportedRequests: number; totalRequests: number }>>
 }
 
 export type DeepSeekReadFileMeta = {
@@ -489,12 +493,47 @@ export function deepSeekSessionInbox(snapshot: DeepSeekSessionSnapshot): DeepSee
   return items
 }
 
-/** 只映射字段名；计费尝试、重试与未知值全部由同版本官方实现裁决。 */
+/** 精确总量与请求归属均由官方判定；App只额外披露部分已上报字段。 */
 export function deepSeekTurnUsage(events: any[]): DeepSeekUsage | undefined {
   const usage = deriveTurnTokenUsage(events)
   if (!usage) return undefined
   const { uncachedInputTokens, routes: _routes, ...rest } = usage
-  return { inputTokens: uncachedInputTokens, ...rest }
+  const result: DeepSeekUsage = { inputTokens: uncachedInputTokens, ...rest }
+  // Reuse the official normalization for each charged attempt, including its final stream sample.
+  const attempts = events.filter(event => ['assistant/message', 'assistant/attempt'].includes(event.type)).map(event => {
+    const { turn, step } = event.data
+    return deriveTurnTokenUsage([
+      { type: 'turn/start', data: { turn } }, { type: 'step/start', data: { turn, step } },
+      event, { type: 'step/end', data: { turn, step } }, { type: 'turn/end', data: { turn } },
+    ] as any)
+  })
+  if (attempts.some(attempt => !attempt)) return result
+  for (const field of ['cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const) {
+    if (result[field] !== undefined) continue
+    const reported = attempts.flatMap(attempt => attempt?.[field] === undefined ? [] : [attempt[field]!])
+    if (!reported.length || reported.length === attempts.length) continue
+    result.reportedUsage ??= {}
+    result.reportedUsage[field] = {
+      tokens: reported.reduce((sum, value) => sum + value, 0), reportedRequests: reported.length, totalRequests: attempts.length,
+    }
+  }
+  return result
+}
+
+/** 展示已知事实；不推断缺失字段、不估算费用或不完整命中率。 */
+export function deepSeekUsageRows(usage?: DeepSeekUsage): Array<{ label: string; value: string; coverage?: string }> {
+  if (!usage) return []
+  const fields = [
+    ['inputTokens', '未缓存输入'], ['cacheReadTokens', '缓存读取'], ['cacheWriteTokens', '缓存写入'],
+    ['outputTokens', '输出'], ['reasoningTokens', '思考'],
+  ] as const
+  return fields.map(([field, label]) => {
+    const exact = usage[field]
+    if (exact !== undefined) return { label, value: exact.toLocaleString('zh-CN') }
+    const partial = field === 'inputTokens' || field === 'outputTokens' ? undefined : usage.reportedUsage?.[field]
+    return partial ? { label, value: `已报告 ${partial.tokens.toLocaleString('zh-CN')}`,
+      coverage: `${partial.reportedRequests}/${partial.totalRequests} 次请求提供数据` } : { label, value: '未上报' }
+  })
 }
 
 export function deepSeekSessionUsage(snapshot: DeepSeekSessionSnapshot): Map<string, DeepSeekUsage> {

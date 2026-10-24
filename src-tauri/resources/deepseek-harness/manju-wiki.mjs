@@ -127,11 +127,23 @@ function indexSummary(value, content, label) {
     .find(line => line && !/^#{1,6}\s/.test(line))
     ?.replace(/^[-*+]\s+/, '')
   const summary = String(value || excerpt || `${label}正文。`)
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, target, label) => label || target)
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/[\r\n|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   const clipped = [...summary].slice(0, 160).join('')
   return clipped || `${label}正文。`
+}
+
+function normalizeWikiLinks(content, wikiRoot, path) {
+  return content.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (original, target, label) => {
+    if (!target.startsWith(`${wikiRoot}/`)) return original
+    const match = /^(.*?\.md)(?:\s+(.+))?$/.exec(target)
+    if (!match) return original
+    const relative = posix.relative(posix.dirname(`${wikiRoot}/${path}`), match[1])
+    return `[[${relative}|${label || match[2] || posix.basename(match[1], '.md')}]]`
+  })
 }
 
 function safeName(value, field) {
@@ -171,6 +183,7 @@ function artifactSpec(args, contract) {
     template = { ...template, path: template.path.replace('项目资料/', prefix), index: template.index.replace('项目资料/', prefix) }
   }
   const values = {}
+  if (template.episode) values.episode_number = String(args.episode_number)
   if (template.mode === 'source_selection') values.work = safeName(args.work_name, 'work_name')
   if (template.episode) values.episode = episodeFolder(args.episode_number)
   if (template.entity) values.entity = safeName(args.entity_name, 'entity_name')
@@ -178,7 +191,12 @@ function artifactSpec(args, contract) {
     if (!template.model.includes(args.video_model)) throw new Error(`video_model 必须是 ${template.model.join(' 或 ')}`)
     values.model = args.video_model
   }
-  if (template.path.includes('{segment}')) values.segment = safeName(args.segment, 'segment')
+  if (template.path.includes('{segment}') || template.label.includes('{segment}')) values.segment = safeName(args.segment ?? '全篇', 'segment')
+  if (template.path.includes('{clip}')) {
+    const clip = /^(?:片段)?([0-9]{1,3})$/.exec(String(args.segment || ''))
+    if (!clip || Number(clip[1]) < 1) throw new Error('segment 必须是1至999的片段序号，例如001')
+    values.clip = String(Number(clip[1])).padStart(3, '0')
+  }
   if (template.path.includes('{book}') || template.path.includes('{chapter}')) {
     values.book = safeName(args.work_name, 'work_name')
     values.chapter = chapterFolder(args.chapter_number)
@@ -262,6 +280,7 @@ async function writePath(ctx, args, exec, cwd, workspace, policy, relativePath, 
       throw new Error(`文件在读取期间发生变化，请重试：${relativePath}`)
     if (expectedPriorContent !== undefined && currentText !== expectedPriorContent)
       throw new Error(`文件内容已被其他操作修改，请重新读取后再更新：${relativePath}`)
+    if (mode === 'upsert' && currentText === content) return 'unchanged'
     if (mode === 'append') {
       const section = safeName(args.section_name, 'section_name')
       if (currentText.split(/\r?\n/).some(line => line.trim() === `## ${section}`))
@@ -305,7 +324,7 @@ async function appendIndexLink(ctx, exec, cwd, workspace, policy, indexPath, tar
     if (!info || info.type !== 'file') throw new Error(`索引文件不可用：${indexPath}`)
     const current = await ctx.fs.readText(target, exec.signal)
     const lines = current.split(/\r?\n/)
-    const existingLine = lines.findIndex(line => line.includes(`[[${targetKey}|`))
+    const existingLine = lines.findIndex(line => line.includes(`[[${targetKey}|`) || line.includes(`[[${targetKey}]]`))
     if (existingLine >= 0 && lines[existingLine].trim() === link) return
     const next = existingLine >= 0
       ? `${lines.map((line, index) => index === existingLine ? link : line).join('\n').trimEnd()}\n`
@@ -429,6 +448,17 @@ function indexEntries(spec, wikiRoot, contract) {
   const index = `${wikiRoot}/${spec.index}`
   const target = `${wikiRoot}/${spec.path}`
   const entries = [{ index, target, label: spec.label, summary: spec.summary }]
+  if (spec.precise) {
+    let directory = posix.dirname(spec.index)
+    while (directory !== '.') {
+      const parent = posix.dirname(directory)
+      entries.push({ index: `${wikiRoot}/${parent === '.' ? '' : `${parent}/`}index.md`,
+        target: `${wikiRoot}/${directory}/index.md`, label: posix.basename(directory), summary: `${posix.basename(directory)}资料与产物。` })
+      directory = parent
+    }
+    entries.push({ index: `${wikiRoot}/${contract.scaffold.progressPath}`, target, label: spec.label, summary: spec.summary })
+    return entries.filter(entry => entry.index !== entry.target)
+  }
   if (spec.episode) {
     const episodePath = `剧本/${spec.episode}`
     entries.push({ index: `${wikiRoot}/剧本/index.md`, target: `${wikiRoot}/${episodePath}/index.md`, label: spec.episode, summary: '查看本集分集剧本、工程剧本和视频提示词。' })
@@ -480,6 +510,14 @@ function indexEntries(spec, wikiRoot, contract) {
 }
 
 async function ensureDynamicIndexes(ctx, args, exec, cwd, workspace, policy, wikiRoot, spec, contract) {
+  if (spec.precise) {
+    let directory = posix.dirname(spec.index)
+    while (directory !== '.') {
+      await ensureFile(ctx, args, exec, cwd, workspace, policy, `${wikiRoot}/${directory}/index.md`, `# ${posix.basename(directory)}\n\n## 页面\n`)
+      directory = posix.dirname(directory)
+    }
+    return
+  }
   if (spec.template.research || spec.mode === 'source_selection') {
     let directory = posix.dirname(spec.index)
     while (directory !== '.') {
@@ -592,7 +630,7 @@ async function saveConfirmedChapter(ctx, args, exec, cwd, workspace, policy, wik
   return { path: sourcePath, operation, warnings }
 }
 
-async function saveArtifact(ctx, args, exec, contract) {
+async function saveArtifact(ctx, args, exec, contract, route) {
   const cwd = exec.agent?.session?.header?.cwd
   if (typeof cwd !== 'string' || !cwd) throw new Error('Wiki 产物必须保存到当前项目，请先打开项目目录。')
   const workspace = await ctx.fs.resolve(cwd, { cwd, signal: exec.signal })
@@ -600,18 +638,43 @@ async function saveArtifact(ctx, args, exec, contract) {
   if (ctx.fs.sandboxMode !== undefined && !policyService)
     throw new Error('Wiki 产物保存失败：当前文件系统缺少沙箱策略服务。')
   const policy = policyService?.resolve({ session: exec.agent.session })
-  const spec = artifactSpec(args, contract)
-  const content = spec.mode === 'source_selection' ? args.content : normalizedMarkdown(args.content)
-  spec.summary = indexSummary(args.summary, content, spec.label)
   const wikiRoot = await chooseWikiRoot(ctx, cwd, exec, workspace, contract)
+  let legacySpec
+  if (route === 'manju' && contract.manju_layout) {
+    try { legacySpec = artifactSpec(args, contract) } catch { /* new layout may not require a legacy segment */ }
+    contract = { ...contract, types: Object.fromEntries(Object.entries(contract.types).map(([kind, spec]) =>
+      [kind, { ...spec, ...contract.manju_layout.types[kind] }])),
+      scaffold: { ...contract.scaffold, directories: contract.manju_layout.directories } }
+  }
+  let spec
+  try { spec = artifactSpec(args, contract) }
+  catch (error) {
+    if (!legacySpec || !await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${legacySpec.path}`, exec.signal, workspace), exec.signal)) throw error
+    spec = legacySpec
+  }
+  spec.precise = route === 'manju' && contract.manju_layout !== undefined
+  if (legacySpec && legacySpec.path !== spec.path) {
+    const oldFile = await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${legacySpec.path}`, exec.signal, workspace), exec.signal)
+    if (oldFile) {
+      const newFile = await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${spec.path}`, exec.signal, workspace), exec.signal)
+      if (newFile) throw new Error('新旧产物同时存在，请明确当前版本，未覆盖任一文件')
+      spec = { ...legacySpec, precise: false }
+    }
+  }
+  let content = spec.mode === 'source_selection' ? args.content : normalizedMarkdown(args.content)
+  if (route === 'manju' && !['source_selection', 'pipeline'].includes(spec.mode)) content = normalizeWikiLinks(content, wikiRoot, spec.path)
+  if (spec.mode === 'pipeline') content = await pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spec, content)
+  spec.summary = indexSummary(args.summary, content, spec.label)
 
   let saved
   if (spec.mode === 'chapter_source') {
     saved = await saveConfirmedChapter(ctx, args, exec, cwd, workspace, policy, wikiRoot, spec, content)
   } else {
     const pageContent = spec.mode === 'chapter_draft' ? chapterDocument(spec, content) : content
+    const writeMode = route !== 'none' && args.write_mode === undefined && spec.mode !== 'source_selection'
+      ? 'upsert' : spec.writeMode
     const operation = await writePath(ctx, args, exec, cwd, workspace, policy,
-      `${wikiRoot}/${spec.path}`, pageContent, spec.writeMode)
+      `${wikiRoot}/${spec.path}`, pageContent, writeMode)
     saved = { path: `${wikiRoot}/${spec.path}`, operation }
   }
 
@@ -647,6 +710,172 @@ async function saveArtifact(ctx, args, exec, contract) {
 
 
 const sourceMessages = new WeakMap()
+const pipelineStates = new WeakMap()
+export const pipelineStateFor = agent => pipelineStates.get(agent)
+// Successful model-facing reads only; writing a document does not count as reading it.
+const wikiReads = new WeakMap()
+export function resetWikiReads(agent) { wikiReads.set(agent, new Map()) }
+export function recordWikiRead(agent, target, observation, exec) {
+  if (exec?.agent?.session !== agent.session || !['read', 'read_image'].includes(exec.name) || observation.kind !== 'present') return
+  wikiReads.get(agent)?.set(target.targetKey, { target, version: observation.version, image: exec.name === 'read_image' })
+}
+
+export function validateSeedanceReferences(content) {
+  const definitions = [...content.matchAll(/^@图(\d+)[：:]([^\n]*)$/gm)]
+  if (!definitions.length) throw new Error('Seedance缺少参考图占位：每个资产须以@图1：……单独成行，镜内引用相同编号')
+  if (definitions.some(match => /@图\d+[：:]/.test(match[2]))) throw new Error('每个参考图定义必须单独一行')
+  if (definitions.some(match => !match[2].trim())) throw new Error('参考图行必须写明资产名称与特征')
+  for (const match of definitions)
+    if (match[2].includes('声音九维') && !['年龄', '音高', '明暗', '厚薄', '共鸣', '气息', '颗粒感', '口音', '表达'].every(field => match[2].includes(field)))
+      throw new Error('角色参考图行的声音九维信息不完整')
+  const numbers = definitions.map(match => Number(match[1]))
+  if (numbers.some((number, index) => number !== index + 1)) throw new Error('参考图编号必须从1连续且不重复')
+  for (const match of content.matchAll(/@图(\d+)/g))
+    if (!numbers.includes(Number(match[1]))) throw new Error(`引用了未定义的参考图${match[1]}`)
+  if (/(?<!@)图\d+/.test(content)) throw new Error('参考图与镜内引用统一使用@图编号')
+  const global = content.indexOf('【全局设定】'), shots = content.indexOf('【时间戳剧本分镜】'), ending = content.indexOf('【全局补充】')
+  if (global < 0 || shots <= global || ending <= shots || definitions.some(match => match.index >= global))
+    throw new Error('Seedance须按五模块交付：简短基调、逐行@图与空间关系、【全局设定】、【时间戳剧本分镜】、【全局补充】')
+  if (/待上传|未上传|未提供参考图|尚未核验|工程镜\s*\d|对应本段镜|全片\s*\d|本段\s*\d+(?:\.\d+)?秒预算|非实测|制作待审/.test(content)
+    || /承接上一段|沿用上一段|继续前文|同上|下一段[切接]/.test(content)) throw new Error('提交正文不得包含制作备注或跨段上下文指代')
+  for (const line of content.split('\n'))
+    if (/声音九维|年龄感[：:]|音高[：:]|共鸣[：:]|颗粒感[：:]/.test(line) && !/^@图\d+[：:]/.test(line))
+      throw new Error('声音九维身份信息只能写在角色参考图行，不能放在分镜或全局设定里')
+  if (!/@图\d+/.test(content.slice(shots, ending))) throw new Error('分镜必须使用@图引用当前镜头资产')
+}
+
+async function requirePipelineReads(ctx, args, exec, agent) {
+  const reads = wikiReads.get(agent), state = pipelineStateFor(agent)
+  if (!reads || !state || state.stage === 'complete') return
+  const kind = args.artifact_kind
+  const rules = {
+    film_style: ['summary'], character_asset: ['style', 'bio'], character_voice: ['style', 'bio'],
+    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'],
+    engineering_script: ['style', 'source', 'cast'], sound_direction: ['engineering', 'cast'],
+    storyboard_prompt: ['engineering'], video_prompt: ['engineeringOrStoryboard'],
+  }
+  if (kind === 'video_prompt' && args.video_model === 'Seedance' && Object.keys(state.files?.assets || {}).length) validateSeedanceReferences(args.content)
+  if (!rules[kind]) return
+  if (args.episode_number !== undefined && args.episode_number !== state.episode_number
+    || args.video_model !== undefined && args.video_model !== state.video_model) throw new Error('当前流水线集数或模型不匹配，请先保存对应plan进度')
+  const root = state.path.split('/制作流水线/')[0]
+  const materials = Object.keys(state.files?.materials || {})
+  const entity = args.entity_name ? safeName(args.entity_name, '实体') : ''
+  const candidates = category => {
+    const paths = materials.filter(path => path.includes(`/${category}/`))
+    const exact = paths.filter(path => posix.basename(path, '.md') === entity)
+    return exact.length || category === '人物小传' || category === '道具说明' ? exact : paths
+  }
+  const groups = {
+    summary: materials.filter(path => /\/故事梗概\.md$/.test(path)),
+    style: Object.keys(state.files?.style || {}).filter(path => path === `${root}/项目风格/影片比例与风格.md`), source: [state.source_path],
+    bio: candidates('人物小传'), scene: candidates('场景说明'), prop: candidates('道具说明'),
+    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`],
+    engineering: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
+    engineeringOrStoryboard: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
+  }
+  const cwd = exec.agent.session.header.cwd
+  const observed = async path => {
+    const target = await ctx.fs.resolve(path, { cwd, signal: exec.signal })
+    const prior = reads.get(target.targetKey)
+    return prior && JSON.stringify((await ctx.fs.stat(target, exec.signal))?.version) === JSON.stringify(prior.version)
+  }
+  if (kind === 'video_prompt' && args.video_model === 'Seedance') {
+    const byEntity = new Map()
+    for (const path of Object.keys(state.files?.assets || {}).filter(path => /生图(?:格式)?提示词\.md$/.test(path))) {
+      const name = posix.basename(posix.dirname(path))
+      if (!args.content.includes(name)) continue
+      if (!byEntity.has(name)) byEntity.set(name, [])
+      byEntity.get(name).push(path)
+    }
+    for (const paths of byEntity.values())
+      if (!(await Promise.all(paths.map(observed))).some(Boolean)) throw new Error(`参考图对应资产尚未读取或已过期：先read ${paths.join(' 或 ')}，再填写占位与镜内引用`)
+  }
+  for (const rule of rules[kind]) {
+    if (rule === 'cast') {
+      for (const path of materials.filter(path => path.includes('/人物小传/') && String(args.content || '').includes(posix.basename(path, '.md'))))
+        if (!await observed(path)) throw new Error(`精准读取缺失或已过期：请用read读取 ${path}，再根据正文生成产物；刚写入和聊天记忆不能代替读取。`)
+      continue
+    }
+    if (rule === 'image' && (await Promise.all([...reads.values()].filter(read => read.image).map(read => observed(ctx.fs.processPath(read.target))))).some(Boolean)) continue
+    const paths = groups[rule]
+    // A storyboard alternative is valid only when it was actually read this turn.
+    if (rule === 'engineeringOrStoryboard') {
+      for (const { target } of reads.values()) {
+        const path = ctx.fs.processPath(target)
+        if (path.includes(`/分镜提示词/${args.video_model}/第${args.episode_number}集`) && await observed(path)) paths.push(path)
+      }
+    }
+    if (!paths.length || !(await Promise.all(paths.map(observed))).some(Boolean))
+      throw new Error(`精准读取缺失或已过期（${rule}）：先用read读取对应Wiki正文再生成。候选：${paths.join('、') || '请先补齐对应项目资料'}。刚写入和聊天记忆不能代替读取。`)
+  }
+}
+
+const pipelineStages = ['plan', 'materials', 'style', 'assets', 'engineering', 'prompts', 'complete']
+
+async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spec, content) {
+  const input = JSON.parse(content)
+  const stage = pipelineStages.indexOf(input.stage)
+  if (stage < 0 || !Array.isArray(input.outputs)) throw new Error('流水线进度需要有效stage和outputs数组')
+  const target = await projectTarget(ctx, cwd, `${wikiRoot}/${spec.path}`, exec.signal, workspace)
+  const previous = await ctx.fs.stat(target, exec.signal) ? JSON.parse(await ctx.fs.readText(target, exec.signal)) : undefined
+  if (stage > 0 && (!previous || ![stage - 1, stage].includes(pipelineStages.indexOf(previous.stage))))
+    throw new Error('流水线不能跳过尚未完成的前置阶段')
+  if (input.stage === 'complete' && input.status === 'blocked') throw new Error('完成阶段不能同时标记暂停')
+  if (input.status !== undefined && !['running', 'blocked', ...(input.stage === 'complete' ? ['completed'] : [])].includes(input.status)) throw new Error('流水线status无效')
+  if (input.status === 'blocked' && !String(input.reason || '').trim()) throw new Error('暂停流水线必须说明原因')
+  const state = stage === 0 ? {} : previous
+  const hashFile = async (path, output = true) => {
+    if (typeof path !== 'string' || (output && !path.startsWith(`${wikiRoot}/`))) throw new Error('流水线产物必须位于当前Wiki')
+    const file = await projectTarget(ctx, cwd, path, exec.signal, workspace)
+    if ((await ctx.fs.stat(file, exec.signal))?.type !== 'file') throw new Error(`流水线文件不存在：${path}`)
+    return createHash('sha256').update(await ctx.fs.readText(file, exec.signal)).digest('hex')
+  }
+  const source = stage === 0 ? input.source_path : state.source_path
+  const sourceHash = await hashFile(source, false)
+  if (stage && sourceHash !== state.source_hash) throw new Error('来源剧本已改变，请重新规划流水线')
+  const files = Object.fromEntries(Object.entries(state.files || {}).filter(([name]) => pipelineStages.indexOf(name) < stage))
+  for (const entries of Object.values(files)) for (const [path, hash] of Object.entries(entries))
+    if (await hashFile(path) !== hash) throw new Error(`前置产物已修改，请从该阶段重新规划：${path}`)
+  const outputs = {}
+  for (const path of input.outputs) outputs[path] = await hashFile(path)
+  if (stage > 0 && stage < 6 && Object.keys(outputs).length === 0) throw new Error('当前阶段没有真实产物，不能标记完成')
+  if (input.stage === 'materials' && !input.outputs.some(path => /项目资料\/(?:[^/]+\/)?故事梗概\.md$/.test(path))) throw new Error('项目资料阶段需要故事梗概')
+  if (input.stage === 'style') {
+    const path = `${wikiRoot}/项目风格/影片比例与风格.md`
+    if (!outputs[path]) throw new Error('风格阶段必须保存影片比例与风格')
+    const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
+    if (/状态：待填写/.test(text) || !/\d+(?:\.\d+)?\s*:\s*\d+/.test(text)) throw new Error('影片比例与风格尚未填写')
+  }
+  if (input.stage === 'assets' && input.outputs.some(path => !path.startsWith(`${wikiRoot}/资产/`))) throw new Error('资产阶段只能登记资产文档')
+  const duration = input.duration_seconds ?? state.duration_seconds
+  if (stage >= 4 && (!Number.isFinite(duration) || duration <= 0)) throw new Error('工程阶段必须提供有效总时长预算duration_seconds')
+  if (input.stage === 'engineering') {
+    const path = input.outputs.find(path => /工程剧本\.md$/.test(path))
+    if (!path) throw new Error('工程阶段缺少工程剧本')
+    const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
+    if (!/资产清单/.test(text) || !/比例/.test(text)) throw new Error('工程剧本缺少影片比例或整集资产清单')
+  }
+  const segments = input.segments ?? state.segments
+  if (stage >= 5) {
+    if (!Array.isArray(segments) || !segments.length) throw new Error('视频提示词阶段必须提供segments')
+    let end = 0
+    for (const [index, segment] of segments.entries()) {
+      const path = `${wikiRoot}/剧本/视频提示词/${args.video_model}/第${args.episode_number}集${String(index + 1).padStart(3, '0')}视频提示词.md`
+      if (segment.path !== path || !Number.isFinite(segment.start_seconds) || !Number.isFinite(segment.end_seconds)
+        || Math.abs(segment.start_seconds - end) > 0.01 || segment.end_seconds <= end
+        || segment.end_seconds - segment.start_seconds > (args.video_model === 'H3' ? 15 : 30)) throw new Error('片段命名、连续时间或30/15秒上限不符合流水线合同')
+      await hashFile(path)
+      if (stage === 5 && !outputs[path]) throw new Error('片段必须包含在本阶段outputs中')
+      end = segment.end_seconds
+    }
+    if (Math.abs(end - duration) > 0.01) throw new Error('片段没有覆盖整集工程时长')
+  }
+  files[input.stage] = outputs
+  return JSON.stringify({ stage: input.stage, status: input.stage === 'complete' ? 'completed' : input.status || 'running', reason: input.stage === 'complete' ? '' : input.reason || '',
+    video_model: args.video_model, episode_number: args.episode_number, source_path: source, source_hash: sourceHash,
+    files, duration_seconds: duration, segments }, null, 2) + '\n'
+}
 
 export function setWikiSourceContent(agent, blocks) {
   sourceMessages.set(agent, blocks.filter(block => block.type === 'text').map(block => block.text))
@@ -687,7 +916,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
         enum: kinds,
         description: '产物类型，决定唯一保存目录。',
       },
-      content: { type: 'string', description: '本次完成的 Markdown 正文。小说章节传章节正文，不含工具自动生成的章标题。' },
+      content: { type: 'string', description: '完成的正文；pipeline_checkpoint传JSON：stage、outputs路径数组、plan的source_path、engineering的duration_seconds、prompts的segments[{path,start_seconds,end_seconds}]。' },
       source_block: { type: 'integer', description: 'source_material 必填，当前用户消息文本块序号，从0开始。' },
       source_start: { type: 'string', description: '来源开始处至少12字符的唯一原文，包含在保存内容中。' },
       source_end: { type: 'string', description: '来源结束处至少12字符的唯一原文，包含在保存内容中。' },
@@ -697,7 +926,9 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
       entity_name: { type: 'string', description: '人物、角色、场景或道具名称。' },
       video_model: { type: 'string', enum: ['H3', 'Seedance'], description: '视频或分镜提示词使用的模型分支。' },
       segment: { type: 'string', description: '视频、分镜提示词或声音导演稿的片段或镜头范围，如 片段001-003；整集声音稿用 全篇。' },
-      write_mode: { type: 'string', enum: ['create', 'update', 'append'], description: '默认 create；update 替换完整文件，append 保留现有文件并新增章节。' },
+      write_mode: { type: 'string', enum: ['create', 'update', 'append'], description: route === 'none'
+        ? '默认 create；update 替换完整文件，append 保留现有文件并新增章节。'
+        : '省略时自动创建或更新同一路径；显式 create 只新建，update 替换完整文件，append 新增实体章节。原始来源不覆盖。' },
       section_name: { type: 'string', description: 'write_mode=append 时用于新章节的标题。' },
       work_name: { type: 'string', description: '小说书名；章节草稿和确认正文必填。' },
       chapter_number: { type: 'integer', description: '小说章节序号，必须为正整数。' },
@@ -714,7 +945,13 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
         if (args.write_mode && args.write_mode !== 'create') throw new Error('原始来源只允许创建，不覆盖已有原文')
         args = { ...args, content: selectWikiSource(sourceAgent, args) }
       }
-      const value = await saveArtifact(ctx, args, exec, contract)
+      if (route === 'manju') await requirePipelineReads(ctx, args, exec, sourceAgent)
+      const value = await saveArtifact(ctx, args, exec, contract, route)
+      if (args.artifact_kind === 'pipeline_checkpoint') {
+        const workspace = await ctx.fs.resolve(exec.agent.session.header.cwd, { cwd: exec.agent.session.header.cwd, signal: exec.signal })
+        const target = await projectTarget(ctx, exec.agent.session.header.cwd, value.path, exec.signal, workspace)
+        pipelineStates.set(sourceAgent, { ...JSON.parse(await ctx.fs.readText(target, exec.signal)), path: value.path })
+      }
       return { status: value.status, path: value.path, operation: value.operation, warnings: value.warnings }
     },
   }
