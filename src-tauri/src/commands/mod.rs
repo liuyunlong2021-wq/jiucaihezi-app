@@ -8,6 +8,7 @@ pub mod image_edit;
 pub mod mcp;
 pub mod media;
 pub mod plugin;
+pub mod keep_awake;
 pub mod remote_bridge;
 pub mod remote_client;
 pub mod remote_relay;

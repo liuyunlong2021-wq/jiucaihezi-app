@@ -62,11 +62,11 @@ function revoke(deviceId: string) { return run(async () => { await revokeRemoteD
   <div class="remote-settings">
     <section>
       <div class="remote-head">
-        <div><strong>手机控制器</strong><span>{{ status?.listening ? '局域网 Bridge 已开启' : '默认关闭' }}</span></div>
+        <div><strong>手机控制器</strong><span>{{ status?.listening ? '已开启 · 在家、在外都能连' : '默认关闭' }}</span></div>
         <button v-if="status?.listening" :disabled="busy" @click="stop">关闭</button>
         <button v-else :disabled="busy" @click="start">开启</button>
       </div>
-      <p>只允许经本机确认的设备控制当前对话。关闭时不监听任何局域网端口。</p>
+      <p>只允许在这台电脑上确认过的手机连接。开着时电脑不会因闲置自动睡眠（屏幕照常熄灭，合上笔记本盖子仍会睡）。关闭后不监听端口，也不连云端中继。</p>
       <p v-if="status?.address">{{ status.address }}</p>
       <button v-if="status?.listening && !offer" :disabled="busy" @click="pair">生成一次性二维码</button>
       <div v-if="offer" class="remote-qr">

@@ -165,6 +165,8 @@ test('Desktop LAN listener is user-started and uses Noise instead of plaintext b
   assert.match(settings, /默认关闭/)
   assert.match(settings, /startRemoteBridge/)
   assert.match(settings, /approveRemotePairing/)
+  // 开着手机控制器时电脑不闲置睡眠：设置页要说清楚，免得用户以为是电脑坏了。
+  assert.match(settings, /不会因闲置自动睡眠/)
 })
 
 test('Desktop remote treats a catalog-only new conversation as an empty lazy Harness session', () => {

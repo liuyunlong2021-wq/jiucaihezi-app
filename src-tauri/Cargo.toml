@@ -67,6 +67,8 @@ tauri-plugin-global-shortcut = "=2.3.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 xcap = "=0.6.2"
+# 手机控制器开着时阻止闲置睡眠（SetThreadExecutionState）；锁文件里已有该版本。
+windows-sys = { version = "0.59", features = ["Win32_System_Power"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -521,6 +521,16 @@ fn start_bridge(app: &AppHandle, state: &RemoteBridgeState) -> Result<RemoteBrid
             })
         });
     }
+    // 手机控制器开着就别让电脑闲置睡过去，否则在外面连不上；关掉或重开即放下。
+    let awake_state = state.clone();
+    thread::spawn(move || {
+        let _awake = super::keep_awake::hold()
+            .map_err(|error| bridge_log(&format!("keep awake unavailable: {error}")))
+            .ok();
+        while generation_is_current(&awake_state, generation) {
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
     let server_state = state.clone();
     let app = app.clone();
     thread::spawn(move || accept_loop(listener, app, server_state, generation));

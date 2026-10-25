@@ -3126,6 +3126,7 @@ dependencies = [
  "trash",
  "tungstenite",
  "uuid",
+ "windows-sys 0.59.0",
  "xcap",
 ]
 
