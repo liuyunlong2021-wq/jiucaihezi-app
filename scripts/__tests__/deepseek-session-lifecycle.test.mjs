@@ -638,7 +638,7 @@ test('a failed process reap is reported and keeps its handle for a later close a
 // 原版模块由 npm pack 的同版本发布包提供；不反向撤销 App 补丁来伪造对照组。
 test('official unpatched SDK and APP runner share request budgets, tool loops and asynchronous subagents', { timeout: 45000 }, async t => {
   const officialServer = process.env.DSH_OFFICIAL_CONTROL_SERVER
-  if (!officialServer) return t.skip('set DSH_OFFICIAL_CONTROL_SERVER to an unmodified 0.2.1-rc.2 server module')
+  if (!officialServer) return t.skip('set DSH_OFFICIAL_CONTROL_SERVER to an unmodified 0.2.1-rc.3 server module')
   assert.doesNotMatch(readFileSync(officialServer, 'utf8'), /attachApprovalBridge|applyPinnedSkillScope|createOfficialSession/)
   const f = await fixture(t, false, undefined, { respond(request, res) {
     const text = JSON.stringify(request.messages)
