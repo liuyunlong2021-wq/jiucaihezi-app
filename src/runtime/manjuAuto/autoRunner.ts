@@ -69,10 +69,15 @@ export function createAutoRun(config: AutoRunConfig): AutoRunState {
   return { version: 1, config, status: 'running', reviewed: false, episodes: Object.fromEntries(config.episodes.map(n => [String(n), { phase: 'queued' as const }])) }
 }
 
+/** 续做：保留原集数与进度，模型、比例、预算等用确认卡上新的选择（例如生图线路故障后换模型）。 */
+export function resumeAutoRun(saved: AutoRunState, config: AutoRunConfig): AutoRunState {
+  return { ...saved, config: { ...config, episodes: saved.config.episodes } }
+}
+
 /** 价格换算：数字或“x/条|张|次”按件，“x/秒”乘以秒数；其他写法无法估算。 */
 export function estimateUnitCost(price: number | string | undefined, seconds = 1): number | undefined {
   if (typeof price === 'number') return price
-  const match = String(price ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*(?:\/\s*(秒|s|条|张|次|个))?$/)
+  const match = String(price ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*元?\s*(?:\/\s*(秒|s|条|张|次|个))?$/)
   if (!match) return undefined
   return Number(match[1]) * (match[2] === '秒' || match[2] === 's' ? seconds : 1)
 }

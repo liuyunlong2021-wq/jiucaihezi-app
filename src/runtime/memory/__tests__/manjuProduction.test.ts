@@ -158,7 +158,7 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(workbench, /const manjuAutoMode = ref\(false\)/, '默认提示词模式')
   assert.match(workbench, /autoIntake \? `\$\{AUTO_INTAKE_PREFIX\}/, '全自动模式下用户剧本先入稿拆集')
   assert.match(workbench, /path\.endsWith\('\.json'\)[\s\S]*manjuAuto\.handleArtifactSaved\(path\)/)
-  assert.match(workbench, /@start="manjuAuto\.start"/)
+  assert.match(workbench, /@start="\(config, resume\) => manjuAuto\.start\(config, resume\)"/)
   // 付费调用只在 start() 里装配；prepare() 只读目录与 Wiki。
   const prepare = controller.slice(controller.indexOf('async function prepare'), controller.indexOf('async function start'))
   assert.doesNotMatch(prepare, /submit|runAuto/)
@@ -174,6 +174,13 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(controller, /inputs\.includes\('image'\) \|\| Boolean\(spec\?\.files\?\.images\?\.max\)/)
   assert.match(controller, /\/seedance\/i/)
   assert.match(controller, /next_cursor/)
+  // 目录查询网络超时沿用上次成功目录（dynamic 或 legacy），不把云端模型降级为只允许本机 ComfyUI（2026-10-25 实测）。
+  const bridge = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
+  assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, result\)/)
+  assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, legacy\)/)
+  assert.match(bridge, /!\(error instanceof CreationProtocolError\) && cached/)
+  // 续做按确认卡上新的模型继续（生图线路故障后换模型）。
+  assert.match(panel, /@click="startNew\(true\)"/)
   // 设计系统没有 --danger，警示色必须用 --jc-error。
   assert.doesNotMatch(panel, /var\(--danger\)/)
   assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)

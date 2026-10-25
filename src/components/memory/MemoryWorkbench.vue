@@ -5197,7 +5197,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           :run="manjuAuto.run.value"
           :review="manjuAuto.review.value"
           :error="manjuAuto.error.value"
-          @start="manjuAuto.start"
+          @start="(config, resume) => manjuAuto.start(config, resume)"
           @cancel="manjuAuto.cancelDraft"
           @stop="manjuAuto.stop"
           @approve="manjuAuto.approveReview"

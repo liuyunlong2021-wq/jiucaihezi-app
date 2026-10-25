@@ -23,8 +23,8 @@
     </template>
     <div class="manju-auto-actions">
       <button type="button" @click="emit('cancel')">取消</button>
-      <button v-if="draft.saved" type="button" @click="emit('start', 'resume')">从第 {{ resumeEpisode }} 集续做</button>
-      <button type="button" class="primary" :disabled="!canStart" @click="startNew">开始全自动</button>
+      <button v-if="draft.saved" type="button" :disabled="!canStart" title="沿用已完成的文字与已生成的资产，按上面新的模型与预算继续" @click="startNew(true)">从第 {{ resumeEpisode }} 集续做</button>
+      <button type="button" class="primary" :disabled="!canStart" @click="startNew()">开始全自动</button>
     </div>
   </div>
 
@@ -61,7 +61,7 @@ const props = defineProps<{
   review: { ids: string[]; images: Record<string, string> } | null
   error: string
 }>()
-const emit = defineEmits<{ start: [config: AutoRunConfig | 'resume']; cancel: []; stop: []; approve: [] }>()
+const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; stop: []; approve: [] }>()
 
 const episodes = ref<number[]>([])
 const imageModelId = ref('')
@@ -94,7 +94,7 @@ const priceNote = computed(() => {
 })
 const canStart = computed(() => Boolean(props.draft?.ratio && episodes.value.length && imageModelId.value && videoModelId.value))
 
-function startNew() {
+function startNew(resume = false) {
   const draft = props.draft
   if (!draft?.ratio || !canStart.value) return
   const cap = Number(budget.value)
@@ -108,7 +108,7 @@ function startNew() {
     budgetPerEpisode: budget.value !== '' && Number.isFinite(cap) && cap > 0 ? cap : undefined,
     imagePrice: imageModel.value?.price,
     videoPrice: videoModel.value?.price,
-  })
+  }, resume)
 }
 
 function displaySrc(path?: string) {
