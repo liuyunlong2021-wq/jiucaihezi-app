@@ -20,7 +20,8 @@ compatibility: Portable to any agent that can read local files — no external A
 
 流水线指令为【全自动成片·第N集】且视频模型为 H3 时，每段按 Ref2VA（`references/ref-en.txt`）写，宿主按本段资产图生成参考视频：
 
-- 本段入画的角色、场景、道具各对应一张 `<Picture N>`，从1连续编号，顺序与进度中本段 refs 一致；张数不超过指令给出的上限（如 6 张），超出就拆镜或减少本段入画资产，不合并资产。
+- 本段入画的角色、场景、已登记道具（仅剧情道具与角色标志物；杯碗筷、桌椅、食物等日常物件属于场景陈设，不占图）各对应一张 `<Picture N>`，从1连续编号，顺序与进度中本段 refs 一致；张数不超过指令给出的上限（如 6 张），超出就拆镜或减少本段入画资产，不合并资产。
+- 人群用已登记的群像图作一张 `<Picture N>`（如 `<Subject 4> is the 太虚宗弟子 crowd from <Picture 4>`），镜头里写明人数与队形（如 “over one thousand disciples stand in a square formation behind <Subject 1>”），群像图只锁定服制与外观。
 - `subject_definitions` 每张图单独一行并写出资产名，例如 `<Subject 1> is 顾云舟 from <Picture 1>, ...`、`<Picture 2> is the environment reference for 后山石道, ...`，名称与资产档案一致。
 - 每段都写清参考图与角色空间关系：谁在画面哪一侧、距离、朝向、视线、持物，以及场景地标的位置；不能只写“沿用上一段”。每段独立可提交，时间从0起，时长不超过指令上限。
 - 角色声音按人物声音档案写进对白与 soundscape；不写制作备注、上传说明或预算。

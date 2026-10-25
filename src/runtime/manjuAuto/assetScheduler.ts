@@ -18,7 +18,7 @@ export const RATE_LIMIT = /请求过于频繁|too many requests|rate.?limit|\b42
 export const MAX_TRANSIENT = 5
 const RATE_LIMIT_BACKOFF_MS = 60_000
 
-export type AssetKind = 'character' | 'scene' | 'prop'
+export type AssetKind = 'character' | 'scene' | 'prop' | 'crowd'
 
 export interface EpisodeCheckpoint {
   episode_number: number

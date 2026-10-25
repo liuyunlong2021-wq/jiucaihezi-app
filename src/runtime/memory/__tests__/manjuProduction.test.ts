@@ -11,7 +11,8 @@ import {
 import { NOVEL_MODE, restoreNovelSelection } from '../novelProduction'
 
 test('the production bundle includes both video routes and excludes the portrait skill', () => {
-  assert.equal(MANJU_SKILLS.length, 15)
+  assert.equal(MANJU_SKILLS.length, 16)
+  assert.ok(MANJU_SKILLS.includes('jc-renqun'), '人群群像随漫剧白名单内置')
   assert.ok(!MANJU_SKILLS.includes('jc-duanju'))
   assert.ok(MANJU_SKILLS.includes('h3-prompt-writing'))
   assert.ok(MANJU_SKILLS.includes('jc-seedance'))

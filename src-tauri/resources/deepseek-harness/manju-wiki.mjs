@@ -753,7 +753,7 @@ async function requirePipelineReads(ctx, args, exec, agent) {
   const kind = args.artifact_kind
   const rules = {
     film_style: ['summary'], character_asset: ['style', 'bio'], character_voice: ['style', 'bio'],
-    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'],
+    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'], crowd_asset: ['style'],
     engineering_script: ['style', 'source', 'cast'], sound_direction: ['engineering', 'cast'],
     storyboard_prompt: ['engineering'], video_prompt: ['engineeringOrStoryboard'],
   }
@@ -861,9 +861,9 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   let assets = state.assets || {}
   if (input.stage === 'assets') {
     assets = {}
-    const kinds = { 角色: 'character', 场景: 'scene', 道具: 'prop' }
+    const kinds = { 角色: 'character', 场景: 'scene', 道具: 'prop', 人群: 'crowd' }
     for (const path of input.outputs) {
-      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词)\.md)$/)
+      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具|人群)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词|群像生图提示词)\.md)$/)
       if (!match) continue
       const id = `${match[1]}/${match[2]}`
       if (assets[id]?.prompt_path.endsWith('/角色生图格式提示词.md')) continue

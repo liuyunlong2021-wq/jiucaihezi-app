@@ -167,9 +167,12 @@ test('Seedance pipeline registers image assets and binds each segment @图 order
   const sheet = await save({ artifact_kind: 'character_format', entity_name: '莫甘娜' }, '# 莫甘娜三视图')
   const voice = await save({ artifact_kind: 'character_voice', entity_name: '莫甘娜' }, '# 莫甘娜声音')
   const road = await save({ artifact_kind: 'scene_asset', entity_name: '石道' }, '# 石道')
-  await checkpoint({ stage: 'assets', outputs: [portrait, sheet, voice, road] })
+  const crowd = await save({ artifact_kind: 'crowd_asset', entity_name: '太虚宗弟子' }, '# 太虚宗弟子群像')
+  assert.equal(crowd, 'wiki/资产/人群/太虚宗弟子/群像生图提示词.md')
+  await checkpoint({ stage: 'assets', outputs: [portrait, sheet, voice, road, crowd] })
   const registered = JSON.parse(files.get(join(root, progress.path)).content).assets
-  assert.deepEqual(Object.keys(registered).sort(), ['场景/石道', '角色/莫甘娜'])
+  assert.deepEqual(Object.keys(registered).sort(), ['人群/太虚宗弟子', '场景/石道', '角色/莫甘娜'])
+  assert.equal(registered['人群/太虚宗弟子'].kind, 'crowd')
   assert.equal(registered['角色/莫甘娜'].prompt_path, sheet, '角色优先使用三视图格式提示词作为参考图')
   assert.equal(registered['角色/莫甘娜'].kind, 'character')
   assert.match(registered['场景/石道'].prompt_hash, /^[0-9a-f]{64}$/)
@@ -185,7 +188,7 @@ test('Seedance pipeline registers image assets and binds each segment @图 order
   const saved = JSON.parse(files.get(join(root, progress.path)).content)
   assert.deepEqual(saved.segments[0].refs, ['角色/莫甘娜', '场景/石道'])
   await checkpoint({ stage: 'complete', outputs: [] })
-  assert.deepEqual(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).sort(), ['场景/石道', '角色/莫甘娜'])
+  assert.deepEqual(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).sort(), ['人群/太虚宗弟子', '场景/石道', '角色/莫甘娜'])
 })
 
 test('H3 pipeline uses plan limits (28s, 6 images) and binds <Picture N> labels to registered refs', async t => {
@@ -505,11 +508,11 @@ test('long pasted source is sliced verbatim from the current turn, never from mo
 })
 
 
-test('all 42 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
+test('all 43 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-route-artifacts-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
-  assert.equal(Object.keys(contract.types).length, 42)
+  assert.equal(Object.keys(contract.types).length, 43)
   const counts = { manju: 0, 'short-drama': 0, novel: 0 }
   for (const [kind, template] of Object.entries(contract.types)) {
     assert.ok(Array.isArray(template.production_routes) && template.production_routes.length)
@@ -558,7 +561,7 @@ test('all 42 artifact contracts have explicit routes and every allowed kind save
       assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
     }
   }
-  assert.deepEqual(counts, { manju: 24, 'short-drama': 16, novel: 16 })
+  assert.deepEqual(counts, { manju: 25, 'short-drama': 16, novel: 16 })
 })
 
 test('source links use document-relative targets and summaries contain only readable labels', async t => {

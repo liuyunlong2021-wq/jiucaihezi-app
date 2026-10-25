@@ -1088,6 +1088,37 @@
     }
   },
   {
+    "id": "jc-renqun",
+    "name": "jc-renqun",
+    "displayName": "jc-renqun",
+    "description": "用于生成符合视觉资产规范的多角色/群演横向一字排开（Character Line-up Sheet）生图提示词。支持3D动画、真人写实、2D日漫画风、概念原画等多种风格。当用户需要生成弟子、士兵、路人、同阵营群像阵容图时使用。",
+    "triggers": [
+      "群演提示词",
+      "群像生图",
+      "Line-up提示词",
+      "角色阵容图",
+      "一排人物生图",
+      "门徒群像",
+      "多角色参考图",
+      "jc-renqun",
+      "群演规范"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
     "id": "jc-scene-prompt",
     "name": "jc-scene-prompt",
     "displayName": "jc-scene-prompt",

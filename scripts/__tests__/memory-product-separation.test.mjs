@@ -163,6 +163,7 @@ test('App bundles only the remaining product Skills', () => {
     'jc-new-user-guide',
     'jc-novel',
     'jc-prop-prompt',
+    'jc-renqun',
     'jc-scene-prompt',
     'jc-seedance',
     'jc-shengyin-daoyan',
