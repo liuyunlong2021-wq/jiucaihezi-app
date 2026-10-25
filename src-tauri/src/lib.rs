@@ -1575,6 +1575,8 @@ pub fn run() {
         .setup(|app| {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             commands::desktop_update::setup(app.handle());
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::remote_bridge::autostart(app.handle());
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             commands::screenshot::setup(app.handle())?;
             let app_data = app.path().app_data_dir()?;

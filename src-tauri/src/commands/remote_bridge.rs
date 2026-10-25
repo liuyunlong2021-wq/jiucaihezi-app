@@ -12,7 +12,7 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
@@ -74,6 +74,8 @@ pub struct RemoteBridgeCore {
     public_key: Vec<u8>,
     now: u64,
     address: Option<String>,
+    /// 手机重连用的候选地址：`address`（IP）在前，Bonjour 名在后。IP 换了靠后者找回。
+    addresses: Vec<String>,
     offer: Option<(RemotePairingOffer, bool)>,
     devices: HashMap<String, RemoteDevice>,
 }
@@ -85,6 +87,7 @@ impl RemoteBridgeCore {
             public_key: keypair.public,
             now,
             address: None,
+            addresses: Vec::new(),
             offer: None,
             devices: HashMap::new(),
         }
@@ -106,12 +109,14 @@ impl RemoteBridgeCore {
         }
     }
 
-    pub fn set_listener(&mut self, address: String) {
-        self.address = Some(address);
+    pub fn set_listener(&mut self, addresses: Vec<String>) {
+        self.address = addresses.first().cloned();
+        self.addresses = addresses;
     }
 
     pub fn clear_listener(&mut self) {
         self.address = None;
+        self.addresses.clear();
         self.offer = None;
     }
 
@@ -424,6 +429,22 @@ pub fn remote_bridge_start(
     app: AppHandle,
     state: State<'_, RemoteBridgeState>,
 ) -> Result<RemoteBridgeStatus, String> {
+    start_bridge(&app, state.inner())
+}
+
+/// 用户开过桥，下次启动就自动开：人不在电脑前时没法去设置页补点「开启」。
+pub fn autostart(app: &AppHandle) {
+    let Ok(path) = bridge_settings_path(app) else {
+        return;
+    };
+    if load_bridge_settings(&path).enabled {
+        if let Err(error) = start_bridge(app, app.state::<RemoteBridgeState>().inner()) {
+            bridge_log(&format!("autostart failed: {error}"));
+        }
+    }
+}
+
+fn start_bridge(app: &AppHandle, state: &RemoteBridgeState) -> Result<RemoteBridgeStatus, String> {
     if !state.initialized.load(Ordering::Acquire) {
         let mut core = RemoteBridgeCore::new(load_or_create_keypair()?, now_ms());
         if let Ok(Some(devices)) = crate::secure_store::get_remote_bridge_devices() {
@@ -433,9 +454,11 @@ pub fn remote_bridge_start(
         state.initialized.store(true, Ordering::Release);
     }
     if state.core.lock().map_err(lock_error)?.status().listening {
-        return remote_bridge_status(state);
+        return Ok(state.core.lock().map_err(lock_error)?.status());
     }
-    let listener = TcpListener::bind("0.0.0.0:0").map_err(|error| error.to_string())?;
+    let settings_path = bridge_settings_path(app)?;
+    let settings = load_bridge_settings(&settings_path);
+    let listener = bind_listener(settings.port)?;
     listener
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
@@ -443,21 +466,112 @@ pub fn remote_bridge_start(
         .local_addr()
         .map_err(|error| error.to_string())?
         .port();
-    // 这个字符串会原样进一次性 offer，手机端拿它直接 TcpStream::connect，
+    // 地址会原样进一次性 offer，手机端拿它直接 TcpStream::connect，
     // 所以必须是裸 host:port：带任何 scheme 都会让 getaddrinfo 报
     // "nodename nor servname provided"。
-    let address = format!("{}:{port}", local_ip()?);
+    let addresses = listener_addresses(&local_ip()?, bonjour_host().as_deref(), port);
+    save_bridge_settings(
+        &settings_path,
+        &RemoteBridgeSettings {
+            enabled: true,
+            port: Some(port),
+        },
+    )?;
     let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
-    state.core.lock().map_err(lock_error)?.set_listener(address);
-    let server_state = state.inner().clone();
+    state
+        .core
+        .lock()
+        .map_err(lock_error)?
+        .set_listener(addresses);
+    let server_state = state.clone();
+    let app = app.clone();
     thread::spawn(move || accept_loop(listener, app, server_state, generation));
-    remote_bridge_status(state)
+    Ok(state.core.lock().map_err(lock_error)?.status())
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RemoteBridgeSettings {
+    enabled: bool,
+    port: Option<u16>,
+}
+
+fn bridge_settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join("remote-bridge.json"))
+        .map_err(|error| error.to_string())
+}
+
+/// 读不到或读坏都当作「没开过」：宁可不自动开，也不因为一个坏文件拦住启动。
+fn load_bridge_settings(path: &std::path::Path) -> RemoteBridgeSettings {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default()
+}
+
+fn save_bridge_settings(
+    path: &std::path::Path,
+    settings: &RemoteBridgeSettings,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let value = serde_json::to_string(settings).map_err(|error| error.to_string())?;
+    std::fs::write(path, value).map_err(|error| error.to_string())
+}
+
+/// 端口固定下来，手机存的地址才不会在电脑每次重启后失效；被别人占了才换。
+fn bind_listener(port: Option<u16>) -> Result<TcpListener, String> {
+    if let Some(port) = port
+        && let Ok(listener) = TcpListener::bind(("0.0.0.0", port))
+    {
+        return Ok(listener);
+    }
+    TcpListener::bind("0.0.0.0:0").map_err(|error| error.to_string())
+}
+
+fn listener_addresses(ip: &str, bonjour: Option<&str>, port: u16) -> Vec<String> {
+    let mut addresses = vec![format!("{ip}:{port}")];
+    if let Some(name) = bonjour {
+        addresses.push(format!("{name}.local:{port}"));
+    }
+    addresses
+}
+
+/// 局域网里不随 DHCP 变的名字。macOS 取 Bonjour 名；Windows 10+ 也会应答 `计算机名.local`。
+fn bonjour_host() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let name = std::process::Command::new("scutil")
+        .args(["--get", "LocalHostName"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
+    #[cfg(target_os = "windows")]
+    let name = std::env::var("COMPUTERNAME").ok();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let name: Option<String> = None;
+    name.filter(|value| {
+        !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
 }
 
 #[tauri::command]
 pub fn remote_bridge_stop(
+    app: AppHandle,
     state: State<'_, RemoteBridgeState>,
 ) -> Result<RemoteBridgeStatus, String> {
+    let settings_path = bridge_settings_path(&app)?;
+    let settings = load_bridge_settings(&settings_path);
+    save_bridge_settings(
+        &settings_path,
+        &RemoteBridgeSettings {
+            enabled: false,
+            ..settings
+        },
+    )?;
     state.generation.fetch_add(1, Ordering::AcqRel);
     state.core.lock().map_err(lock_error)?.clear_listener();
     state.pending_pairings.lock().map_err(lock_error)?.clear();
@@ -769,7 +883,12 @@ fn handle_connection_with_dispatch(
         ) {
             return Err("AUTH_INVALID".to_string());
         }
-        write_encrypted_json(&mut stream, &transport, &serde_json::json!({ "ok": true }))?;
+        let addresses = state.core.lock().map_err(lock_error)?.addresses.clone();
+        write_encrypted_json(
+            &mut stream,
+            &transport,
+            &serde_json::json!({ "ok": true, "addresses": addresses }),
+        )?;
         auth.device_id
     } else {
         return Err("AUTH_INVALID".to_string());
@@ -1307,7 +1426,7 @@ mod tests {
     #[test]
     fn pairing_offer_is_one_time_and_expires_after_five_minutes() {
         let mut core = RemoteBridgeCore::new(noise_keypair(), 1_000);
-        core.set_listener("192.168.1.2:9527".into());
+        core.set_listener(vec!["192.168.1.2:9527".into()]);
         let offer = core.create_offer("offer-1".into(), 1_000);
         // offer 里的地址会原样交给手机端 TcpStream::connect，必须保持裸 host:port。
         assert_eq!(offer.address, "192.168.1.2:9527");
@@ -1465,6 +1584,7 @@ mod tests {
         let desktop_public = {
             let mut core = state.core.lock().unwrap();
             core.authorize_device("iphone-1", "iPhone", "test-token", &mobile.public);
+            core.set_listener(vec!["192.168.1.2:9527".into(), "Mac.local:9527".into()]);
             core.public_key.clone()
         };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1540,6 +1660,11 @@ mod tests {
         .unwrap();
         let auth: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
         assert_eq!(auth["ok"], true);
+        // 手机靠这份清单在电脑换 IP 后找回它：每次认证都刷新。
+        assert_eq!(
+            auth["addresses"],
+            serde_json::json!(["192.168.1.2:9527", "Mac.local:9527"])
+        );
 
         let request = |id: &str, kind: &str, payload: serde_json::Value| {
             serde_json::json!({
@@ -1640,5 +1765,58 @@ mod tests {
         );
         stream.shutdown(Shutdown::Both).unwrap();
         server.join().unwrap();
+    }
+
+    fn free_port() -> u16 {
+        TcpListener::bind("0.0.0.0:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    #[test]
+    fn restarting_the_bridge_reuses_the_saved_port() {
+        let port = free_port();
+        let listener = bind_listener(Some(port)).unwrap();
+        assert_eq!(listener.local_addr().unwrap().port(), port);
+    }
+
+    #[test]
+    fn a_taken_saved_port_falls_back_to_a_new_one() {
+        let taken = TcpListener::bind("0.0.0.0:0").unwrap();
+        let port = taken.local_addr().unwrap().port();
+        let listener = bind_listener(Some(port)).unwrap();
+        assert_ne!(listener.local_addr().unwrap().port(), port);
+    }
+
+    #[test]
+    fn bridge_settings_default_to_off_and_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("remote-bridge.json");
+        assert_eq!(load_bridge_settings(&path), RemoteBridgeSettings::default());
+        assert!(!RemoteBridgeSettings::default().enabled);
+
+        let saved = RemoteBridgeSettings {
+            enabled: true,
+            port: Some(9527),
+        };
+        save_bridge_settings(&path, &saved).unwrap();
+        assert_eq!(load_bridge_settings(&path), saved);
+
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(load_bridge_settings(&path), RemoteBridgeSettings::default());
+    }
+
+    #[test]
+    fn listener_addresses_put_the_ip_first_then_the_bonjour_name() {
+        assert_eq!(
+            listener_addresses("192.168.1.2", Some("Mac"), 9527),
+            vec!["192.168.1.2:9527".to_string(), "Mac.local:9527".to_string()]
+        );
+        assert_eq!(
+            listener_addresses("192.168.1.2", None, 9527),
+            vec!["192.168.1.2:9527".to_string()]
+        );
     }
 }

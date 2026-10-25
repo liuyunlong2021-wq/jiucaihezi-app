@@ -24,6 +24,8 @@ use super::remote_bridge::{
 };
 
 const TRANSPORT_TIMEOUT: Duration = Duration::from_secs(30);
+/// 单个候选地址的 TCP 建连上限。系统默认要等一分多钟，旧 IP 失效时会把后面的候选全拖死。
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 /// Desktop 上的配对要等本机用户点「允许」，服务端给了 300 秒，这里留一点余量。
 const PAIRING_APPROVAL_TIMEOUT: Duration = Duration::from_secs(330);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -67,13 +69,22 @@ struct StoredCredential {
     device_id: String,
     token: String,
     desktop_public_key: String,
+    /// 上次连上的地址，重连时最先尝试。
     address: String,
+    /// Desktop 认证时报上的全部地址（IP + Bonjour 名）。信任只认公钥，地址只是去哪找它。
+    #[serde(default)]
+    addresses: Vec<String>,
 }
+
+type EventCallback = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
+type ClosedCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// 一个已认证的 Desktop 连接。读由独立线程负责，写必须经 `stream` 锁，
 /// 否则两个并发请求的帧会互相插进对方里面。
 struct DesktopSession {
     address: String,
+    /// 本次认证时 Desktop 报上的地址清单，连上后写回凭证。
+    advertised: Vec<String>,
     device_id: String,
     stream: Mutex<TcpStream>,
     transport: Arc<Mutex<TransportState>>,
@@ -202,8 +213,7 @@ fn open_encrypted(
         .map_err(|error| error.to_string())?
         .build_initiator()
         .map_err(|error| error.to_string())?;
-    let mut stream =
-        TcpStream::connect(socket_address(address)).map_err(|error| error.to_string())?;
+    let mut stream = connect_tcp(socket_address(address))?;
     stream
         .set_read_timeout(Some(TRANSPORT_TIMEOUT))
         .map_err(|error| error.to_string())?;
@@ -232,6 +242,67 @@ fn open_encrypted(
         .into_transport_mode()
         .map_err(|error| error.to_string())?;
     Ok((stream, transport))
+}
+
+fn connect_tcp(address: &str) -> Result<TcpStream, String> {
+    use std::net::ToSocketAddrs;
+    let mut last_error = "PAIRING_ADDRESS_INVALID".to_string();
+    for target in address
+        .to_socket_addrs()
+        .map_err(|error| error.to_string())?
+    {
+        match TcpStream::connect_timeout(&target, CONNECT_TIMEOUT) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(last_error)
+}
+
+/// 重连先试上次成功的地址，再试 Desktop 报过的其余地址；用户手填的地址只试那一个。
+fn candidate_addresses(credential: &StoredCredential, explicit: Option<&str>) -> Vec<String> {
+    if let Some(address) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
+        return vec![address.to_string()];
+    }
+    let mut candidates: Vec<String> = Vec::new();
+    for address in std::iter::once(&credential.address).chain(&credential.addresses) {
+        let address = address.trim();
+        if !address.is_empty() && !candidates.iter().any(|known| known == address) {
+            candidates.push(address.to_string());
+        }
+    }
+    candidates
+}
+
+/// 逐个候选地址连接，任何一个都必须通过配对时那把 Desktop 公钥的校验。
+/// 公钥不符的错误优先上报：它说明找到的是另一台电脑，而不是网络不通。
+fn connect_first(
+    candidates: &[String],
+    credential: &StoredCredential,
+    keypair: &Keypair,
+    on_event: EventCallback,
+    on_closed: ClosedCallback,
+) -> Result<Arc<DesktopSession>, String> {
+    let mut failure: Option<String> = None;
+    for address in candidates {
+        let event = Arc::clone(&on_event);
+        let closed = Arc::clone(&on_closed);
+        match connect_session(
+            address,
+            credential,
+            keypair,
+            Box::new(move |value| event(value)),
+            Box::new(move || closed()),
+        ) {
+            Ok(session) => return Ok(session),
+            Err(error) => {
+                if failure.as_deref() != Some("DESKTOP_KEY_MISMATCH") {
+                    failure = Some(error);
+                }
+            }
+        }
+    }
+    Err(failure.unwrap_or_else(|| "PAIRING_ADDRESS_INVALID".to_string()))
 }
 
 fn pair_with_desktop(
@@ -276,6 +347,7 @@ fn pair_with_desktop(
         token: token.to_string(),
         desktop_public_key: STANDARD_NO_PAD.encode(desktop_public_key),
         address: address.to_string(),
+        addresses: Vec::new(),
     })
 }
 
@@ -303,6 +375,19 @@ fn connect_session(
     if response.get("ok").and_then(|value| value.as_bool()) != Some(true) {
         return Err("AUTH_INVALID".to_string());
     }
+    let advertised = response
+        .get("addresses")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .filter(|item| !item.is_empty() && item.len() <= 256)
+                .take(8)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
     // 认证之后这是一条长期连接：留着读超时会把空闲连接读死。
     stream
         .set_read_timeout(None)
@@ -320,6 +405,7 @@ fn connect_session(
     );
     Ok(Arc::new(DesktopSession {
         address: address.to_string(),
+        advertised,
         device_id: credential.device_id.clone(),
         stream: Mutex::new(stream),
         transport,
@@ -464,34 +550,32 @@ pub async fn mobile_remote_connect(
     address: Option<String>,
 ) -> Result<MobileRemoteStatus, String> {
     let credential = read_credential()?.ok_or_else(|| "PAIRING_REQUIRED".to_string())?;
-    let target = address
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| credential.address.clone());
-    if target.is_empty() {
+    let candidates = candidate_addresses(&credential, address.as_deref());
+    if candidates.is_empty() {
         return Err("PAIRING_ADDRESS_INVALID".to_string());
     }
     let (_, keypair) = load_or_create_identity()?;
-    let connecting_address = target.clone();
     let connecting: StoredCredential = credential.clone();
 
     let session = tokio::task::spawn_blocking(move || {
         let event_app = app.clone();
         let closed_app = app.clone();
-        connect_session(
-            &connecting_address,
+        connect_first(
+            &candidates,
             &connecting,
             &keypair,
-            Box::new(move |value| {
+            Arc::new(move |value| {
                 let _ = event_app.emit(MOBILE_EVENT_NAME, value);
             }),
-            Box::new(move || {
+            Arc::new(move || {
                 let _ = closed_app.emit(MOBILE_CLOSED_EVENT_NAME, ());
             }),
         )
     })
     .await
     .map_err(|error| error.to_string())??;
+    let target = session.address.clone();
+    let advertised = session.advertised.clone();
 
     let mut guard = state.session.lock().map_err(lock_error)?;
     if let Some(previous) = guard.take() {
@@ -500,9 +584,15 @@ pub async fn mobile_remote_connect(
     *guard = Some(session);
     drop(guard);
 
-    if credential.address != target {
+    let addresses = if advertised.is_empty() {
+        credential.addresses.clone()
+    } else {
+        advertised
+    };
+    if credential.address != target || credential.addresses != addresses {
         let updated = StoredCredential {
             address: target.clone(),
+            addresses,
             ..credential.clone()
         };
         let serialized = serde_json::to_string(&updated).map_err(|error| error.to_string())?;
@@ -593,6 +683,7 @@ mod tests {
             token: TOKEN.to_string(),
             desktop_public_key: STANDARD_NO_PAD.encode(desktop_public_key),
             address: address.to_string(),
+            addresses: Vec::new(),
         }
     }
 
@@ -926,5 +1017,107 @@ mod tests {
                 "{message_type} 不在 Desktop 白名单里"
             );
         }
+    }
+
+    /// 端口已经关掉的地址：模拟电脑换了 IP 后，手机手里那个旧地址。
+    fn dead_address() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().to_string()
+    }
+
+    /// 假 Desktop：握手、认证成功，并像真 Desktop 一样报上自己当前的地址清单。
+    fn spawn_authenticating_desktop(
+        listener: TcpListener,
+        private: Vec<u8>,
+        advertised: serde_json::Value,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            let (mut stream, transport) = accept_encrypted(&listener, &private);
+            let _auth: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+            write_encrypted_json(
+                &mut stream,
+                &transport,
+                &serde_json::json!({ "ok": true, "addresses": advertised }),
+            )
+            .unwrap();
+        })
+    }
+
+    #[test]
+    fn candidates_try_the_last_good_address_first_without_duplicates() {
+        let mut cred = credential("192.168.1.2:9527", &[0; 32]);
+        cred.addresses = vec![
+            "192.168.1.2:9527".into(),
+            "Mac.local:9527".into(),
+            " ".into(),
+        ];
+        assert_eq!(
+            candidate_addresses(&cred, None),
+            vec!["192.168.1.2:9527".to_string(), "Mac.local:9527".to_string()]
+        );
+        // 用户手动填的地址只试这一个，不悄悄换去别处。
+        assert_eq!(
+            candidate_addresses(&cred, Some(" 10.0.0.8:9527 ")),
+            vec!["10.0.0.8:9527".to_string()]
+        );
+    }
+
+    #[test]
+    fn reconnect_finds_the_same_desktop_at_another_address_by_its_key() {
+        let (listener, live, server) = desktop_listener();
+        let desktop = spawn_authenticating_desktop(
+            listener,
+            server.private.clone(),
+            serde_json::json!([live.clone(), "Mac.local:9527"]),
+        );
+        let (_, keypair) = device_identity();
+        let mut cred = credential(&dead_address(), &server.public);
+        cred.addresses = vec![live.clone()];
+
+        let session = connect_first(
+            &candidate_addresses(&cred, None),
+            &cred,
+            &keypair,
+            Arc::new(|_| {}),
+            Arc::new(|| {}),
+        )
+        .expect("旧地址失效后应当用同一把公钥在新地址连上");
+
+        assert_eq!(session.address, live);
+        assert_eq!(
+            session.advertised,
+            vec![live.clone(), "Mac.local:9527".to_string()]
+        );
+        desktop.join().unwrap();
+    }
+
+    #[test]
+    fn reconnect_refuses_an_address_answered_by_another_desktop() {
+        let (listener, address, impostor) = desktop_listener();
+        let private = impostor.private.clone();
+        let desktop = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            // 握手会在手机核对公钥时中断，这里不关心结果。
+            let _ = server_noise_handshake(&mut stream, &private);
+        });
+        let paired_desktop = noise_keypair();
+        let (_, keypair) = device_identity();
+        let cred = credential(&address, &paired_desktop.public);
+
+        let error = connect_first(
+            &candidate_addresses(&cred, None),
+            &cred,
+            &keypair,
+            Arc::new(|_| {}),
+            Arc::new(|| {}),
+        )
+        .err()
+        .expect("公钥不符必须拒绝");
+
+        assert_eq!(error, "DESKTOP_KEY_MISMATCH");
+        desktop.join().unwrap();
     }
 }
