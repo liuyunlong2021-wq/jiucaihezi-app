@@ -10,6 +10,9 @@ export const ASSET_REGISTRY_PATH = '制作流水线/资产注册表.json'
 /** 首次提交 + 2 次重试（2026-10-25 用户确认）。 */
 const MAX_ATTEMPTS = 3
 export const MODERATION = /审核|敏感|违规|moderation|content.?policy|sensitive|safety/i
+/** 限流：等一会儿再提，不计入失败次数（2026-10-25 实测一次提交 18 张被限流）。 */
+export const RATE_LIMIT = /请求过于频繁|too many requests|rate.?limit|\b429\b/i
+const RATE_LIMIT_BACKOFF_MS = 60_000
 
 export type AssetKind = 'character' | 'scene' | 'prop'
 
@@ -24,6 +27,10 @@ export interface AssetRegistryEntry {
   prompt_hash: string
   status: 'pending' | 'ready' | 'failed' | 'locked'
   attempts: number
+  /** 累计提交次数，用于生成唯一 requestId（重试、限流重提、跨运行重提都不重复）。 */
+  submits?: number
+  /** 限流后最早可重提的时间戳。 */
+  retry_at?: number
   task_id?: string
   request_id?: string
   image_path?: string
@@ -69,7 +76,8 @@ export function promptBody(text: string): string {
 }
 
 async function submit(wikiRoot: string, registry: Registry, id: string, entry: AssetRegistryEntry, deps: AssetSchedulerDeps) {
-  const requestId = `manju:${id}:${entry.prompt_hash.slice(0, 16)}:${entry.attempts}`
+  entry.submits = (entry.submits ?? entry.attempts - 1) + 1
+  const requestId = `manju:${id}:${entry.prompt_hash.slice(0, 16)}:${entry.submits}`
   entry.task_id = await deps.submitImage({ requestId, prompt: promptBody(await deps.readText(entry.prompt_path)), kind: entry.kind })
   entry.request_id = requestId
   entry.status = 'pending'
@@ -95,7 +103,9 @@ export async function submitEpisodeAssets(wikiRoot: string, checkpoint: EpisodeC
   const registry = await loadRegistry(wikiRoot, deps)
   for (const [id, asset] of Object.entries(checkpoint.assets || {})) {
     if (!needsSubmit(registry, id, asset.prompt_hash)) continue
-    const entry: AssetRegistryEntry = { ...asset, status: 'pending', attempts: 1, episode: checkpoint.episode_number }
+    const previous = registry.assets[id]
+    const entry: AssetRegistryEntry = { ...asset, status: 'pending', attempts: 1, episode: checkpoint.episode_number,
+      ...(previous && { submits: previous.submits ?? previous.attempts }) }
     registry.assets[id] = entry
     await submit(wikiRoot, registry, id, entry, deps)
   }
@@ -128,7 +138,14 @@ export async function awaitEpisodeAssets(
         entry.image_path = task.localPath
       } else if (!task || task.status === 'failed' || task.status === 'cancelled') {
         const error = task?.error || '任务记录丢失'
-        if (MODERATION.test(error) || entry.attempts >= MAX_ATTEMPTS) {
+        if (task && RATE_LIMIT.test(error)) {
+          if (entry.retry_at === undefined) entry.retry_at = now() + RATE_LIMIT_BACKOFF_MS
+          else if (now() >= entry.retry_at) {
+            delete entry.retry_at
+            await submit(wikiRoot, registry, id, entry, deps)
+          }
+          pending.push(id)
+        } else if (MODERATION.test(error) || entry.attempts >= MAX_ATTEMPTS) {
           Object.assign(entry, { status: 'failed', error })
           failed.push(id)
         } else {

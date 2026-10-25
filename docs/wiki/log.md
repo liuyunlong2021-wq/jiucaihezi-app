@@ -3060,3 +3060,4 @@
 - 同日 P1 调度内核：新增 `src/runtime/manjuAuto/assetScheduler.ts` 与桌面适配，持久化资产注册表去重、重试 2 次、审核不重试、审图锁定；桥导出 `runCreationOperation` 并支持 `canvas:false`。尚未接入触发，等全自动入口 UI；未做真实生图验证。
 - 同日 P2 调度内核：新增 `videoScheduler.ts`（按 refs 顺序提交视频、整集预检模型约束、每集任务登记去重、单次检查重试 1 次）与 `mediaParams.ts`（按模型字段名、时长档位、参考图上限组装参数）；desktopAssetDeps 改名 desktopDeps 并加视频适配。未接入触发；未做真实出片验证。
 - 同日 P3 入口与运行控制：漫剧按钮改为模式菜单，新增全自动成片确认卡、进度条、审图面板（`ManjuAutoPanel.vue` + `useManjuAuto.ts`），运行控制 `autoRunner.ts`（逐集、按集预算、首集审图、30 分钟视频检查、续做），Rust `media_concat_videos`（ffmpeg concat + outpoint 裁尾，已登记命令权限），远程动态目录参数档案，Skill 增加入稿与单集指令段落。本地测试全部通过；未做真实出片与扣费验证，未发布。
+- 同日首轮真实运行：第 1 集文字流水线跑通（18 资产、10 段，refs 校验通过），资产提交不阻塞文字；`gpt-image-2.5-1k` 线路持续 HTTP 502，54 次提交全部失败，运行在提交视频前按设计暂停。据此修复：失败资产在续做时重试、续做可换模型、目录超时沿用上次目录、“元”价格解析。另按用户要求，全自动的角色资产一步出三格参考图提示词（流水线 Skill + geshi 增加“设计并格式”，harness 允许已读人物小传支撑 character_format）。

@@ -4,7 +4,7 @@
  * 资产齐全后按每段 refs（@图 顺序）取参考图提交视频，不等待；
  * 之后在集与集之间或定时调用 checkEpisodeVideos 单次检查，不在这里循环轮询。
  */
-import { MODERATION, promptBody, type WikiTaskDeps } from './assetScheduler'
+import { MODERATION, RATE_LIMIT, promptBody, type WikiTaskDeps } from './assetScheduler'
 
 /** 首次提交 + 1 次重试（2026-10-25 用户确认）。 */
 const MAX_ATTEMPTS = 2
@@ -28,6 +28,8 @@ interface VideoEntry {
   duration_seconds: number
   status: 'pending' | 'ready' | 'failed'
   attempts: number
+  /** 累计提交次数，生成唯一 requestId。 */
+  submits?: number
   task_id?: string
   request_id?: string
   video_path?: string
@@ -77,7 +79,8 @@ async function prepare(segment: VideoCheckpoint['segments'][number], images: Rec
 
 async function submit(wikiRoot: string, checkpoint: VideoCheckpoint, registry: Registry, index: number, deps: VideoSchedulerDeps) {
   const entry = registry.segments[index]
-  const requestId = `manju-video:${checkpoint.video_model}:${checkpoint.episode_number}:${index + 1}:${entry.fingerprint}:${entry.attempts}`
+  entry.submits = (entry.submits ?? entry.attempts - 1) + 1
+  const requestId = `manju-video:${checkpoint.video_model}:${checkpoint.episode_number}:${index + 1}:${entry.fingerprint}:${entry.submits}`
   const prompt = promptBody(await deps.readText(entry.path))
   entry.task_id = await deps.submitVideo({ requestId, prompt, images: entry.images, durationSeconds: entry.duration_seconds })
   entry.request_id = requestId
@@ -95,7 +98,8 @@ export async function submitEpisodeVideos(wikiRoot: string, checkpoint: VideoChe
     const current = registry.segments[index]
     if (current?.path === segment.path && current.fingerprint === prepared[index].fingerprint) continue
     const { fingerprint, images: ordered, durationSeconds } = prepared[index]
-    registry.segments[index] = { path: segment.path, fingerprint, images: ordered, duration_seconds: durationSeconds, status: 'pending', attempts: 1 }
+    registry.segments[index] = { path: segment.path, fingerprint, images: ordered, duration_seconds: durationSeconds, status: 'pending', attempts: 1,
+      ...(current && { submits: current.submits ?? current.attempts }) }
     await submit(wikiRoot, checkpoint, registry, index, deps)
   }
   await save(wikiRoot, checkpoint, registry, deps)
@@ -114,7 +118,11 @@ export async function checkEpisodeVideos(wikiRoot: string, checkpoint: VideoChec
       entry.video_path = task.localPath
     } else if (!task || task.status === 'failed' || task.status === 'cancelled') {
       const error = task?.error || '任务记录丢失'
-      if (MODERATION.test(error) || entry.attempts >= MAX_ATTEMPTS) {
+      if (task && RATE_LIMIT.test(error)) {
+        // 限流：检查间隔已有 30 分钟，直接重提，不计入重试次数。
+        await submit(wikiRoot, checkpoint, registry, index, deps)
+        pending.push(index + 1)
+      } else if (MODERATION.test(error) || entry.attempts >= MAX_ATTEMPTS) {
         Object.assign(entry, { status: 'failed', error })
         failed.push(index + 1)
       } else {

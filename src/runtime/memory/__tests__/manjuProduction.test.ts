@@ -177,10 +177,15 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // 目录查询网络超时沿用上次成功目录（dynamic 或 legacy），不把云端模型降级为只允许本机 ComfyUI（2026-10-25 实测）。
   const bridge = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
   assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, result\)/)
+  // 回归（2026-10-25 实测“参数不是 JSON 数据”）：目录缓存键不能把 undefined 交给 canonicalCreationJson。
+  assert.doesNotMatch(bridge, /catalogKey = canonicalCreationJson/)
+  assert.match(bridge, /params\[name\] \?\? null/)
   assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, legacy\)/)
   assert.match(bridge, /!\(error instanceof CreationProtocolError\) && cached/)
   // 续做按确认卡上新的模型继续（生图线路故障后换模型）。
   assert.match(panel, /@click="startNew\(true\)"/)
+  // 暂停原因直接显示，不只藏在悬停提示里（2026-10-25 用户反馈“看到暂停有点懵”）。
+  assert.match(panel, /暂停原因：\{\{ episode\.reason \}\}/)
   // 设计系统没有 --danger，警示色必须用 --jc-error。
   assert.doesNotMatch(panel, /var\(--danger\)/)
   assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)

@@ -116,3 +116,17 @@ test('model constraint failure on any segment blocks the whole episode before sp
   await assert.rejects(submitEpisodeVideos(wiki, checkpoint, images, deps), /最长 15/)
   assert.equal(submits.length, 0)
 })
+
+test('rate-limited video failures resubmit at the next check without using the single retry', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  tasks.set('v1', { status: 'success', localPath: '/p/1.mp4' })
+  tasks.set('v2', { status: 'failed', error: '请求过于频繁，请稍后再试' })
+  await checkEpisodeVideos(wiki, checkpoint, deps)
+  tasks.set('v3', { status: 'failed', error: '请求过于频繁' })
+  const second = await checkEpisodeVideos(wiki, checkpoint, deps)
+  assert.equal(second.status, 'pending')
+  assert.equal(registry(fs)[1].attempts, 1)
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length)
+})

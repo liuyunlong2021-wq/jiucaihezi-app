@@ -164,3 +164,33 @@ test('assets that finally failed get a fresh retry series on the next run (e.g. 
   assert.equal(registry(fs)['场景/石道'].status, 'pending')
   assert.equal(registry(fs)['场景/石道'].attempts, 1)
 })
+
+test('rate-limited failures wait and resubmit without using up attempts, each with a fresh requestId', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/a.png' })
+  tasks.set('t2', { status: 'failed', error: '请求过于频繁，请稍后再试' })
+  let clock = 0, limited = 4
+  deps.now = () => clock
+  deps.sleep = async ms => {
+    clock += ms
+    for (const [id, task] of tasks) if (id !== 't1' && task.status === 'pending')
+      tasks.set(id, limited-- > 0 ? { status: 'failed', error: 'HTTP 429 Too Many Requests' } : { status: 'success', localPath: `/p/${id}.png` })
+  }
+  const result = await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 30 * 60_000, pollMs: 30_000 })
+  assert.equal(result.status, 'ready')
+  assert.equal(registry(fs)['场景/石道'].attempts, 1, '限流不计入失败次数')
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length, '每次提交 requestId 都不同')
+})
+
+test('retrying a finally-failed asset on a later run never reuses an earlier requestId', async () => {
+  const { deps, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/a.png' })
+  tasks.set('t2', { status: 'failed', error: '内容审核未通过' })
+  await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 1000, pollMs: 1 })
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length)
+})

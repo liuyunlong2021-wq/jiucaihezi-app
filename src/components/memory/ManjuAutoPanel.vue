@@ -45,6 +45,8 @@
     <span class="manju-auto-status">{{ statusLabel }}</span>
     <span v-for="(episode, key) in run.episodes" :key="key" class="manju-auto-chip" :class="episode.phase" :title="episode.reason || episode.output || ''">第{{ key }}集 {{ phaseLabels[episode.phase] }}</span>
     <button v-if="run.status === 'running'" type="button" @click="emit('stop')">停止</button>
+    <p v-for="(episode, key) in blockedEpisodes" :key="`reason-${key}`" class="manju-auto-reason">第{{ key }}集暂停原因：{{ episode.reason }}</p>
+    <p v-if="run.status === 'blocked' || run.status === 'stopped'" class="manju-auto-reason">处理后从「漫剧·全自动」菜单重新选「全自动成片」，点「从第 N 集续做」；已完成的文字和已出的图不会重做。</p>
   </div>
   <p v-if="error" class="manju-auto-error">{{ error }}</p>
 </template>
@@ -79,6 +81,7 @@ watch(() => props.draft, draft => {
 const phaseLabels: Record<EpisodePhase, string> = {
   queued: '待做', text: '写提示词', assets: '生图中', review: '待审图', videos: '出片中', concat: '拼接中', done: '已成片', blocked: '已暂停',
 }
+const blockedEpisodes = computed(() => Object.fromEntries(Object.entries(props.run?.episodes || {}).filter(([, episode]) => episode.phase === 'blocked' && episode.reason)))
 const statusLabel = computed(() => ({ running: '全自动成片运行中', blocked: '全自动成片已暂停', stopped: '全自动成片已停止', done: '全自动成片已完成' })[props.run!.status])
 const resumeEpisode = computed(() => {
   const saved = props.draft?.saved
@@ -145,5 +148,6 @@ function displaySrc(path?: string) {
 .manju-auto-chip.blocked { background: color-mix(in srgb, var(--jc-error) 14%, transparent); color: var(--jc-error); }
 .manju-auto-chip.review { background: color-mix(in srgb, #d08a00 18%, transparent); color: #a86d00; }
 .manju-auto-progress button { margin-left: auto; padding: 3px 10px; }
+.manju-auto-reason { flex-basis: 100%; margin: 2px 0 0; color: var(--ink2); font-size: 11px; line-height: 1.5; }
 .manju-auto-error { margin: 0 14px 6px; color: var(--jc-error); font-size: 12px; }
 </style>

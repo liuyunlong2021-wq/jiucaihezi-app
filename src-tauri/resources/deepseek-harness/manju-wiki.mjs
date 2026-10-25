@@ -773,14 +773,15 @@ async function requirePipelineReads(ctx, args, exec, agent) {
     summary: materials.filter(path => /\/故事梗概\.md$/.test(path)),
     style: Object.keys(state.files?.style || {}).filter(path => path === `${root}/项目风格/影片比例与风格.md`), source: [state.source_path],
     bio: candidates('人物小传'), scene: candidates('场景说明'), prop: candidates('道具说明'),
-    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`],
+    // 三格格式提示词可由已读的角色设计提示词，或（全自动成片一步出格式时）已读的人物小传支撑。
+    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`, ...candidates('人物小传')],
     engineering: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
     engineeringOrStoryboard: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
   }
   const cwd = exec.agent.session.header.cwd
   const observed = async path => {
     const target = await ctx.fs.resolve(path, { cwd, signal: exec.signal })
-    const prior = reads.get(target.targetKey)
+    const prior = reads.get(target.targetKey ?? target)
     return prior && JSON.stringify((await ctx.fs.stat(target, exec.signal))?.version) === JSON.stringify(prior.version)
   }
   if (kind === 'video_prompt' && args.video_model === 'Seedance') {

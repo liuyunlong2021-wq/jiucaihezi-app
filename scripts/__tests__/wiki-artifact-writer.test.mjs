@@ -188,6 +188,32 @@ test('Seedance pipeline registers image assets and binds each segment @图 order
   assert.deepEqual(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).sort(), ['场景/石道', '角色/莫甘娜'])
 })
 
+test('full-auto may write a character three-panel format prompt straight from the read bio, without a separate design prompt', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-format-from-bio-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'manju' })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'Seedance', episode_number: 1, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  const read = path => recordWikiRead(sourceAgent, { targetKey: join(root, path) }, { kind: 'present', version: files.get(join(root, path)).version }, { ...exec, agent: sourceAgent, name: 'read' })
+  await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+  const summary = await save({ artifact_kind: 'story_summary' }, '# 故事梗概')
+  const bio = await save({ artifact_kind: 'character_bio', entity_name: '莫甘娜' }, '# 莫甘娜\n银发金瞳，暗红长裙')
+  await checkpoint({ stage: 'materials', outputs: [summary, bio] })
+  read(summary)
+  const style = await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：9:16')
+  await checkpoint({ stage: 'style', outputs: [style] })
+  read(style)
+  const format = { artifact_kind: 'character_format', entity_name: '莫甘娜' }
+  await assert.rejects(tool.execute({ ...format, content: '9:16三格人物设定图，莫甘娜' }, exec), /精准读取缺失/)
+  read(bio)
+  const saved = await tool.execute({ ...format, content: '9:16三格人物设定图，莫甘娜银发金瞳' }, exec)
+  assert.equal(saved.path, 'wiki/资产/角色/莫甘娜/角色生图格式提示词.md')
+  assert.ok(!files.has(join(root, 'wiki/资产/角色/莫甘娜/角色生图提示词.md')), '不需要先存设计提示词')
+})
+
 test('each creative route automatically replaces its own generated artifact in place and keeps one index entry', async t => {
   for (const [route, artifact] of [
     ['manju', { artifact_kind: 'engineering_script', episode_number: 1 }],

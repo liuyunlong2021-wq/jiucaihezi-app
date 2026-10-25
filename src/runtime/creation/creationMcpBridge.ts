@@ -155,7 +155,8 @@ function capabilities(params: Record<string, unknown>): string[] {
 }
 
 async function creationModels(params: Record<string, unknown>) {
-  const catalogKey = canonicalCreationJson({ cursor: params.cursor, query: params.query, limit: params.limit, input_modality: params.input_modality, output_modality: params.output_modality })
+  // 缺省参数是 undefined：canonicalCreationJson 会拒绝 undefined，这里统一成 null 再序列化。
+  const catalogKey = JSON.stringify(['cursor', 'query', 'limit', 'input_modality', 'output_modality'].map(name => params[name] ?? null))
   if (capabilities(params).length && !capabilities(params).includes('av')) throw new Error('当前入口未授权影音能力')
   try {
     const directory = await listDynamicCreationCapabilities(params)
