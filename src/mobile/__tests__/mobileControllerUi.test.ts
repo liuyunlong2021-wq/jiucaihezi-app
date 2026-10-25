@@ -134,3 +134,11 @@ test('M2：聊天页能打开对话列表；列表先列项目再列对话，可
   assert.match(list, /跟随电脑当前对话/)
   assert.match(list, /电脑正在运行/)
 })
+
+test('M3a：配对过的手机可手填电脑地址（Tailscale 地址或主机名）后连接', () => {
+  const pairing = source('src/mobile/MobilePairingView.vue')
+  const remote = source('src/mobile/useMobileRemote.ts')
+  assert.match(pairing, /编辑电脑地址/)
+  assert.match(pairing, /\$emit\('connect', manualAddress\.trim\(\)\)/)
+  assert.match(remote, /const reconnect = \(address\?: string\) => run\(async \(\) => \{\n\s+status\.value = await connectMobileRemote\(address\)/)
+})

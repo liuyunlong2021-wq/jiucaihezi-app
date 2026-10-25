@@ -13,11 +13,12 @@ defineProps<{
 const emit = defineEmits<{
   scan: []
   pair: [text: string]
-  connect: []
+  connect: [address?: string]
   disconnect: []
 }>()
 
 const pasted = ref('')
+const manualAddress = ref('')
 
 function submitPasted() {
   const text = pasted.value.trim()
@@ -67,6 +68,25 @@ function submitPasted() {
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
+    <details v-if="status?.paired && !status?.connected" class="fallback">
+      <summary>编辑电脑地址（在外面用 Tailscale 时）</summary>
+      <p>填电脑在 Tailscale 里的地址（100. 开头）或主机名；不写端口就用配对时的端口。上次连上的地址：{{ status?.address || '无' }}</p>
+      <input
+        v-model="manualAddress"
+        type="text"
+        inputmode="url"
+        autocapitalize="off"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="例如 100.101.1.2 或 my-mac.tail1234.ts.net"
+      />
+      <button class="wide" type="button" :disabled="busy || !manualAddress.trim()" @click="$emit('connect', manualAddress.trim())">
+        <JcIcon name="lan" />
+        <span>用这个地址连接</span>
+      </button>
+    </details>
+
     <details v-if="!status?.connected" class="fallback">
       <summary>相机扫不出来？用粘贴配对</summary>
       <p>在电脑上点「复制配对信息」（或用系统相机扫那个二维码并复制），长按下面输入框粘贴。</p>
@@ -85,7 +105,7 @@ function submitPasted() {
       </button>
     </details>
 
-    <p class="hint">手机只操作电脑上当前打开的那个对话；对话历史留在电脑，手机不保存副本。</p>
+    <p class="hint">对话历史留在电脑，手机不保存副本。</p>
   </section>
 </template>
 
@@ -105,7 +125,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .fallback { display: grid; gap: 8px; }
 .fallback summary { color: var(--ink3); font-size: 13px; cursor: pointer; }
 .fallback p { margin: 0; color: var(--ink3); font-size: 12px; line-height: 1.5; }
-.fallback textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 13px; resize: vertical; }
+.fallback input, .fallback textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 13px; resize: vertical; }
 /* 兜底按钮也按主按钮的尺寸来，之前贴着图标变成一个方块很难看。 */
 .fallback .wide { width: 100%; min-height: 48px; font-size: 14px; }
 </style>

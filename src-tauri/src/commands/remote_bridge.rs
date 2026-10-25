@@ -1258,11 +1258,30 @@ fn bridge_log(_message: &str) {}
 fn listen_ips() -> Result<Vec<String>, String> {
     let default_ip = local_ip().ok().and_then(|ip| ip.parse().ok());
     let interfaces = local_ip_address::list_afinet_netifas().unwrap_or_default();
-    let ips = lan_ipv4s(&interfaces, default_ip);
+    let ips = reachable_ipv4s(&interfaces, default_ip);
     if !ips.is_empty() {
         return Ok(ips);
     }
     local_ip().map(|ip| vec![ip])
+}
+
+/// 局域网地址在前（在家先直连），其后是 Tailscale 的 100.64.0.0/10 地址（在外面靠它连回来）。
+/// Tailscale 网卡在 macOS 上叫 utunN，按名字过滤会把它一起滤掉，所以按网段单独取。
+fn reachable_ipv4s(
+    interfaces: &[(String, std::net::IpAddr)],
+    default_ip: Option<std::net::IpAddr>,
+) -> Vec<String> {
+    let mut ips = lan_ipv4s(interfaces, default_ip);
+    for (_, ip) in interfaces {
+        if let std::net::IpAddr::V4(ip) = ip
+            && ip.octets()[0] == 100
+            && (ip.octets()[1] & 0xC0) == 64
+            && !ips.contains(&ip.to_string())
+        {
+            ips.push(ip.to_string());
+        }
+    }
+    ips
 }
 
 /// 物理网卡上的私网 IPv4；默认出口若正好是其中之一则排在最前。
@@ -1931,6 +1950,26 @@ mod tests {
         assert_eq!(
             lan_ipv4s(&interfaces, None),
             vec!["192.168.1.8".to_string()]
+        );
+    }
+    /// M3a：装了 Tailscale 时，手机在外面靠 100.x 地址连回来；它排在局域网地址之后，
+    /// 在家时手机仍先试局域网。Clash 的 198.18.x 不是 Tailscale 网段，不算。
+    #[test]
+    fn tailscale_addresses_are_advertised_after_the_lan_ones() {
+        let interfaces = [
+            interface("utun4", "100.101.1.2"),
+            interface("en0", "192.168.0.26"),
+            interface("utun10", "198.18.0.1"),
+            interface("Tailscale", "100.64.0.7"),
+            interface("en5", "100.128.0.1"),
+        ];
+        assert_eq!(
+            reachable_ipv4s(&interfaces, "198.18.0.1".parse().ok()),
+            vec![
+                "192.168.0.26".to_string(),
+                "100.101.1.2".to_string(),
+                "100.64.0.7".to_string(),
+            ]
         );
     }
 }

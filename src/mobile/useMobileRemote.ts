@@ -110,8 +110,8 @@ export function useMobileRemote() {
   /** 相机不可用时的兜底：粘贴电脑上复制的同一份 offer（内容与二维码完全一致）。 */
   const pairByText = (text: string) => run(() => pairWithOfferText(text))
 
-  const reconnect = () => run(async () => {
-    status.value = await connectMobileRemote()
+  const reconnect = (address?: string) => run(async () => {
+    status.value = await connectMobileRemote(address)
     await client.connect()
   })
 

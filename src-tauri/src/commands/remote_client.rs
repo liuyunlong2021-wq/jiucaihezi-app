@@ -265,7 +265,20 @@ fn connect_tcp(address: &str) -> Result<TcpStream, String> {
 /// 重连先试上次成功的地址，再试 Desktop 报过的其余地址；用户手填的地址只试那一个。
 fn candidate_addresses(credential: &StoredCredential, explicit: Option<&str>) -> Vec<String> {
     if let Some(address) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
-        return vec![address.to_string()];
+        // 手填的 Tailscale 地址或主机名常不写端口：沿用配对时电脑的端口。
+        if address.contains(':') {
+            return vec![address.to_string()];
+        }
+        let port = credential
+            .address
+            .rsplit_once(':')
+            .map(|(_, port)| port)
+            .unwrap_or_default();
+        return vec![if port.is_empty() {
+            address.to_string()
+        } else {
+            format!("{address}:{port}")
+        }];
     }
     let mut candidates: Vec<String> = Vec::new();
     for address in std::iter::once(&credential.address).chain(&credential.addresses) {
@@ -1073,6 +1086,24 @@ mod tests {
         assert_eq!(
             candidate_addresses(&cred, Some(" 10.0.0.8:9527 ")),
             vec!["10.0.0.8:9527".to_string()]
+        );
+    }
+
+    /// M3a：用户手填 Tailscale 地址或主机名时通常不写端口，沿用配对时电脑的端口。
+    #[test]
+    fn a_typed_address_without_port_uses_the_paired_port() {
+        let cred = credential("192.168.0.26:56537", &[0; 32]);
+        assert_eq!(
+            candidate_addresses(&cred, Some("100.101.1.2")),
+            vec!["100.101.1.2:56537".to_string()]
+        );
+        assert_eq!(
+            candidate_addresses(&cred, Some(" my-mac.tail1234.ts.net ")),
+            vec!["my-mac.tail1234.ts.net:56537".to_string()]
+        );
+        assert_eq!(
+            candidate_addresses(&cred, Some("100.101.1.2:6000")),
+            vec!["100.101.1.2:6000".to_string()]
         );
     }
 
