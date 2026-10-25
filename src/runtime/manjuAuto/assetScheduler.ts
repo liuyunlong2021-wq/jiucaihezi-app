@@ -54,12 +54,12 @@ export interface AssetGateResult {
 
 type Registry = { version: 1; assets: Record<string, AssetRegistryEntry> }
 
-async function loadRegistry(wikiRoot: string, deps: AssetSchedulerDeps): Promise<Registry> {
+async function loadRegistry(wikiRoot: string, deps: WikiTaskDeps): Promise<Registry> {
   const path = `${wikiRoot}/${ASSET_REGISTRY_PATH}`
   return await deps.exists(path) ? JSON.parse(await deps.readText(path)) : { version: 1, assets: {} }
 }
 
-function saveRegistry(wikiRoot: string, registry: Registry, deps: AssetSchedulerDeps) {
+function saveRegistry(wikiRoot: string, registry: Registry, deps: WikiTaskDeps) {
   return deps.writeText(`${wikiRoot}/${ASSET_REGISTRY_PATH}`, JSON.stringify(registry, null, 2) + '\n')
 }
 
@@ -78,12 +78,22 @@ async function submit(wikiRoot: string, registry: Registry, id: string, entry: A
   await saveRegistry(wikiRoot, registry, deps)
 }
 
+function needsSubmit(registry: Registry, id: string, hash: string) {
+  const current = registry.assets[id]
+  return !current || (current.status !== 'locked' && current.prompt_hash !== hash)
+}
+
+/** 本集需要新生成的资产（预算估算用），与 submitEpisodeAssets 的判断一致。 */
+export async function assetsToSubmit(wikiRoot: string, checkpoint: EpisodeCheckpoint, deps: WikiTaskDeps): Promise<string[]> {
+  const registry = await loadRegistry(wikiRoot, deps)
+  return Object.entries(checkpoint.assets || {}).filter(([id, asset]) => needsSubmit(registry, id, asset.prompt_hash)).map(([id]) => id)
+}
+
 /** 资产提示词完成后调用：提交尚未生成的资产，立即返回，不等待结果。 */
 export async function submitEpisodeAssets(wikiRoot: string, checkpoint: EpisodeCheckpoint, deps: AssetSchedulerDeps) {
   const registry = await loadRegistry(wikiRoot, deps)
   for (const [id, asset] of Object.entries(checkpoint.assets || {})) {
-    const current = registry.assets[id]
-    if (current && (current.status === 'locked' || current.prompt_hash === asset.prompt_hash)) continue
+    if (!needsSubmit(registry, id, asset.prompt_hash)) continue
     const entry: AssetRegistryEntry = { ...asset, status: 'pending', attempts: 1, episode: checkpoint.episode_number }
     registry.assets[id] = entry
     await submit(wikiRoot, registry, id, entry, deps)

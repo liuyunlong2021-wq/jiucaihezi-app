@@ -21,6 +21,8 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
+import ManjuAutoPanel from './ManjuAutoPanel.vue'
+import { AUTO_INTAKE_PREFIX, useManjuAuto } from '@/composables/useManjuAuto'
 import { findCustomProvider, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
@@ -1043,6 +1045,64 @@ watch(
   { immediate: true },
 )
 const sending = computed(() => activeRun.value?.phase === 'running')
+
+/**
+ * 漫剧制作的两种模式：提示词模式（默认，只出文字）与全自动成片（2026-10-25 用户确认）。
+ * 选中全自动不会花钱；发送剧本先入稿拆集，确认卡点“开始”后才提交生图/视频。
+ */
+const manjuAutoMode = ref(false)
+const manjuMenu = ref<{ left: number; bottom: number } | null>(null)
+let pendingAutoIntake = false
+function waitUntilIdle() {
+  return new Promise<void>(resolve => {
+    if (!sending.value && !sendInFlight.value) return resolve()
+    const stopWatch = watch(() => sending.value || sendInFlight.value, busy => {
+      if (busy) return
+      stopWatch()
+      resolve()
+    })
+  })
+}
+const manjuAuto = useManjuAuto({
+  owner: () => projectOwner.value,
+  async sendText(text) {
+    await waitUntilIdle()
+    if (!manjuSelected.value) toggleManjuProduction()
+    await send(text)
+  },
+})
+watch(sending, busy => {
+  if (busy || !pendingAutoIntake) return
+  pendingAutoIntake = false
+  void manjuAuto.prepare()
+})
+watch(manjuSelected, on => { if (!on) manjuAutoMode.value = false })
+
+function toggleManjuMenu(event: MouseEvent) {
+  if (manjuMenu.value) {
+    manjuMenu.value = null
+    return
+  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  manjuMenu.value = { left: rect.left, bottom: window.innerHeight - rect.top + 8 }
+}
+
+function chooseManjuMode(mode: 'prompt' | 'auto' | 'off') {
+  manjuMenu.value = null
+  if (mode === 'off') {
+    if (manjuSelected.value) toggleManjuProduction()
+    manjuAuto.cancelDraft()
+    return
+  }
+  if (!manjuSelected.value) toggleManjuProduction()
+  manjuAutoMode.value = mode === 'auto'
+  if (mode === 'prompt') {
+    manjuAuto.cancelDraft()
+    return
+  }
+  contextNotice.value = '已切换到全自动成片：发送剧本后先按集拆分，再弹出启动确认卡；确认前不会产生费用。'
+  void manjuAuto.prepare()
+}
 const composerHasPayload = computed(() => Boolean(
   input.value.trim() || persistentAttachments.value.length || attachments.value.length
     || referencedFiles.value.length || referencedSessions.value.length || selectedSkillNames.value.length,
@@ -1865,6 +1925,7 @@ function isInternalMediaModel(modelId: string): boolean {
 }
 
 function closeModelPicker(event: PointerEvent) {
+  if (manjuMenu.value && !(event.target as Element | null)?.closest?.('.memory-manju-menu, .memory-manju-button')) manjuMenu.value = null
   if (modelPickerOpen.value && !modelPickerRef.value?.contains(event.target as Node)) modelPickerOpen.value = false
   if (conversationPickerOpen.value && !conversationPickerRef.value?.contains(event.target as Node)) conversationPickerOpen.value = false
   if (mentionOpen.value
@@ -2797,11 +2858,15 @@ async function send(remoteText?: string) {
   }
   const remote = typeof remoteText === 'string'
   const active = conversation.value
-  const message = (remote ? remoteText : input.value).trim()
+  const rawMessage = (remote ? remoteText : input.value).trim()
   const activeAttachments = remote ? [] : [...persistentAttachments.value, ...attachments.value]
   const pendingAttachments = remote ? [] : attachments.value.slice()
   const activeReferencedFiles = remote ? [] : referencedFiles.value
   const activeReferencedSessions = remote ? [] : referencedSessions.value.slice()
+  // 全自动成片：用户发来的剧本先走入稿拆集，回合结束后弹出启动确认卡。
+  const autoIntake = !remote && manjuAutoMode.value && manjuSelected.value && manjuAuto.run.value?.status !== 'running'
+    && Boolean(rawMessage || activeAttachments.length || activeReferencedFiles.length)
+  const message = autoIntake ? `${AUTO_INTAKE_PREFIX}${rawMessage || '请按集拆分附件或引用文件中的剧本。'}` : rawMessage
   if (!active || (!message && !activeAttachments.length && !activeReferencedFiles.length
     && !activeReferencedSessions.length && !selectedSkillNames.value.length) || sendInFlight.value) return
   sendInFlight.value = true
@@ -2879,6 +2944,7 @@ async function send(remoteText?: string) {
     resizeComposer()
   }
 
+  if (autoIntake) pendingAutoIntake = true
   beginRunStatus(run)
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
@@ -2945,6 +3011,11 @@ async function send(remoteText?: string) {
       files: activeReferencedFiles,
       attachments: requestAttachments,
       onArtifactSaved(path) {
+        // 进度 JSON 只交给全自动成片（资产阶段提前生图），不在编辑器里打开。
+        if (path.endsWith('.json')) {
+          void manjuAuto.handleArtifactSaved(path)
+          return
+        }
         if (!isCurrentRun()) return
         emitEvent('project-filetree:locate', {
           path,
@@ -5119,6 +5190,17 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <div v-else-if="!completedRunVisible && !runStripVisible && !sending && (displayedStatus || displayedError)" class="memory-status" :class="{ error: Boolean(displayedError) }">
           <span>{{ displayedError || displayedStatus }}</span>
         </div>
+        <ManjuAutoPanel
+          v-if="desktopOnlyRuntime"
+          :draft="manjuAuto.draft.value"
+          :run="manjuAuto.run.value"
+          :review="manjuAuto.review.value"
+          :error="manjuAuto.error.value"
+          @start="manjuAuto.start"
+          @cancel="manjuAuto.cancelDraft"
+          @stop="manjuAuto.stop"
+          @approve="manjuAuto.approveReview"
+        />
         <div
           class="memory-input-row"
           data-project-drop-target="chat"
@@ -5182,7 +5264,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                   <JcIcon name="folder" /><span>{{ permissionSwitching ? '切换中' : permissionTierLabel() }}</span><JcIcon name="expand_more" />
                 </button>
               </div>
-              <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected }" :aria-pressed="manjuSelected" @click="toggleManjuProduction()"><JcIcon name="movie" /><span>漫剧制作</span></button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected, auto: manjuSelected && manjuAutoMode }" aria-haspopup="menu" :aria-expanded="manjuMenu ? true : undefined" @click="toggleManjuMenu($event)"><JcIcon name="movie" /><span>{{ manjuSelected && manjuAutoMode ? '漫剧·全自动' : '漫剧制作' }}</span><JcIcon name="expand_more" /></button>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" :aria-pressed="shortDramaSelected" @click="toggleShortDramaProduction()"><JcIcon name="edit-note" /><span>短剧改编</span></button>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="auto_stories" /><span>小说创作</span></button>
               <button type="button" data-command-id="skill" :title="skillCommand.description" @click="insertCommand(skillCommand)"><JcIcon name="psychology" /><span>@Skill</span></button>
@@ -5205,6 +5287,25 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button type="button" @click="permissionConfirm = false">取消</button>
             <button type="button" class="primary" @click="confirmFullAccess">启用完全权限</button>
           </div>
+        </div>
+        <div
+          v-if="manjuMenu"
+          class="memory-permission-menu memory-manju-menu"
+          role="menu"
+          :style="{ left: `${manjuMenu.left}px`, bottom: `${manjuMenu.bottom}px` }"
+        >
+          <button type="button" role="menuitemradio" :aria-checked="manjuSelected && !manjuAutoMode" @click="chooseManjuMode('prompt')">
+            <JcIcon :name="manjuSelected && !manjuAutoMode ? 'check_circle' : 'circle'" />
+            <span>提示词模式<small class="memory-permission-note">只写文字与提示词，不产生费用</small></span>
+          </button>
+          <button type="button" role="menuitemradio" :aria-checked="manjuSelected && manjuAutoMode" @click="chooseManjuMode('auto')">
+            <JcIcon :name="manjuSelected && manjuAutoMode ? 'check_circle' : 'circle'" />
+            <span>全自动成片<small class="memory-permission-note">自动生图、生视频并拼接成片，按集计费，开始前确认预算</small></span>
+          </button>
+          <button v-if="manjuSelected" type="button" role="menuitem" @click="chooseManjuMode('off')">
+            <JcIcon name="close" />
+            <span>退出漫剧制作</span>
+          </button>
         </div>
         <div
           v-if="permissionMenu"
@@ -5669,6 +5770,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-strip > .memory-manju-button.active, .memory-command-strip > .memory-short-drama-button.active, .memory-command-strip > .memory-novel-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
+/* 全自动成片会花钱：用与完全权限同一套警示色，一眼区分提示词模式。 */
+.memory-command-strip > .memory-manju-button.auto { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 /* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
    写在 hover 之后，压住 hover 的 olive，红着不动。 */

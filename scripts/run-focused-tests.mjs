@@ -71,6 +71,7 @@ const wave1FocusedTests = [
   'src/runtime/manjuAuto/__tests__/assetScheduler.test.ts',
   'src/runtime/manjuAuto/__tests__/videoScheduler.test.ts',
   'src/runtime/manjuAuto/__tests__/mediaParams.test.ts',
+  'src/runtime/manjuAuto/__tests__/autoRunner.test.ts',
   'src/runtime/memory/__tests__/memoryToolRouting.test.ts',
   'src/runtime/memory/__tests__/memoryToolPolicy.test.ts',
   'src/runtime/memory/__tests__/fileTaskRuntime.test.ts',

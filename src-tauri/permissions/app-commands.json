@@ -116,6 +116,7 @@
           "save_file_picker",
           "skill_material_compile",
           "media_cache_file",
+          "media_concat_videos",
           "document_to_markdown_file",
           "document_path_to_markdown_file",
           "media_select_file",

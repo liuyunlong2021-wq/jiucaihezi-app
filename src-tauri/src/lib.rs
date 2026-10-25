@@ -1897,6 +1897,7 @@ pub fn run() {
             commands::media::media_process_file,
             commands::media::media_transcribe_file,
             commands::media::media_burn_subtitles,
+            commands::media::media_concat_videos,
             commands::plugin::plugin_install_npm,
             commands::plugin::plugin_read_manifest,
             commands::plugin::plugin_read_config,

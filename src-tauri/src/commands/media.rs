@@ -1578,3 +1578,85 @@ pub async fn media_burn_subtitles(
         duration_ms: start.elapsed().as_millis(),
     })
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaConcatVideosInput {
+    pub inputs: Vec<String>,
+    /// 每段计划时长（秒）：视频模型按时长档位向上取整，拼接时裁掉多出来的尾巴。
+    pub durations: Vec<f64>,
+    pub output_path: String,
+}
+
+/// ffmpeg concat demuxer 列表；路径中的单引号按 concat 语法转义。
+pub fn build_concat_list(inputs: &[String], durations: &[f64]) -> Result<String, String> {
+    if inputs.is_empty() || inputs.len() != durations.len() {
+        return Err("拼接片段与时长数量不一致".into());
+    }
+    let mut list = String::new();
+    for (path, duration) in inputs.iter().zip(durations) {
+        if !duration.is_finite() || *duration <= 0.0 {
+            return Err(format!("片段时长无效: {}", duration));
+        }
+        list.push_str(&format!("file '{}'\noutpoint {:.3}\n", path.replace('\'', "'\\''"), duration));
+    }
+    Ok(list)
+}
+
+/// 漫剧全自动成片：按片段顺序无损拼接（-c copy），同一模型同参数出片编码一致。
+#[tauri::command]
+pub async fn media_concat_videos(app: tauri::AppHandle, input: MediaConcatVideosInput) -> Result<String, String> {
+    for path in &input.inputs {
+        if !Path::new(path).is_file() {
+            return Err(format!("片段文件不存在: {}", path));
+        }
+    }
+    let output = PathBuf::from(&input.output_path);
+    if !output.is_absolute() || output.extension().and_then(|ext| ext.to_str()) != Some("mp4") {
+        return Err("成片输出必须是绝对路径的 .mp4 文件".into());
+    }
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建成片目录失败: {}", e))?;
+    }
+    let list_path = std::env::temp_dir().join(format!("jc-concat-{}.txt", uuid::Uuid::new_v4()));
+    std::fs::write(&list_path, build_concat_list(&input.inputs, &input.durations)?)
+        .map_err(|e| format!("写入拼接列表失败: {}", e))?;
+    let result = timeout(
+        Duration::from_secs(900),
+        Command::new(resolve_app_media_binary(&app, "ffmpeg")?)
+            .args(["-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i"])
+            .arg(&list_path)
+            .args(["-c", "copy"])
+            .arg(&output)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    let _ = std::fs::remove_file(&list_path);
+    let output_result = result
+        .map_err(|_| "拼接超时，请稍后重试。".to_string())?
+        .map_err(|e| format!("无法启动 ffmpeg: {}", e))?;
+    if !output_result.status.success() {
+        let detail = String::from_utf8_lossy(&output_result.stderr);
+        return Err(format!("拼接失败：{}", sanitize_media_process_error(detail.trim(), "请检查片段文件后重试。")));
+    }
+    Ok(output.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod concat_tests {
+    use super::build_concat_list;
+
+    #[test]
+    fn concat_list_trims_each_segment_and_escapes_quotes() {
+        let list = build_concat_list(&["/p/a.mp4".into(), "/p/it's.mp4".into()], &[12.5, 13.0]).unwrap();
+        assert_eq!(list, "file '/p/a.mp4'\noutpoint 12.500\nfile '/p/it'\\''s.mp4'\noutpoint 13.000\n");
+    }
+
+    #[test]
+    fn concat_list_rejects_mismatched_or_invalid_durations() {
+        assert!(build_concat_list(&["/a.mp4".into()], &[]).is_err());
+        assert!(build_concat_list(&[], &[]).is_err());
+        assert!(build_concat_list(&["/a.mp4".into()], &[0.0]).is_err());
+    }
+}

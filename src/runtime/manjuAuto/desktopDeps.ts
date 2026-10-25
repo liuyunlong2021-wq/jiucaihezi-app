@@ -1,8 +1,7 @@
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
-import { getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import type { AssetSchedulerDeps, WikiTaskDeps } from './assetScheduler'
-import { buildMediaParams } from './mediaParams'
+import { buildMediaParams, profileFromCapability, profileFromSpec, type MediaParamProfile } from './mediaParams'
 import type { VideoSchedulerDeps } from './videoScheduler'
 
 /** 读写项目 Wiki、经 @影音 同一桥查询任务。 */
@@ -31,18 +30,24 @@ async function submit(owner: string, modelId: string, requestId: string, params:
   return result.taskId
 }
 
-export function createDesktopAssetDeps(owner: string, config: { imageModelId: string; ratio: string }): AssetSchedulerDeps {
+/** 读取模型参数档案：本地登记有 fields，远程动态目录有 parameter_schema。 */
+export async function loadMediaParamProfile(modelId: string): Promise<MediaParamProfile> {
+  const model = await runCreationOperation('get_creation_model', { modelId }) as Record<string, unknown>
+  if (Array.isArray(model.fields)) return profileFromSpec(model as never)
+  if (model.parameter_schema) return profileFromCapability(model as never)
+  throw new Error(`无法读取模型参数：${modelId}`)
+}
+
+export function createDesktopAssetDeps(owner: string, config: { imageModelId: string; ratio: string }, profile: MediaParamProfile): AssetSchedulerDeps {
   return {
     ...wikiTaskDeps(owner),
-    submitImage: ({ requestId, prompt }) =>
-      submit(owner, config.imageModelId, requestId, buildMediaParams(getCreationModelSpec(config.imageModelId), { prompt, ratio: config.ratio })),
+    submitImage: ({ requestId, prompt }) => submit(owner, config.imageModelId, requestId, buildMediaParams(profile, { prompt, ratio: config.ratio })),
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   }
 }
 
-export function createDesktopVideoDeps(owner: string, config: { videoModelId: string; ratio: string }): VideoSchedulerDeps {
-  const params = (input: { prompt: string; images: string[]; durationSeconds: number }) =>
-    buildMediaParams(getCreationModelSpec(config.videoModelId), { ...input, ratio: config.ratio })
+export function createDesktopVideoDeps(owner: string, config: { videoModelId: string; ratio: string }, profile: MediaParamProfile): VideoSchedulerDeps {
+  const params = (input: { prompt: string; images: string[]; durationSeconds: number }) => buildMediaParams(profile, { ...input, ratio: config.ratio })
   return {
     ...wikiTaskDeps(owner),
     checkVideo: input => { params(input) },

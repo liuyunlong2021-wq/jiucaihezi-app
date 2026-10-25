@@ -1920,7 +1920,8 @@ async function runDeepSeekHarnessTurn(
             const result = JSON.parse(text) as { status?: unknown; path?: unknown }
             const path = typeof result.path === 'string' ? result.path : ''
             const safePath = /^(?:wiki|docs\/wiki)\//.test(path)
-              && path.endsWith('.md')
+              // 进度 JSON 也通知：全自动成片在资产阶段保存时就提交生图。
+              && (path.endsWith('.md') || /\/制作流水线\/[^/]+\/第\d+集进度\.json$/.test(path))
               && !path.split('/').some(part => part === '.' || part === '..')
             if ((result.status === 'saved' || result.status === 'saved_with_warnings') && safePath)
               input.onArtifactSaved?.(path)

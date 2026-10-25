@@ -79,7 +79,9 @@ test('character format requests accept existing character text and override ordi
 
 test('the composer retains the production entry without a model selector or model state', () => {
   const source = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
-  assert.match(source, /@click="[^"\n]*toggleManjuProduction\(\)"/)
+  // 2026-10-25：按钮改为弹出模式菜单（提示词模式 / 全自动成片 / 退出），菜单项仍走 toggleManjuProduction。
+  assert.match(source, /class="memory-manju-button"[^>]*@click="toggleManjuMenu\(\$event\)"/)
+  assert.match(source, /function chooseManjuMode[\s\S]*?toggleManjuProduction\(\)/)
   assert.doesNotMatch(source, /memory-manju-model|manjuVideoModel|manjuModelSnapshot|changeManjuVideoModel/)
   for (const file of ['src/services/deepSeekHarness.ts', 'src/services/desktopConversationRuntime.ts']) {
     assert.doesNotMatch(readFileSync(file, 'utf8'), /manjuVideoModel|ManjuVideoModel/)
@@ -146,4 +148,20 @@ test('native Wiki remains independent of all three production Skill selections',
   for (const name of [PROJECT_WIKI, 'wiki-memory']) assert.equal(needsProjectWiki('继续', [name]), true)
   assert.equal(needsProjectWiki('你好', []), false)
   assert.equal(needsProjectWiki('查询项目 Wiki', []), true)
+})
+
+test('full-auto mode is opt-in from the manju menu and only spends after the confirmation card', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  const panel = readFileSync('src/components/memory/ManjuAutoPanel.vue', 'utf8')
+  const controller = readFileSync('src/composables/useManjuAuto.ts', 'utf8')
+  assert.match(workbench, /chooseManjuMode\('prompt'\)[\s\S]*提示词模式[\s\S]*chooseManjuMode\('auto'\)[\s\S]*全自动成片/)
+  assert.match(workbench, /const manjuAutoMode = ref\(false\)/, '默认提示词模式')
+  assert.match(workbench, /autoIntake \? `\$\{AUTO_INTAKE_PREFIX\}/, '全自动模式下用户剧本先入稿拆集')
+  assert.match(workbench, /path\.endsWith\('\.json'\)[\s\S]*manjuAuto\.handleArtifactSaved\(path\)/)
+  assert.match(workbench, /@start="manjuAuto\.start"/)
+  // 付费调用只在 start() 里装配；prepare() 只读目录与 Wiki。
+  const prepare = controller.slice(controller.indexOf('async function prepare'), controller.indexOf('async function start'))
+  assert.doesNotMatch(prepare, /submit|runAuto/)
+  assert.match(panel, /emit\('start'/)
+  assert.match(panel, /第 1 集资产出齐后暂停审图/)
 })
