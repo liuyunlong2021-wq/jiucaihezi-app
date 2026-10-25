@@ -3,7 +3,13 @@ import { computed, ref } from 'vue'
 import ChatScrollNav from '@/components/chat/ChatScrollNav.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
-import type { MobileRemoteApprovalDecision, MobileRemoteTurn, MobileRemoteView } from '@/services/mobileRemoteClient'
+import {
+  mobileRemotePendingTurn,
+  mobileVisibleTurns,
+  type MobileRemoteApprovalDecision,
+  type MobileRemoteTurn,
+  type MobileRemoteView,
+} from '@/services/mobileRemoteClient'
 
 // 单会话聊天页：只读投影 + 纯文字发送 + 停止 + 审批（合同 §7.1、§12）。
 const props = defineProps<{
@@ -23,14 +29,8 @@ const draft = ref('')
 
 const isRunning = computed(() => props.view.run.state === 'running')
 const approval = computed(() => props.view.run.approval)
-const turns = computed(() => props.view.turns)
-const remotePendingTurn = computed(() => {
-  const turn = props.view.pendingTurn
-  if (!turn || props.view.turns.some(item => item.id === turn.id)) return null
-  if (props.view.pendingMessages.some(message => message.runId && message.runId === props.view.run.runId
-    || message.content === turn.content && message.state !== 'failed')) return null
-  return turn
-})
+const turns = computed(() => mobileVisibleTurns(props.view))
+const remotePendingTurn = computed(() => mobileRemotePendingTurn(props.view))
 
 function kindOf(turn: MobileRemoteTurn) {
   if (turn.role === 'user') return 'user'

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MobileRemoteClient, type MobileRemoteTransport } from '@/services/mobileRemoteClient'
+import {
+  MobileRemoteClient, mobileRemotePendingTurn, mobileVisibleTurns,
+  type MobileRemoteTransport, type MobileRemoteView,
+} from '@/services/mobileRemoteClient'
 
 const context = {
   projectName: '项目 A', conversationTitle: '对话 A', conversationId: 'a', sessionId: 'jc-v1-a',
@@ -99,6 +102,53 @@ test('纯工具轮即使没有助手正文，也投影临时用户轮次与执�
   assert.equal(client.view.pendingTurn, null)
   assert.equal(client.view.run.steps[0]?.state, 'done')
   client.disconnect()
+})
+
+function viewWith(patch: Partial<MobileRemoteView>): MobileRemoteView {
+  return {
+    state: 'connected', context, turns: [], pendingTurn: null, streamingText: '',
+    run: { state: 'running', steps: [], approval: null }, lastSeq: 0, pendingMessages: [], ...patch,
+  }
+}
+
+test('临时用户轮次保留发送时间，供手机按时间与官方历史去重', async () => {
+  const { client } = connectedClient({
+    'session.attach': () => ({ sessionId: context.sessionId, gatewayEpoch: 'epoch-1', seq: 0,
+      snapshot: { ...snapshot, pendingTurn: { id: 'turn-tmp', role: 'user', content: '现在什么进度',
+        createdAt: '2026-10-25T13:35:00.000Z' } } }),
+  })
+  await client.connect()
+  assert.equal(client.view.pendingTurn?.createdAt, '2026-10-25T13:35:00.000Z')
+  client.disconnect()
+})
+
+test('官方历史已有同内容且不早于发送时间的用户轮次时，不再重复显示「电脑正在处理」', () => {
+  const pendingTurn = { id: 'turn-tmp', role: 'user', content: '现在什么进度', createdAt: '2026-10-25T13:35:00.000Z' }
+  const official = { id: 'dsh-user-9', role: 'user', content: '现在什么进度', createdAt: '2026-10-25T13:35:01.000Z' }
+  assert.equal(mobileRemotePendingTurn(viewWith({ turns: [official], pendingTurn })), null)
+})
+
+test('更早发过的同一句话不吞掉这次的「电脑正在处理」', () => {
+  const pendingTurn = { id: 'turn-tmp', role: 'user', content: '现在什么进度', createdAt: '2026-10-25T13:35:00.000Z' }
+  const earlier = { id: 'dsh-user-3', role: 'user', content: '现在什么进度', createdAt: '2026-10-25T12:00:00.000Z' }
+  assert.equal(mobileRemotePendingTurn(viewWith({ turns: [earlier], pendingTurn }))?.id, 'turn-tmp')
+})
+
+test('手机自己发的待发送气泡仍然挡住同一条临时轮次', () => {
+  const pendingTurn = { id: 'turn-tmp', role: 'user', content: '继续' }
+  const view = viewWith({ pendingTurn, run: { runId: 'run-1', state: 'running', steps: [], approval: null },
+    pendingMessages: [{ commandId: 'c1', content: '继续', state: 'accepted', runId: 'run-1', existingTurnIds: [] }] })
+  assert.equal(mobileRemotePendingTurn(view), null)
+})
+
+test('正文为空的轮次（只有工具过程）不画成空白气泡', () => {
+  const turns = [
+    { id: 'u1', role: 'user', content: '开始' },
+    { id: 'a1', role: 'assistant', content: '' },
+    { id: 'a2', role: 'assistant', content: '  \n ' },
+    { id: 'a3', role: 'assistant', content: '完成了' },
+  ]
+  assert.deepEqual(mobileVisibleTurns(viewWith({ turns })).map(turn => turn.id), ['u1', 'a3'])
 })
 
 test('同一对话重连保留未确认命令，不把它误判为新草稿', async () => {

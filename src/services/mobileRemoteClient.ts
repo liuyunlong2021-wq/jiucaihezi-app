@@ -11,7 +11,8 @@ export type MobileRemoteTurn = {
   id: string
   role: string
   content: string
-  createdAt?: number
+  /** Desktop 发来的是 ISO 字符串；旧快照里可能是毫秒数。 */
+  createdAt?: number | string
 }
 
 export type MobileRemoteStep = {
@@ -467,11 +468,37 @@ export class MobileRemoteClient {
   }
 }
 
+/** 只有工具过程、没有正文的轮次不画气泡；过程已在底部步骤里显示。 */
+export function mobileVisibleTurns(view: MobileRemoteView) {
+  return view.turns.filter(turn => turn.content.trim())
+}
+
+/**
+ * 电脑正在处理、但官方历史和手机自己的待发送气泡都还没有的那条用户轮次。
+ * 官方会话里的同一轮另有 id，按 Desktop 工作台同一规则认：内容相同且不早于发送时间。
+ */
+export function mobileRemotePendingTurn(view: MobileRemoteView) {
+  const turn = view.pendingTurn
+  if (!turn || view.turns.some(item => item.id === turn.id)) return null
+  const sentAt = turnTime(turn)
+  if (Number.isFinite(sentAt) && view.turns.some(item => item.role === 'user'
+    && item.content === turn.content && turnTime(item) >= sentAt)) return null
+  if (view.pendingMessages.some(message => message.runId && message.runId === view.run.runId
+    || message.content === turn.content && message.state !== 'failed')) return null
+  return turn
+}
+
+function turnTime(turn: MobileRemoteTurn) {
+  return typeof turn.createdAt === 'number' ? turn.createdAt : Date.parse(turn.createdAt ?? '')
+}
+
 function parsePendingTurn(value: unknown): MobileRemoteTurn | null {
   if (!value || typeof value !== 'object') return null
   const turn = value as Partial<MobileRemoteTurn>
   return typeof turn.id === 'string' && turn.role === 'user' && typeof turn.content === 'string'
-    ? { id: turn.id, role: 'user', content: turn.content } : null
+    ? { id: turn.id, role: 'user', content: turn.content,
+      ...typeof turn.createdAt === 'string' || typeof turn.createdAt === 'number' ? { createdAt: turn.createdAt } : {} }
+    : null
 }
 
 function parseContext(value: unknown): MobileRemoteContext {

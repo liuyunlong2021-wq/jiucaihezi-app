@@ -33,7 +33,8 @@ test('纯工具轮结束后仍显示执行步骤，不能只在运行中显示',
 test('桌面发起的临时轮次显示在手机且不重复手机自己的 pending', () => {
   const session = source('src/mobile/MobileSessionView.vue')
   assert.match(session, /v-if="remotePendingTurn"/)
-  assert.match(session, /props\.view\.pendingMessages\.some\(message => message\.runId && message\.runId === props\.view\.run\.runId/)
+  assert.match(session, /mobileRemotePendingTurn\(props\.view\)/)
+  assert.match(session, /mobileVisibleTurns\(props\.view\)/)
 })
 
 test('已连电脑但没有当前对话时，手机明确提示等待而非引导重复配对', () => {
