@@ -20,7 +20,8 @@
         <select v-model="videoResolution"><option v-for="resolution in videoModel.resolutions" :key="resolution" :value="resolution">{{ resolution }}{{ priceForResolution(videoModel.price, resolution) ? ` · ¥${priceForResolution(videoModel.price, resolution)}` : '' }}</option></select>
       </label>
       <label class="manju-auto-row"><span>视频路线</span>
-        <select v-model="route" :disabled="Boolean(draft.saved)" :title="draft.saved ? '续做沿用原路线；换路线请点「开始全自动」重新开始' : ''">
+        <!-- 不锁定：开始新运行可换路线；「从第 N 集续做」由 resumeAutoRun 强制沿用原路线。 -->
+        <select v-model="route" :title="draft.saved ? `续做沿用原路线（${draft.saved.config.videoModel}）；换路线请点「开始全自动」` : ''">
           <option value="Seedance">Seedance 提示词</option>
           <option value="H3">MiniMax H3 提示词</option>
         </select>

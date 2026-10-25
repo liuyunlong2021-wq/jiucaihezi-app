@@ -205,6 +205,8 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // H3 路线：确认卡选路线，模型限制（秒数、参考图张数）写进配置与每集指令（2026-10-25）。
   assert.match(panel, /<option value="H3">MiniMax H3 提示词<\/option>/)
   assert.match(panel, /limits: limits\.value/)
+  // 回归（2026-10-25 实测）：有未完成运行时路线下拉被锁，无法改用 H3 重新开始。
+  assert.doesNotMatch(panel, /v-model="route" :disabled/)
   assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config\)/)
   assert.match(controller, /checkpointPath\(wikiRoot, state\.config\.videoModel, episode\)/)
   // 每次运行独立停止开关 + runId 落盘守卫：旧运行（含热更新遗留）发现记录属于新运行就退出（2026-10-25 实测两个运行互相覆盖）。
