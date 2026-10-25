@@ -40,6 +40,8 @@ export function useMobileRemote() {
   const status = ref<MobileRemoteStatus | null>(null)
   const error = ref('')
   const busy = ref(false)
+  /** 用户点了「断开」：不再自动连回去，直到用户自己点连接或重新配对。 */
+  let userDisconnected = false
 
   const stopWatching = client.onChange(next => { view.value = next })
 
@@ -49,7 +51,7 @@ export function useMobileRemote() {
     void mobileRemoteStatus().then(async next => {
       status.value = next
       if (next.connected) error.value = ''
-      if (shouldAutoReconnect(next)) await reconnect()
+      if (!userDisconnected && shouldAutoReconnect(next)) await reconnect()
       else if (next.connected && view.value.state === 'connected') await client.refresh()
       else if (next.connected) await client.connect()
     }).catch(cause => { error.value = describeRemoteError(cause) })
@@ -75,13 +77,16 @@ export function useMobileRemote() {
     }
   }
 
+  // 打开 App、断线回调都走这里：配对过又没连着就直接连，不用用户每次手点。
   const refreshStatus = () => run(async () => {
     status.value = await mobileRemoteStatus()
+    if (!userDisconnected && shouldAutoReconnect(status.value)) status.value = await connectMobileRemote()
     if (status.value.connected && view.value.state !== 'connected') await client.connect()
   })
 
   /** 用 Desktop 的一次性 offer 配对，然后按 §10.4 建立当前 Session。 */
   const pairWithOfferText = async (text: string) => {
+    userDisconnected = false
     const offer = parsePairingOffer(text)
     status.value = await pairMobileRemote(offer, 'iPhone')
     status.value = await connectMobileRemote()
@@ -111,12 +116,14 @@ export function useMobileRemote() {
   /** 相机不可用时的兜底：粘贴电脑上复制的同一份 offer（内容与二维码完全一致）。 */
   const pairByText = (text: string) => run(() => pairWithOfferText(text))
 
-  const reconnect = (address?: string) => run(async () => {
-    status.value = await connectMobileRemote(address)
+  const reconnect = () => run(async () => {
+    userDisconnected = false
+    status.value = await connectMobileRemote()
     await client.connect()
   })
 
   const disconnect = () => run(async () => {
+    userDisconnected = true
     status.value = await disconnectMobileRemote()
     client.disconnect()
   })

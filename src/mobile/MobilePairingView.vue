@@ -13,12 +13,11 @@ defineProps<{
 const emit = defineEmits<{
   scan: []
   pair: [text: string]
-  connect: [address?: string]
+  connect: []
   disconnect: []
 }>()
 
 const pasted = ref('')
-const manualAddress = ref('')
 
 function submitPasted() {
   const text = pasted.value.trim()
@@ -32,6 +31,7 @@ function submitPasted() {
       <JcIcon name="smartphone_outline" />
       <h1>韭菜盒子遥控</h1>
       <p v-if="status?.connected">已与电脑配对；正在读取电脑上当前打开的对话。</p>
+      <p v-else-if="status?.paired">打开就会自动连接上次配对的电脑；在家、在外都能连。</p>
       <p v-else>在电脑上打开「设置 → 手机控制器 → 开启」，再扫描它显示的二维码。</p>
     </header>
 
@@ -43,20 +43,26 @@ function submitPasted() {
       <span v-else>还没有和电脑配对</span>
     </p>
 
-    <button v-if="!status?.connected" class="primary" type="button" :disabled="busy" @click="$emit('scan')">
-      <JcIcon name="qr_code_scanner" />
-      <span>{{ status?.paired ? '重新扫码配对' : '扫描二维码连接' }}</span>
-    </button>
+    <!-- 配对过就以「连接」为主：电脑会报上全部地址（局域网、Tailscale、云端中继），手机依次自动尝试。 -->
     <button
       v-if="status?.paired && (!status?.connected || !waitingForConversation)"
       type="button"
+      :class="{ primary: !status?.connected }"
       :disabled="busy"
       @click="$emit('connect')"
     >
       <JcIcon name="sync" />
       <span>{{ status?.connected ? '重新进入当前对话' : '连接上次配对的电脑' }}</span>
     </button>
-    <button v-if="status?.paired" type="button" :disabled="busy" @click="$emit('disconnect')">
+    <button v-if="!status?.paired" class="primary" type="button" :disabled="busy" @click="$emit('scan')">
+      <JcIcon name="qr_code_scanner" />
+      <span>扫描二维码连接</span>
+    </button>
+    <button v-else-if="!status?.connected" type="button" :disabled="busy" @click="$emit('scan')">
+      <JcIcon name="qr_code_scanner" />
+      <span>重新扫码配对</span>
+    </button>
+    <button v-if="status?.connected" type="button" :disabled="busy" @click="$emit('disconnect')">
       <JcIcon name="link_off" />
       <span>断开</span>
     </button>
@@ -67,25 +73,6 @@ function submitPasted() {
     </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-
-    <details v-if="status?.paired && !status?.connected" class="fallback">
-      <summary>编辑电脑地址（在外面用 Tailscale 时）</summary>
-      <p>填电脑在 Tailscale 里的地址（100. 开头）或主机名；不写端口就用配对时的端口。上次连上的地址：{{ status?.address === 'relay' ? '云端中继' : status?.address || '无' }}</p>
-      <input
-        v-model="manualAddress"
-        type="text"
-        inputmode="url"
-        autocapitalize="off"
-        autocomplete="off"
-        autocorrect="off"
-        spellcheck="false"
-        placeholder="例如 100.101.1.2 或 my-mac.tail1234.ts.net"
-      />
-      <button class="wide" type="button" :disabled="busy || !manualAddress.trim()" @click="$emit('connect', manualAddress.trim())">
-        <JcIcon name="lan" />
-        <span>用这个地址连接</span>
-      </button>
-    </details>
 
     <details v-if="!status?.connected" class="fallback">
       <summary>相机扫不出来？用粘贴配对</summary>
@@ -125,7 +112,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .fallback { display: grid; gap: 8px; }
 .fallback summary { color: var(--ink3); font-size: 13px; cursor: pointer; }
 .fallback p { margin: 0; color: var(--ink3); font-size: 12px; line-height: 1.5; }
-.fallback input, .fallback textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 13px; resize: vertical; }
+.fallback textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 13px; resize: vertical; }
 /* 兜底按钮也按主按钮的尺寸来，之前贴着图标变成一个方块很难看。 */
 .fallback .wide { width: 100%; min-height: 48px; font-size: 14px; }
 </style>

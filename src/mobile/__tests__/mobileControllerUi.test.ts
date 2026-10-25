@@ -44,7 +44,8 @@ test('已连电脑但没有当前对话时，手机明确提示等待而非引�
   assert.match(pairing, /等待电脑打开对话/)
   // 等待时要告诉用户该去电脑上做什么，而不是只说在等。
   assert.match(pairing, /请在电脑上打开一个对话/)
-  assert.match(pairing, /v-if="!status\?\.connected" class="primary"/)
+  // 没配对时扫码是主按钮；配对过就把「连接」作为主按钮（见下方配对页精简测试）。
+  assert.match(pairing, /v-if="!status\?\.paired" class="primary"/)
 })
 
 test('传输已连接但会话尚未进入时提供重试，不再诱导扫码或粘贴配对', () => {
@@ -135,12 +136,19 @@ test('M2：聊天页能打开对话列表；列表先列项目再列对话，可
   assert.match(list, /电脑正在运行/)
 })
 
-test('M3a：配对过的手机可手填电脑地址（Tailscale 地址或主机名）后连接', () => {
+test('配对页精简：不再手填电脑地址，配对过就以「连接」为主按钮，没连上不显示断开', () => {
   const pairing = source('src/mobile/MobilePairingView.vue')
+  // 电脑会报上局域网、Tailscale 与云端中继全部地址，手机依次自动尝试，不需要手填。
+  assert.doesNotMatch(pairing, /编辑电脑地址|manualAddress/)
+  assert.match(pairing, /:class="\{ primary: !status\?\.connected \}"[\s\S]{0,80}@click="\$emit\('connect'\)"/)
+  assert.ok(pairing.indexOf("$emit('connect')") < pairing.indexOf("$emit('scan')"), '连接排在扫码前面')
+  assert.match(pairing, /v-if="status\?\.connected" type="button"[^>]*@click="\$emit\('disconnect'\)"/)
+  assert.match(pairing, /重新扫码配对/)
+})
+
+test('打开 App 时已配对就自动连电脑，不用每次手点', () => {
   const remote = source('src/mobile/useMobileRemote.ts')
-  assert.match(pairing, /编辑电脑地址/)
-  assert.match(pairing, /\$emit\('connect', manualAddress\.trim\(\)\)/)
-  assert.match(remote, /const reconnect = \(address\?: string\) => run\(async \(\) => \{\n\s+status\.value = await connectMobileRemote\(address\)/)
+  assert.match(remote, /const refreshStatus = \(\) => run\(async \(\) => \{\n\s+status\.value = await mobileRemoteStatus\(\)\n\s+if \(!userDisconnected && shouldAutoReconnect\(status\.value\)\) status\.value = await connectMobileRemote\(\)/)
 })
 
 test('M3b：经中继连上时状态写「云端中继」，不显示内部候选名', () => {
@@ -169,4 +177,12 @@ test('看成果：聊天页有「成果」入口，浏览器能看文字、图�
   assert.match(browser, /<video [^>]*controls[^>]*playsinline/)
   assert.match(browser, /renderStreamingText\(/)
   assert.match(browser, /URL\.revokeObjectURL/)
+})
+
+test('用户主动断开后不自动连回去，直到用户再点连接或重新配对', () => {
+  const remote = source('src/mobile/useMobileRemote.ts')
+  assert.match(remote, /if \(!userDisconnected && shouldAutoReconnect\(status\.value\)\)/)
+  assert.match(remote, /const disconnect = \(\) => run\(async \(\) => \{\n\s+userDisconnected = true/)
+  assert.match(remote, /const reconnect = \(\) => run\(async \(\) => \{\n\s+userDisconnected = false/)
+  assert.match(remote, /const pairWithOfferText = async \(text: string\) => \{\n\s+userDisconnected = false/)
 })
