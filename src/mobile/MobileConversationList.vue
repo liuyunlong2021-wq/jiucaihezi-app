@@ -7,6 +7,8 @@ import type {
 } from '@/services/mobileRemoteClient'
 
 // M2 对话列表：先列项目，再列这个项目里的对话；选中后手机停在那个对话上。
+const MODE_LABELS: Record<string, string> = { manju: '漫剧', 'short-drama': '短剧', novel: '小说' }
+
 const props = defineProps<{
   following: boolean
   currentSessionId: string
@@ -83,6 +85,7 @@ onMounted(() => { void load() })
           @click="open(project, session)"
         >
           <span class="title">{{ session.title || '未命名对话' }}</span>
+          <small v-if="session.mode && session.mode !== 'none'" class="mode">{{ MODE_LABELS[session.mode] }}</small>
           <small v-if="session.running" class="running">电脑正在运行</small>
           <small v-else-if="session.current">电脑上正在看</small>
         </button>
@@ -104,6 +107,7 @@ onMounted(() => { void load() })
 .session .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session small { color: var(--ink3); font-size: 11px; }
 .session small.running { color: var(--olive); }
+.session small.mode { padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; }
 .hint { margin: 0; color: var(--ink3); font-size: 13px; text-align: center; }
 .hint.error { color: var(--danger, #c0392b); }
 </style>

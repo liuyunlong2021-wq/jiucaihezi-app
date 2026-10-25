@@ -833,3 +833,29 @@ test('M2：切回「跟随电脑」重新以电脑当前对话为准', async () 
   assert.equal(client.view.following, true)
   client.disconnect()
 })
+
+// ---- 手机选模式 ----
+
+test('模式：手机读到对话当前模式，切换时把模式发给电脑并以电脑回执为准', async () => {
+  const { client, calls } = connectedClient({
+    'session.attach': payload => ({ sessionId: payload.sessionId, gatewayEpoch: 'epoch-1', seq: 0,
+      snapshot: { ...snapshot, mode: 'manju' } }),
+    'session.mode.set': payload => ({ mode: payload.mode }),
+  })
+  await client.connect()
+  assert.equal(client.view.mode, 'manju')
+  await client.setMode('novel')
+  assert.deepEqual(calls.find(call => call.type === 'session.mode.set')?.payload, { sessionId: context.sessionId, mode: 'novel' })
+  assert.equal(client.view.mode, 'novel')
+  await assert.rejects(() => client.setMode('poetry' as never), /MODE_INVALID/)
+  client.disconnect()
+})
+
+test('模式：电脑推送的运行事件带模式时同步，旧电脑不带模式时显示为未知而不是普通对话', async () => {
+  const { client, emit } = connectedClient()
+  await client.connect()
+  assert.equal(client.view.mode, null, '旧电脑没报模式')
+  emit(sessionEvent(1, { mode: 'short-drama' }))
+  assert.equal(client.view.mode, 'short-drama')
+  client.disconnect()
+})

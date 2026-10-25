@@ -642,7 +642,9 @@ test('conversation lifecycle restores the latest Skill selection and clears it f
   assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel, catalogEntry?.shortDrama)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
-  assert.ok(workbench.includes('if (shortDramaPreference?.enabled) {\n    selectedSkillNames.value = restoreShortDramaSelection(names || [], shortDramaPreference).filter(name => isProductionSelection(name) || available.has(name))'))
+  // 恢复规则在共用模块里（手机后台发送也用它），工作台只负责按已安装 Skill 过滤。
+  assert.ok(source('src/runtime/memory/productionSelection.ts').includes('if (shortDramaPreference?.enabled) return restoreShortDramaSelection(names, shortDramaPreference)'))
+  assert.ok(workbench.includes('.filter(name => isProductionSelection(name) || available.has(name))'))
   assert.ok(workbench.includes("createHarnessConversationCatalogEntry(owner, '新对话')"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
@@ -2112,8 +2114,10 @@ test('editing a turn restores the Skill it was sent with and keeps its reference
   assert.match(cancelEdit, /restoreComposerSkills\(latestUserTurnToolNames\(/)
   assert.match(workbench, /async function restoreComposerSkills\(/)
   // 恢复要过滤掉已卸载的 Skill：坏引用会污染整段会话的 Skill 加载。
-  assert.match(workbench, /restoreManjuSelection\(names \|\| \[\], manjuPreference\)/)
-  assert.match(workbench, /restoreNovelSelection\(/)
+  assert.match(workbench, /restoreProductionSelection\(names, manjuPreference, novelPreference, shortDramaPreference\)/)
+  const selection = source('src/runtime/memory/productionSelection.ts')
+  assert.match(selection, /restoreManjuSelection\(names, manjuPreference\)/)
+  assert.match(selection, /restoreNovelSelection\(/)
   // 引用文件已经跨轮保留，编辑时不该再把它清空。
   assert.doesNotMatch(editTurn, /referencedFiles\.value = \[\]/)
   assert.doesNotMatch(cancelEdit, /referencedFiles\.value = \[\]/)
@@ -2411,12 +2415,12 @@ test('ordinary same-name Skill selections retain Office and MCP chips', () => {
 
 test('explicit ordinary preferences restore literal Skills while old preferences still migrate route aliases', async () => {
   const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
-  const [{ restoreManjuSelection }, { restoreNovelSelection }, { restoreShortDramaSelection }, { nativeWikiSelection }, { isProductionSelection }] = await Promise.all([
-    import('@/runtime/memory/manjuProduction'), import('@/runtime/memory/novelProduction'), import('@/runtime/memory/shortDramaProduction'), import('@/runtime/memory/projectWiki'), import('@/runtime/memory/productionSkills'),
+  const [{ restoreProductionSelection }, { isProductionSelection }] = await Promise.all([
+    import('@/runtime/memory/productionSelection'), import('@/runtime/memory/productionSkills'),
   ])
   const text = source('src/components/memory/MemoryWorkbench.vue')
   const body = text.slice(text.indexOf('async function restoreComposerSkills('), text.indexOf('const mentionOpen =', text.indexOf('async function restoreComposerSkills(')))
-  const deps = { availableSkillNamesForComposer: async () => new Set(['jc-novel', 'jc-duanju', 'jc-seedance']), selectedSkillNames: ref<string[]>([]), nativeWikiSelection, isProductionSelection, restoreManjuSelection, restoreNovelSelection, restoreShortDramaSelection, SHORT_DRAMA_MODE: 'production:short-drama' }
+  const deps = { availableSkillNamesForComposer: async () => new Set(['jc-novel', 'jc-duanju', 'jc-seedance']), selectedSkillNames: ref<string[]>([]), isProductionSelection, restoreProductionSelection }
   const restore = new Function(...Object.keys(deps), transformSync(body, { loader: 'ts' }).code + ';return restoreComposerSkills')(...Object.values(deps))
   for (const name of ['jc-novel', 'jc-duanju', 'jc-seedance']) {
     await restore([name], { enabled: false }, { enabled: false }, { enabled: false })

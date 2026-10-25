@@ -21,6 +21,8 @@ export type DesktopRemoteSessionSummary = {
   updatedAt: string
   current: boolean
   running: boolean
+  /** 创作模式：manju / short-drama / novel / none。 */
+  mode: string
 }
 
 type DesktopRemoteHostDependencies = {
@@ -30,6 +32,7 @@ type DesktopRemoteHostDependencies = {
   listProjects?: () => Promise<DesktopRemoteProject[]>
   listSessions?: (projectId: string) => Promise<DesktopRemoteSessionSummary[]>
   createSession?: (projectId: string) => Promise<DesktopRemoteContext>
+  setMode?: (sessionId: string, mode: string) => Promise<{ mode: string }>
   readSession: (sessionId: string) => Promise<unknown>
   sendMessage: (text: string, sessionId: string) => Promise<{ runId: string } | void>
   stopRun: (sessionId: string) => Promise<string>
@@ -65,6 +68,12 @@ export class DesktopRemoteHost {
   async createSession(projectId: string) {
     if (!this.dependencies.createSession) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
     return await this.dependencies.createSession(projectId)
+  }
+
+  async setMode(sessionId: string, mode: string) {
+    this.assertKnownSession(sessionId)
+    if (!this.dependencies.setMode) throw new RemoteProtocolError('MODE_INVALID')
+    return await this.dependencies.setMode(sessionId, mode)
   }
 
   async readSession(sessionId: string) {

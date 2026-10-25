@@ -7,6 +7,7 @@ import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from '@/services/
 import {
   desktopConversationContext,
   desktopConversationRuns,
+  desktopRemoteModeChanged,
   desktopRemoteSyncError,
   desktopRemoteOfficialHistoryReady,
   createDesktopConversationHost,
@@ -675,4 +676,115 @@ test('M2：后台对话的运行进度推给订阅它的手机，不夹带历史
     m2Cleanup()
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
+})
+
+// ---- 手机选模式：漫剧 / 短剧 / 小说 ----
+
+/** 假 DSH 会话目录：只记下 preferences 写入，并像 DSH 一样把它合进条目。 */
+async function modeCatalog(entries: ReturnType<typeof m2Entry>[]) {
+  const written: Array<Record<string, unknown>> = []
+  let current = entries.map(entry => ({ ...entry }))
+  await refreshHarnessConversationCatalog({ cwd: m2Owner } as never, async (_input, params) => {
+    if (params.action === 'preferences') {
+      written.push(params)
+      current = current.map(entry => entry.conversationId === params.conversationId
+        ? { ...entry, ...(params.preferences as object) } : entry)
+    }
+    return { entries: current, hiddenIds: [], warnings: [] }
+  })
+  return written
+}
+
+async function sendFrom(sessionId: string, entries: ReturnType<typeof m2Entry>[]) {
+  const skills: string[][] = []
+  setDesktopConversationSelection(m2Selection())
+  await modeCatalog(entries)
+  const host = createDesktopConversationHost(async (_run, selected) => {
+    skills.push(selected.skillNames || [])
+    return await new Promise<string>(() => undefined)
+  })
+  const projects = await __desktopRemoteBridgeForTests.dispatch(host, m2Request('project.list')) as {
+    projects: Array<{ projectId: string }>
+  }
+  const listed = await __desktopRemoteBridgeForTests.dispatch(host,
+    m2Request('session.list', { projectId: projects.projects[0]!.projectId })) as {
+    sessions: Array<{ sessionId: string; mode: string }>
+  }
+  await host.sendMessage(sessionId, '继续')
+  return { host, skills, listed }
+}
+
+test('模式-1：后台对话按电脑记住的模式执行——漫剧、短剧、小说各走自己的 Skill', async () => {
+  for (const [preference, expected] of [
+    [{ manju: { enabled: true } }, 'production:manju'],
+    [{ shortDrama: { enabled: true } }, 'production:short-drama'],
+    [{ novel: { enabled: true } }, 'production:novel'],
+  ] as const) {
+    try {
+      const b = { ...m2Entry('m2-b', '对话 B', '2026-10-25T02:00:00.000Z'), ...preference }
+      const { skills, listed } = await sendFrom('jc-v1-m2-b', [m2Entry('m2-a', '对话 A', '2026-10-25T01:00:00.000Z'), b])
+      assert.ok(skills[0]?.includes(expected), `${expected} 应当带进后台执行：${skills[0]}`)
+      assert.equal(listed.sessions.find(item => item.sessionId === 'jc-v1-m2-b')?.mode,
+        expected.replace('production:', ''), '对话列表告诉手机这个对话的模式')
+    } finally { m2Cleanup() }
+  }
+})
+
+test('模式-2：电脑上关掉模式的对话，后台也按普通对话执行', async () => {
+  try {
+    const b = { ...m2Entry('m2-b', '对话 B', '2026-10-25T02:00:00.000Z'),
+      manju: { enabled: false }, novel: { enabled: false }, shortDrama: { enabled: false } }
+    const { skills, listed } = await sendFrom('jc-v1-m2-b', [m2Entry('m2-a', '对话 A', '2026-10-25T01:00:00.000Z'), b])
+    assert.deepEqual(skills[0], [])
+    assert.equal(listed.sessions.find(item => item.sessionId === 'jc-v1-m2-b')?.mode, 'none')
+  } finally { m2Cleanup() }
+})
+
+test('模式-3：手机给后台对话设模式——写进电脑的对话偏好，下一句就按新模式执行', async () => {
+  try {
+    const entries = [m2Entry('m2-a', '对话 A', '2026-10-25T01:00:00.000Z'), m2Entry('m2-b', '对话 B', '2026-10-25T02:00:00.000Z')]
+    setDesktopConversationSelection(m2Selection())
+    const written = await modeCatalog(entries)
+    const skills: string[][] = []
+    const host = createDesktopConversationHost(async (_run, selected) => {
+      skills.push(selected.skillNames || [])
+      return await new Promise<string>(() => undefined)
+    })
+    const projects = await __desktopRemoteBridgeForTests.dispatch(host, m2Request('project.list')) as { projects: Array<{ projectId: string }> }
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    assert.deepEqual(await __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.mode.set', { sessionId: 'jc-v1-m2-b', mode: 'novel' })), { mode: 'novel' })
+    const preferences = written[0]?.preferences as Record<string, { enabled?: boolean }>
+    assert.deepEqual([preferences.manju?.enabled, preferences.novel?.enabled, preferences.shortDrama?.enabled], [false, true, false])
+    await host.sendMessage('jc-v1-m2-b', '写第一章')
+    assert.ok(skills[0]?.includes('production:novel'))
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.mode.set', { sessionId: 'jc-v1-m2-b', mode: 'poetry' })), /MODE_INVALID/)
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.mode.set', { sessionId: 'jc-v1-unknown', mode: 'novel' })), /SESSION_NOT_FOUND/)
+  } finally { m2Cleanup() }
+})
+
+test('模式-4：手机给电脑当前对话设模式，电脑输入框同步切换；正在运行时不许切', async () => {
+  try {
+    setDesktopConversationSelection(m2Selection())
+    await modeCatalog([m2Entry('m2-a', '对话 A', '2026-10-25T01:00:00.000Z')])
+    const host = createDesktopConversationHost(async () => await new Promise<string>(() => undefined))
+    const before = desktopRemoteModeChanged.value
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.mode.set', { sessionId: 'jc-v1-m2-a', mode: 'short-drama' }))
+    assert.notDeepEqual(desktopRemoteModeChanged.value, before, '通知工作台按新偏好恢复输入框里的模式')
+    assert.equal(desktopRemoteModeChanged.value?.conversationId, 'm2-a')
+    const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+    assert.match(workbench, /watch\(desktopRemoteModeChanged,/)
+    await host.sendMessage('jc-v1-m2-a', '跑起来')
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.mode.set', { sessionId: 'jc-v1-m2-a', mode: 'manju' })), /SESSION_BUSY/)
+  } finally { m2Cleanup() }
+})
+
+test('模式-5：电脑打开对话与手机后台发送用同一条模式恢复规则', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  const runtime = readFileSync('src/services/desktopConversationRuntime.ts', 'utf8')
+  assert.match(workbench, /restoreProductionSelection\(/)
+  assert.match(runtime, /restoreProductionSelection\(/)
 })

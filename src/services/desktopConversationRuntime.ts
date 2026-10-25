@@ -1,4 +1,6 @@
-import { productionRoute, productionMode } from '@/runtime/memory/productionSkills'
+import { isProductionSelection, productionRoute, productionMode, type ProductionRoute } from '@/runtime/memory/productionSkills'
+import { restoreProductionSelection } from '@/runtime/memory/productionSelection'
+import { WIKI_MEMORY_SKILL } from '@/runtime/memory/manjuProduction'
 import { needsProjectWiki } from '@/runtime/memory/projectWiki'
 import { reactive, ref, shallowRef, watch } from 'vue'
 import type { DirectRunMetrics } from '@/runtime/direct/directTypes'
@@ -7,6 +9,7 @@ import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import {
   createHarnessConversationCatalogEntry,
   listHarnessConversationCatalog,
+  updateHarnessConversationPreferences,
   upsertHarnessConversationCatalogEntry,
 } from '@/runtime/memory/harnessConversationCatalog'
 import {
@@ -133,6 +136,8 @@ export const desktopRemoteCompleted = shallowRef<{
 export const desktopRemoteSyncError = ref('')
 /** 手机新建了对话：工作台据此刷新对话列表。 */
 export const desktopRemoteCatalogChanged = ref(0)
+/** 手机改了某个对话的创作模式：若电脑正开着它，工作台据此恢复输入框里的模式。 */
+export const desktopRemoteModeChanged = shallowRef<{ owner: string; conversationId: string } | null>(null)
 let stopPublisher: (() => void) | null = null
 let contextEventSeq = 0
 
@@ -164,10 +169,46 @@ function desktopRemoteSelection(sessionId: string): DesktopConversationSelection
   if (deepSeekSessionId(current.conversationId, current.owner) === sessionId) return current
   const target = remoteSessionTargets.get(sessionId)
   if (!target || target.owner !== current.owner) return null
-  // 模型、权限档、MCP 沿用电脑当前设置；A 在电脑上按对话勾选的 Skill 与媒体开关不带给 B。
+  // 模型、权限档、MCP 沿用电脑当前设置；A 的 Skill 与媒体开关不带给 B，
+  // B 的创作模式按电脑记住的偏好恢复，与电脑打开 B 时同一条规则。
   return { ...current, conversationTitle: target.conversationTitle, conversationId: target.conversationId,
-    resourcePath: target.resourcePath, skillNames: [], mediaSelected: false, avSelected: false,
-    scene3dSelected: false, turns: target.turns }
+    resourcePath: target.resourcePath, skillNames: rememberedProductionSkills(current.owner, target.conversationId, target.turns),
+    mediaSelected: false, avSelected: false, scene3dSelected: false, turns: target.turns }
+}
+
+function rememberedProductionSkills(owner: string, conversationId: string, turns: ConversationTurn[]) {
+  const entry = listHarnessConversationCatalog(owner).find(item => item.conversationId === conversationId)
+  const latest = [...turns].reverse().find(turn => turn.role === 'user')
+  return restoreProductionSelection(latest?.skillNames, entry?.manju, entry?.novel, entry?.shortDrama)
+    .filter(name => isProductionSelection(name) || name === WIKI_MEMORY_SKILL)
+}
+
+const REMOTE_MODES: readonly ProductionRoute[] = ['manju', 'short-drama', 'novel', 'none']
+
+function remoteMode(selected: DesktopConversationSelection): ProductionRoute {
+  return productionRoute(selected.skillNames || [])
+}
+
+/** 手机切换对话的创作模式：与电脑上点「漫剧制作 / 短剧改编 / 小说创作」写同一份对话偏好。 */
+async function setDesktopRemoteMode(sessionId: string, mode: string) {
+  if (!REMOTE_MODES.includes(mode as ProductionRoute)) throw new RemoteProtocolError('MODE_INVALID')
+  const selected = desktopRemoteSelection(sessionId)
+  if (!selected) throw new RemoteProtocolError('SESSION_NOT_FOUND')
+  if (desktopConversationRuns.get(memoryRunKey(selected.owner, selected.resourcePath))?.phase === 'running')
+    throw new RemoteProtocolError('SESSION_BUSY')
+  const entry = listHarnessConversationCatalog(selected.owner).find(item => item.conversationId === selected.conversationId)
+  const wikiMemoryWasSelected = entry?.manju?.wikiMemoryWasSelected ?? entry?.novel?.wikiMemoryWasSelected
+    ?? entry?.shortDrama?.wikiMemoryWasSelected ?? (selected.skillNames || []).includes(WIKI_MEMORY_SKILL)
+  await updateHarnessConversationPreferences(selected.owner, selected.conversationId, {
+    manju: { ...entry?.manju, enabled: mode === 'manju', wikiMemoryWasSelected },
+    novel: { ...entry?.novel, enabled: mode === 'novel', wikiMemoryWasSelected },
+    shortDrama: { ...entry?.shortDrama, enabled: mode === 'short-drama', wikiMemoryWasSelected },
+  })
+  const current = selectedConversation.value
+  if (current && deepSeekSessionId(current.conversationId, current.owner) === sessionId)
+    setDesktopConversationSelection({ ...current, skillNames: rememberedProductionSkills(current.owner, current.conversationId, current.turns) })
+  desktopRemoteModeChanged.value = { owner: selected.owner, conversationId: selected.conversationId }
+  return { mode }
 }
 
 /** 项目的对外标识：不把电脑上的绝对路径发给手机。 */
@@ -195,8 +236,10 @@ async function listDesktopRemoteSessions(projectId: string): Promise<DesktopRemo
     const resourcePath = entry.legacyRawPath || `${HARNESS_CONVERSATION_PREFIX}/${entry.conversationId}.md`
     remoteSessionTargets.set(sessionId, { owner: current.owner, conversationId: entry.conversationId,
       conversationTitle: entry.title, resourcePath, turns: remoteSessionTargets.get(sessionId)?.turns ?? [] })
+    const selected = desktopRemoteSelection(sessionId)
     return { sessionId, title: entry.title, updatedAt: entry.updatedAt, current: sessionId === currentSessionId,
-      running: desktopConversationRuns.get(memoryRunKey(current.owner, resourcePath))?.phase === 'running' }
+      running: desktopConversationRuns.get(memoryRunKey(current.owner, resourcePath))?.phase === 'running',
+      mode: selected ? remoteMode(selected) : 'none' }
   })
 }
 
@@ -236,6 +279,7 @@ export function startDesktopConversationPublisher() {
       return {
         sessionId: deepSeekSessionId(selected.conversationId, selected.owner),
         turns: desktopRemoteTurns(selected.turns),
+        mode: remoteMode(selected),
         ...desktopConversationLiveState(selected.owner, selected.resourcePath),
       }
     },
@@ -255,7 +299,9 @@ export function startDesktopConversationPublisher() {
     () => JSON.stringify([...desktopConversationRuns.values()].flatMap(run => {
       const sessionId = deepSeekSessionId(run.conversationId, run.owner)
       if (!remoteSessionTargets.has(sessionId) || sessionId === desktopConversationContext().sessionId) return []
-      return [{ sessionId, ...desktopConversationLiveState(run.owner, run.resourcePath) }]
+      const selected = desktopRemoteSelection(sessionId)
+      return [{ sessionId, ...desktopConversationLiveState(run.owner, run.resourcePath),
+        ...selected ? { mode: remoteMode(selected) } : {} }]
     })),
     value => {
       for (const projection of JSON.parse(value) as Array<{ sessionId: string }>) {
@@ -303,6 +349,7 @@ export function createDesktopConversationHost(execute: RemoteExecution = execute
     listProjects: listDesktopRemoteProjects,
     listSessions: listDesktopRemoteSessions,
     createSession: createDesktopRemoteSession,
+    setMode: setDesktopRemoteMode,
     readSession: readDesktopConversationSession,
     sendMessage: async (text, sessionId) => {
       const { beginDesktopUpdateTask } = await import('./desktopUpdater')
@@ -524,6 +571,7 @@ function desktopConversationProjection(
       steps.map(({ id, label, state, durationMs, errorReason }) => ({ id, label, state, durationMs, errorReason })),
     ])) : {},
     reasoning: snapshot ? Object.fromEntries(deepSeekSessionReasoning(snapshot)) : {},
+    mode: remoteMode(selected),
     ...desktopConversationLiveState(selected.owner, selected.resourcePath),
   }
 }

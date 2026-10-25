@@ -26,6 +26,7 @@ const CONNECTION_ERRORS: Record<string, string> = {
   SESSION_NOT_CURRENT: '电脑上已经切换到别的对话',
   SESSION_NOT_FOUND: '电脑上找不到这个对话，请重新从对话列表选择',
   PROJECT_NOT_FOUND: '电脑上已经换了项目，请重新打开对话列表',
+  MODE_INVALID: '电脑不认识这个创作模式，请更新电脑端',
   MESSAGE_EMPTY: '消息不能为空',
   APPROVAL_NOT_FOUND: '这个待确认动作已经结束了',
   APPROVAL_DECISION_INVALID: '审批决定无效',

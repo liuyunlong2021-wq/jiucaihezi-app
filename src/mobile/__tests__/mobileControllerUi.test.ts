@@ -147,3 +147,12 @@ test('M3b：经中继连上时状态写「云端中继」，不显示内部候�
   const pairing = source('src/mobile/MobilePairingView.vue')
   assert.match(pairing, /status\.address === 'relay' \? '云端中继' : status\.address/)
 })
+
+test('模式：聊天页有漫剧制作/短剧改编/小说创作三个模式按钮，运行中不能切换', () => {
+  const session = source('src/mobile/MobileSessionView.vue')
+  for (const label of ['漫剧制作', '短剧改编', '小说创作']) assert.match(session, new RegExp(label))
+  assert.match(session, /\$emit\('mode', /)
+  assert.match(session, /:disabled="busy \|\| isRunning"/)
+  const controller = source('src/mobile/MobileController.vue')
+  assert.match(controller, /@mode="setMode"/)
+})

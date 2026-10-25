@@ -41,6 +41,7 @@ const MOBILE_REQUEST_TYPES: &[&str] = &[
     "project.list",
     "session.list",
     "session.create",
+    "session.mode.set",
     "message.send",
     "run.stop",
     "approval.respond",
@@ -1142,7 +1143,7 @@ mod tests {
     /// M2 任选对话：列项目、列对话、新建对话三种请求手机能发出。
     #[test]
     fn mobile_can_browse_and_create_conversations() {
-        for message_type in ["project.list", "session.list", "session.create"] {
+        for message_type in ["project.list", "session.list", "session.create", "session.mode.set"] {
             assert!(
                 MOBILE_REQUEST_TYPES.contains(&message_type),
                 "{message_type} 不在手机白名单里"

@@ -33,6 +33,7 @@ const MESSAGE_TYPES: &[&str] = &[
     "project.list",
     "session.list",
     "session.create",
+    "session.mode.set",
     "message.send",
     "run.stop",
     "approval.respond",

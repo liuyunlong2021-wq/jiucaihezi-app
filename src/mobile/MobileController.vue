@@ -9,7 +9,7 @@ import { useMobileRemote } from './useMobileRemote'
 const {
   view, status, error, busy,
   refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
-  listProjects, listSessions, openSession, createSession, followDesktop,
+  listProjects, listSessions, openSession, createSession, followDesktop, setMode,
 } = useMobileRemote()
 
 const browsing = ref(false)
@@ -44,6 +44,7 @@ onMounted(() => { void refreshStatus() })
     @approve="respondApproval"
     @disconnect="disconnect"
     @browse="browsing = true"
+    @mode="setMode"
   />
   <MobilePairingView
     v-else

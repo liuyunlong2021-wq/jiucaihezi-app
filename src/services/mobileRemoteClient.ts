@@ -34,6 +34,14 @@ export type MobileRemoteRun = {
 
 export type MobileRemoteState = 'idle' | 'connecting' | 'connected' | 'offline'
 
+/** 电脑上对话的创作模式，与电脑输入框下的「漫剧制作 / 短剧改编 / 小说创作」一一对应。 */
+export type MobileRemoteMode = 'manju' | 'short-drama' | 'novel' | 'none'
+const MOBILE_REMOTE_MODES: readonly MobileRemoteMode[] = ['manju', 'short-drama', 'novel', 'none']
+
+function parseMode(value: unknown): MobileRemoteMode | null {
+  return MOBILE_REMOTE_MODES.includes(value as MobileRemoteMode) ? value as MobileRemoteMode : null
+}
+
 export type MobileRemoteProject = { projectId: string; name: string; current: boolean }
 export type MobileRemoteSessionSummary = {
   sessionId: string
@@ -41,6 +49,7 @@ export type MobileRemoteSessionSummary = {
   updatedAt: string
   current: boolean
   running: boolean
+  mode?: MobileRemoteMode
 }
 
 export type MobilePendingMessage = {
@@ -62,6 +71,8 @@ export type MobileRemoteView = {
   pendingMessages: MobilePendingMessage[]
   /** true：跟着电脑当前打开的对话走；false：停在手机自己选的对话上（M2）。 */
   following: boolean
+  /** 这个对话的创作模式；旧电脑不报时为 null。 */
+  mode: MobileRemoteMode | null
 }
 
 export type MobileRemoteApprovalDecision = 'approve' | 'reject' | 'always'
@@ -100,6 +111,7 @@ export class MobileRemoteClient {
   private context: MobileRemoteContext | null = null
   /** 手机自己选定的对话；为 null 时跟随电脑当前对话。 */
   private pinned: MobileRemoteContext | null = null
+  private mode: MobileRemoteMode | null = null
   private contextRetry: ReturnType<typeof setInterval> | undefined
   private refreshTimer: ReturnType<typeof setTimeout> | undefined
   private turns: MobileRemoteTurn[] = []
@@ -134,6 +146,7 @@ export class MobileRemoteClient {
       lastSeq: this.lastSeq,
       pendingMessages: this.pendingMessages,
       following: this.pinned === null,
+      mode: this.mode,
     }
   }
 
@@ -285,6 +298,16 @@ export class MobileRemoteClient {
     return parseContext(await this.transport.request({ type: 'session.create', payload: { projectId } }))
   }
 
+  /** 切换这个对话的创作模式；以电脑回执为准，运行中电脑会拒绝。 */
+  async setMode(mode: MobileRemoteMode) {
+    if (!MOBILE_REMOTE_MODES.includes(mode)) throw new RemoteProtocolError('MODE_INVALID')
+    const result = await this.transport.request({
+      type: 'session.mode.set', payload: { ...this.requireConnected(), mode },
+    }) as { mode?: unknown }
+    this.mode = parseMode(result?.mode) ?? this.mode
+    this.notify()
+  }
+
   /** 停在手机选的这个对话上：电脑切换对话、断线重连都不再把手机带走。 */
   async openSession(context: MobileRemoteContext) {
     this.pinned = parseContext(context)
@@ -419,6 +442,7 @@ export class MobileRemoteClient {
         ? (snapshot as { turns: MobileRemoteTurn[] }).turns
         : []
       this.pendingTurn = parsePendingTurn((snapshot as { pendingTurn?: unknown })?.pendingTurn)
+      this.mode = parseMode((snapshot as { mode?: unknown })?.mode)
       const live = snapshot as Partial<{ streamingText: string; run: MobileRemoteRun }>
       this.streamingText = typeof live?.streamingText === 'string' ? live.streamingText : ''
       this.run = live?.run && typeof live.run === 'object' ? live.run : IDLE_RUN
@@ -442,6 +466,7 @@ export class MobileRemoteClient {
     this.streamingText = ''
     this.run = IDLE_RUN
     this.lastSeq = 0
+    this.mode = null
     if (switched) this.gatewayEpoch = ''
     if (switched) this.pendingMessages = []
   }
@@ -477,6 +502,7 @@ export class MobileRemoteClient {
     if (event.gatewayEpoch) this.gatewayEpoch = event.gatewayEpoch
     this.lastSeq = event.seq
     if (Array.isArray(event.turns)) this.turns = event.turns
+    this.mode = parseMode(event.mode) ?? this.mode
     this.pendingTurn = parsePendingTurn(event.pendingTurn)
     this.streamingText = typeof event.streamingText === 'string' ? event.streamingText : ''
     this.run = event.run && typeof event.run === 'object' ? event.run : IDLE_RUN

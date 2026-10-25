@@ -55,7 +55,8 @@ import {
   type ConversationSplitResult,
 } from '@/runtime/memory/conversationSplit'
 import { productionRoute, productionMode, isProductionSelection } from '@/runtime/memory/productionSkills'
-import { nativeWikiSelection, needsProjectWiki } from '@/runtime/memory/projectWiki'
+import { needsProjectWiki } from '@/runtime/memory/projectWiki'
+import { restoreProductionSelection } from '@/runtime/memory/productionSelection'
 import { buildWikiMemoryIndexContext, runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
@@ -88,6 +89,7 @@ import {
   beginMemoryRun,
   desktopConversationRuns,
   desktopRemoteCatalogChanged,
+  desktopRemoteModeChanged,
   desktopRemoteCompleted,
   desktopRemoteSyncError,
   executeDesktopHarnessRun,
@@ -153,15 +155,15 @@ import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/j
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
 import {
-  MANJU_MODE, MANJU_SKILLS, WIKI_MEMORY_SKILL, restoreManjuSelection,
+  MANJU_MODE, MANJU_SKILLS, WIKI_MEMORY_SKILL,
   type ManjuPreference,
 } from '@/runtime/memory/manjuProduction'
 import {
-  NOVEL_MODE, NOVEL_SKILLS, restoreNovelSelection,
+  NOVEL_MODE, NOVEL_SKILLS,
   type NovelPreference,
 } from '@/runtime/memory/novelProduction'
 import {
-  SHORT_DRAMA_MODE, SHORT_DRAMA_SKILLS, restoreShortDramaSelection,
+  SHORT_DRAMA_MODE, SHORT_DRAMA_SKILLS,
   type ShortDramaPreference,
 } from '@/runtime/memory/shortDramaProduction'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
@@ -645,34 +647,8 @@ async function restoreComposerSkills(
   shortDramaPreference?: ShortDramaPreference,
 ) {
   const available = await availableSkillNamesForComposer()
-  if ([manjuPreference, novelPreference, shortDramaPreference].every(preference => preference?.enabled === false)
-    && !(names || []).some(isProductionSelection)) {
-    selectedSkillNames.value = nativeWikiSelection(names || []).filter(name => available.has(name))
-    return
-  }
-  const legacyShortDrama = !shortDramaPreference && names?.some(name => name === SHORT_DRAMA_MODE || name === 'jc-duanju')
-  if (legacyShortDrama) {
-    selectedSkillNames.value = restoreShortDramaSelection(names || [], {
-      enabled: true,
-      wikiMemoryWasSelected: manjuPreference?.wikiMemoryWasSelected,
-    }).filter(name => isProductionSelection(name) || available.has(name))
-    return
-  }
-  if (shortDramaPreference?.enabled) {
-    selectedSkillNames.value = restoreShortDramaSelection(names || [], shortDramaPreference).filter(name => isProductionSelection(name) || available.has(name))
-    return
-  }
-  if (novelPreference?.enabled) {
-    selectedSkillNames.value = restoreNovelSelection(names || [], novelPreference).filter(name => isProductionSelection(name) || available.has(name))
-    return
-  }
-  if (manjuPreference?.enabled) {
-    selectedSkillNames.value = restoreManjuSelection(names || [], manjuPreference).filter(name => isProductionSelection(name) || available.has(name))
-    return
-  }
-  const manju = restoreManjuSelection(names || [], manjuPreference)
-  const novel = restoreNovelSelection(manju, novelPreference)
-  selectedSkillNames.value = restoreShortDramaSelection(novel, shortDramaPreference).filter(name => isProductionSelection(name) || available.has(name))
+  selectedSkillNames.value = restoreProductionSelection(names, manjuPreference, novelPreference, shortDramaPreference)
+    .filter(name => isProductionSelection(name) || available.has(name))
 }
 const mentionOpen = ref(false)
 const mentionTrigger = ref<'@' | '/' | null>(null)
@@ -1185,6 +1161,14 @@ watch(() => [projectOwner.value, conversation.value?.transcript.id] as const, as
 })
 const isOnScreen = (run: MemoryRun) => run.owner === projectOwner.value && conversation.value?.resource.path === run.resourcePath
 
+// 手机切换了电脑正开着的这个对话的创作模式：按新偏好恢复输入框，与打开对话同一条规则。
+watch(desktopRemoteModeChanged, async changed => {
+  const active = conversation.value
+  if (!changed || !active || active.transcript.id !== changed.conversationId || active.resource.owner !== changed.owner) return
+  const entry = listHarnessConversationCatalog(changed.owner).find(item => item.conversationId === changed.conversationId)
+  const latestUserTurn = [...active.transcript.turns].reverse().find(turn => turn.role === 'user')
+  await restoreComposerSkills(latestUserTurn?.skillNames, entry?.manju, entry?.novel, entry?.shortDrama)
+})
 // 手机新建的对话立即出现在电脑的对话列表里。
 watch(desktopRemoteCatalogChanged, () => {
   void refreshProjectView().catch(cause => {

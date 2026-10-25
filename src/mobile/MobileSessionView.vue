@@ -7,6 +7,7 @@ import {
   mobileRemotePendingTurn,
   mobileVisibleTurns,
   type MobileRemoteApprovalDecision,
+  type MobileRemoteMode,
   type MobileRemoteTurn,
   type MobileRemoteView,
 } from '@/services/mobileRemoteClient'
@@ -23,7 +24,15 @@ const emit = defineEmits<{
   approve: [approvalId: string, decision: MobileRemoteApprovalDecision]
   disconnect: []
   browse: []
+  mode: [mode: MobileRemoteMode]
 }>()
+
+// 与电脑输入框下的三个创作按钮一一对应；再点一次已选中的就回到普通对话。
+const MODES: Array<{ id: MobileRemoteMode; label: string }> = [
+  { id: 'manju', label: '漫剧制作' },
+  { id: 'short-drama', label: '短剧改编' },
+  { id: 'novel', label: '小说创作' },
+]
 
 const messagesEl = ref<HTMLElement | null>(null)
 const draft = ref('')
@@ -117,6 +126,20 @@ function submit() {
         @always="$emit('approve', approval.id, 'always')"
       />
 
+      <div class="modes" role="group" aria-label="创作模式">
+        <button
+          v-for="item in MODES"
+          :key="item.id"
+          type="button"
+          :class="{ active: view.mode === item.id }"
+          :aria-pressed="view.mode === item.id"
+          :disabled="busy || isRunning"
+          @click="$emit('mode', view.mode === item.id ? 'none' : item.id)"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+
       <div class="composer">
         <textarea
           v-model="draft"
@@ -162,6 +185,10 @@ function submit() {
 .steps li.done { color: var(--ink2); }
 .steps li.failed { color: var(--danger, #c0392b); }
 .steps em { font-style: normal; opacity: 0.8; }
+.modes { display: flex; gap: 6px; }
+.modes button { flex: 1; min-height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink2); font: inherit; font-size: 13px; cursor: pointer; }
+.modes button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 14%, var(--surface)); color: var(--ink1); }
+.modes button:disabled { opacity: 0.55; cursor: default; }
 .composer { display: flex; align-items: flex-end; gap: 8px; }
 .composer textarea { flex: 1; min-height: 40px; max-height: 30vh; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg, var(--surface)); color: var(--ink1); font: inherit; font-size: 14px; resize: none; }
 .composer button { display: flex; align-items: center; gap: 5px; min-height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 14px; cursor: pointer; }

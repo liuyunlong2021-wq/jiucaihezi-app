@@ -20,6 +20,7 @@
 - 同日 M3b（用户否决“另装 Tailscale”）：新增韭菜盒子云端中继——`gateway` 的 `RelayRoom` Durable Object 只转发 Noise 密文，电脑与手机都只做出站 WebSocket，配对码与认证回包带房间号与密钥（无需登录），两端本地隧道复用全部现有协议。Gateway 8 条、Rust 8 条、TS 2 条先红后绿；`wrangler dev --local` 真实 Worker 往返 200 KB 通过。**未部署**、蜂窝真机未测。
 - 同日 M3b 生产部署（用户同意）：gateway 版本 `badd5cac`，只新增中继（资产无变化）；原有接口均 200，线上中继 wss 往返 200 KB 与 403 通过；iOS 包 `d0c77a74` 已装机。蜂窝真机待测。
 - 同日 M3b 蜂窝网络真机验收：用户实测经线上中继在外控制电脑，全部通过。
+- 2026-10-26 手机选创作模式：抽出共用 `restoreProductionSelection`，后台对话沿用电脑记住的漫剧/短剧/小说模式；新增 `session.mode.set`，手机聊天页三个模式按钮。先红后绿，focused 2281 passed；真机未测。
 
 ## 2026-10-24 短剧改编按真实章切分与圣经升级
 

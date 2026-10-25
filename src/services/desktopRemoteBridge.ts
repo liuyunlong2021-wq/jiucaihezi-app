@@ -53,6 +53,8 @@ async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequ
     return { projectId, sessions: await host.listSessions(projectId) }
   }
   if (request.type === 'session.create') return await host.createSession(requiredString(payload, 'projectId', 200))
+  if (request.type === 'session.mode.set')
+    return await host.setMode(requiredString(payload, 'sessionId', 200), requiredString(payload, 'mode', 32))
   if (request.type === 'session.attach') {
     const sessionId = requiredString(payload, 'sessionId', 200)
     // Rust 已先绑定订阅；读取官方历史期间发生的事件必须高于这条基线，交给 Mobile 重放。

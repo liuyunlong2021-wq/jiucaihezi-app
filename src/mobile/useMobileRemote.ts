@@ -4,6 +4,7 @@ import {
   MobileRemoteClient,
   type MobileRemoteApprovalDecision,
   type MobileRemoteContext,
+  type MobileRemoteMode,
   type MobileRemoteView,
 } from '@/services/mobileRemoteClient'
 import {
@@ -125,6 +126,7 @@ export function useMobileRemote() {
   const openSession = (context: MobileRemoteContext) => run(() => client.openSession(context))
   const createSession = (projectId: string) => run(async () => client.openSession(await client.createSession(projectId)))
   const followDesktop = () => run(() => client.followDesktop())
+  const setMode = (mode: MobileRemoteMode) => run(() => client.setMode(mode))
 
   const send = (text: string) => run(() => client.sendMessage(text))
   const stop = () => run(() => client.stopRun())
@@ -134,6 +136,6 @@ export function useMobileRemote() {
   return {
     view, status, error, busy,
     refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
-    listProjects, listSessions, openSession, createSession, followDesktop,
+    listProjects, listSessions, openSession, createSession, followDesktop, setMode,
   }
 }
