@@ -49,3 +49,12 @@ test('电脑返回的对话信息不完整时，把原始返回一起显示出�
   assert.match(shown, /INVALID_CONTEXT/)
   assert.match(shown, /sessionId/)
 })
+
+test('Tauri 权限拒绝不是相机问题，报出是哪条命令', () => {
+  // 2026-10-25 真机原文形态：ACL 拒绝里带 Permissions，旧规则把它当成相机权限。
+  const acl = 'event.listen not allowed. Permissions associated with this command: core:event:allow-listen, core:event:default'
+  const message = describeRemoteError(acl)
+  assert.doesNotMatch(message, /相机/)
+  assert.match(message, /event\.listen/)
+  assert.match(message, /最新版/)
+})

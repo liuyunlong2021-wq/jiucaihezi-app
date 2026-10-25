@@ -33,7 +33,8 @@ const CONNECTION_ERRORS: Record<string, string> = {
 
 /** 插件与系统给的是自由文本，只能按关键词认。 */
 const FRIENDLY_PATTERNS: Array<[RegExp, string]> = [
-  [/permission|denied|restricted|authoriz/i, '相机权限被拒绝，请在系统设置里允许「韭菜盒子遥控」使用相机'],
+  // 只认明说相机的原文：泛泛的 permission/denied 曾把 Tauri 权限拒绝误报成相机问题。
+  [/camera|相机/i, '相机权限被拒绝，请在系统设置里允许「韭菜盒子遥控」使用相机'],
   [/cancel/i, '已取消扫码'],
   // 握手/读帧被对端关掉（std::io::Error 的原文），真机上曾直接曝光给用户。
   [
@@ -68,6 +69,9 @@ export function describeRemoteError(cause: unknown): string {
   if (!raw) return '连接失败'
   const known = CONNECTION_ERRORS[raw]
   if (known) return known
+  // Tauri ACL 拒绝：App 自身缺权限配置，用户只能换新版；带上命令名便于排查。
+  const denied = raw.match(/^(\S+) not allowed\b/)
+  if (denied) return `手机 App 缺少调用权限（${denied[1]}），请安装最新版`
   for (const [pattern, message] of FRIENDLY_PATTERNS) {
     if (pattern.test(raw)) return message
   }

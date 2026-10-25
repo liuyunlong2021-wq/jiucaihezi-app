@@ -71,6 +71,17 @@ test('扫码先申请相机权限，粘贴配对不触碰相机', () => {
   assert.match(capabilities, /barcode-scanner:allow-request-permissions/)
 })
 
+test('手机订阅电脑推送用到的事件监听，iOS 权限里必须放行', () => {
+  // 2026-10-25 真机：配对成功后停在「正在读取」，listen 被 ACL 拒绝，原文含 Permission
+  // 又被翻成「相机权限被拒绝」。电脑推过来的运行状态手机一条也收不到。
+  const transport = source('src/services/mobileRemoteTransport.ts')
+  const capability = JSON.parse(source('src-tauri/capabilities/mobile.json'))
+
+  assert.match(transport, /await listen</)
+  assert.ok(capability.permissions.includes('core:event:allow-listen'))
+  assert.ok(capability.permissions.includes('core:event:allow-unlisten'))
+})
+
 test('通道断开由传输层通知客户端进入离线，不猜任务结果', () => {
   const remote = source('src/mobile/useMobileRemote.ts')
 
