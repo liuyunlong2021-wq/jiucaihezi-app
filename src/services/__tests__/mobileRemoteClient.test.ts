@@ -772,3 +772,64 @@ test('电脑上还没有对话时定时重试，电脑一开对话就自己进�
   assert.deepEqual(client.view.turns, snapshot.turns)
   client.disconnect()
 })
+
+// ---- M2 任选对话 ----
+
+const contextB = { projectName: '项目 A', conversationTitle: '对话 B', conversationId: 'b', sessionId: 'jc-v1-b' }
+
+test('M2：列项目、列对话、新建对话都只是发对应请求并原样交回', async () => {
+  const { client, calls } = connectedClient({
+    'project.list': () => ({ projects: [{ projectId: 'p-1', name: '项目 A', current: true }] }),
+    'session.list': payload => ({ projectId: payload.projectId, sessions: [
+      { sessionId: 'jc-v1-b', title: '对话 B', updatedAt: '2026-10-25T02:00:00.000Z', current: false, running: true },
+    ] }),
+    'session.create': () => ({ ...contextB, conversationTitle: '新对话' }),
+  })
+  await client.connect()
+  assert.deepEqual(await client.listProjects(), [{ projectId: 'p-1', name: '项目 A', current: true }])
+  assert.equal((await client.listSessions('p-1'))[0]?.sessionId, 'jc-v1-b')
+  assert.equal((await client.createSession('p-1')).conversationTitle, '新对话')
+  assert.deepEqual(calls.filter(call => call.type.startsWith('project.') || call.type.startsWith('session.l')
+    || call.type === 'session.create').map(call => [call.type, call.payload]), [
+    ['project.list', {}], ['session.list', { projectId: 'p-1' }], ['session.create', { projectId: 'p-1' }],
+  ])
+  client.disconnect()
+})
+
+test('M2：手机选定 B 后固定在 B——电脑切换对话不把手机带走，发消息发到 B', async () => {
+  const { client, calls, emit } = connectedClient({
+    'message.send': () => ({ accepted: true, runId: 'run-b' }),
+  })
+  await client.connect()
+  await client.openSession(contextB)
+  assert.equal(client.view.context?.sessionId, 'jc-v1-b')
+  assert.equal(client.view.following, false)
+  assert.deepEqual(calls.at(-1), { type: 'session.attach', payload: { sessionId: 'jc-v1-b' } })
+  emit({ type: 'context.changed', payload: { ...context, conversationId: 'c', sessionId: 'jc-v1-c' } })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(client.view.context?.sessionId, 'jc-v1-b', '电脑那边切走不影响手机选定的对话')
+  await client.sendMessage('推进 B')
+  assert.equal(calls.find(call => call.type === 'message.send')?.payload.sessionId, 'jc-v1-b')
+  client.disconnect()
+})
+
+test('M2：选定的对话在重连后仍是它，不回落到电脑当前对话', async () => {
+  const { client, calls } = connectedClient()
+  await client.connect()
+  await client.openSession(contextB)
+  client.handleTransportClosed()
+  await client.connect()
+  assert.equal(client.view.context?.sessionId, 'jc-v1-b')
+  assert.equal(calls.filter(call => call.type === 'context.get').length, 1, '重连不再问电脑当前对话')
+  client.disconnect()
+})
+
+test('M2：切回「跟随电脑」重新以电脑当前对话为准', async () => {
+  const { client } = connectedClient()
+  await client.connect()
+  await client.openSession(contextB)
+  await client.followDesktop()
+  assert.equal(client.view.context?.sessionId, context.sessionId)
+  assert.equal(client.view.following, true)
+  client.disconnect()
+})

@@ -87,6 +87,7 @@ import {
   beginRunStatus,
   beginMemoryRun,
   desktopConversationRuns,
+  desktopRemoteCatalogChanged,
   desktopRemoteCompleted,
   desktopRemoteSyncError,
   executeDesktopHarnessRun,
@@ -1184,6 +1185,12 @@ watch(() => [projectOwner.value, conversation.value?.transcript.id] as const, as
 })
 const isOnScreen = (run: MemoryRun) => run.owner === projectOwner.value && conversation.value?.resource.path === run.resourcePath
 
+// 手机新建的对话立即出现在电脑的对话列表里。
+watch(desktopRemoteCatalogChanged, () => {
+  void refreshProjectView().catch(cause => {
+    contextNotice.value = `对话列表刷新失败：${cause instanceof Error ? cause.message : String(cause)}`
+  })
+})
 watch(desktopRemoteCompleted, async completed => {
   const active = conversation.value
   if (!completed || !active || active.resource.owner !== completed.owner

@@ -4,7 +4,11 @@ import { reactive, ref, shallowRef, watch } from 'vue'
 import type { DirectRunMetrics } from '@/runtime/direct/directTypes'
 import type { MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
-import { listHarnessConversationCatalog, upsertHarnessConversationCatalogEntry } from '@/runtime/memory/harnessConversationCatalog'
+import {
+  createHarnessConversationCatalogEntry,
+  listHarnessConversationCatalog,
+  upsertHarnessConversationCatalogEntry,
+} from '@/runtime/memory/harnessConversationCatalog'
 import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
   applyDeepSeekInboxEvent,
@@ -31,7 +35,7 @@ import {
   type DeepSeekSessionSnapshot,
   type DeepSeekUsage,
 } from './deepSeekHarness'
-import { DesktopRemoteHost } from './desktopRemoteHost'
+import { DesktopRemoteHost, type DesktopRemoteSessionSummary } from './desktopRemoteHost'
 import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from './desktopRemoteEventSeq'
 import { publishDesktopRemoteEvent } from './desktopRemoteBridge'
 import { RemoteProtocolError } from './desktopRemoteProtocol'
@@ -127,11 +131,83 @@ export const desktopRemoteCompleted = shallowRef<{
   snapshot: DeepSeekSessionSnapshot
 } | null>(null)
 export const desktopRemoteSyncError = ref('')
+/** 手机新建了对话：工作台据此刷新对话列表。 */
+export const desktopRemoteCatalogChanged = ref(0)
 let stopPublisher: (() => void) | null = null
 let contextEventSeq = 0
 
 export function setDesktopConversationSelection(selection: DesktopConversationSelection | null) {
   selectedConversation.value = selection
+}
+
+/** 与工作台 `conversationFromCatalog` 的资源路径同一格式：运行表按它取同一个 run。 */
+const HARNESS_CONVERSATION_PREFIX = '.harness-conversations'
+
+/**
+ * 手机列出过、可以在后台推进的对话（M2），键是 sessionId。
+ *
+ * 只认电脑当前项目：一个工作区同时只归一个窗口，运行表也是每个窗口各一份，
+ * 在这里跑别的项目会和那个窗口的 runner 撞同一个会话写锁（见 `claimWorkspace`）。
+ */
+const remoteSessionTargets = new Map<string, {
+  owner: string
+  conversationId: string
+  conversationTitle: string
+  resourcePath: string
+  turns: ConversationTurn[]
+}>()
+
+/** 手机指定的对话在电脑上的执行上下文；不认识或不属于当前项目时为 null。 */
+function desktopRemoteSelection(sessionId: string): DesktopConversationSelection | null {
+  const current = selectedConversation.value
+  if (!current || !sessionId) return null
+  if (deepSeekSessionId(current.conversationId, current.owner) === sessionId) return current
+  const target = remoteSessionTargets.get(sessionId)
+  if (!target || target.owner !== current.owner) return null
+  // 模型、权限档、MCP 沿用电脑当前设置；A 在电脑上按对话勾选的 Skill 与媒体开关不带给 B。
+  return { ...current, conversationTitle: target.conversationTitle, conversationId: target.conversationId,
+    resourcePath: target.resourcePath, skillNames: [], mediaSelected: false, avSelected: false,
+    scene3dSelected: false, turns: target.turns }
+}
+
+/** 项目的对外标识：不把电脑上的绝对路径发给手机。 */
+async function remoteProjectId(owner: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(owner))
+  return `p-${Array.from(new Uint8Array(digest).slice(0, 8), byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+async function remoteProjectOwner(projectId: string) {
+  const current = selectedConversation.value
+  if (!current || projectId !== await remoteProjectId(current.owner)) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
+  return current
+}
+
+async function listDesktopRemoteProjects() {
+  const current = selectedConversation.value
+  return current ? [{ projectId: await remoteProjectId(current.owner), name: current.projectName, current: true }] : []
+}
+
+async function listDesktopRemoteSessions(projectId: string): Promise<DesktopRemoteSessionSummary[]> {
+  const current = await remoteProjectOwner(projectId)
+  const currentSessionId = deepSeekSessionId(current.conversationId, current.owner)
+  return listHarnessConversationCatalog(current.owner).reverse().slice(0, 100).map(entry => {
+    const sessionId = deepSeekSessionId(entry.conversationId, current.owner)
+    const resourcePath = entry.legacyRawPath || `${HARNESS_CONVERSATION_PREFIX}/${entry.conversationId}.md`
+    remoteSessionTargets.set(sessionId, { owner: current.owner, conversationId: entry.conversationId,
+      conversationTitle: entry.title, resourcePath, turns: remoteSessionTargets.get(sessionId)?.turns ?? [] })
+    return { sessionId, title: entry.title, updatedAt: entry.updatedAt, current: sessionId === currentSessionId,
+      running: desktopConversationRuns.get(memoryRunKey(current.owner, resourcePath))?.phase === 'running' }
+  })
+}
+
+async function createDesktopRemoteSession(projectId: string) {
+  const current = await remoteProjectOwner(projectId)
+  const entry = await createHarnessConversationCatalogEntry(current.owner)
+  const sessionId = deepSeekSessionId(entry.conversationId, current.owner)
+  remoteSessionTargets.set(sessionId, { owner: current.owner, conversationId: entry.conversationId,
+    conversationTitle: entry.title, resourcePath: `${HARNESS_CONVERSATION_PREFIX}/${entry.conversationId}.md`, turns: [] })
+  desktopRemoteCatalogChanged.value += 1
+  return { projectName: current.projectName, conversationTitle: entry.title, conversationId: entry.conversationId, sessionId }
 }
 
 export function startDesktopConversationPublisher() {
@@ -173,9 +249,31 @@ export function startDesktopConversationPublisher() {
     },
     { immediate: true },
   )
+  // 电脑当前对话之外、手机正在推进的对话：只推运行进度，历史等结束后手机从官方会话读。
+  const backgroundPublished = new Map<string, string>()
+  const stopBackground = watch(
+    () => JSON.stringify([...desktopConversationRuns.values()].flatMap(run => {
+      const sessionId = deepSeekSessionId(run.conversationId, run.owner)
+      if (!remoteSessionTargets.has(sessionId) || sessionId === desktopConversationContext().sessionId) return []
+      return [{ sessionId, ...desktopConversationLiveState(run.owner, run.resourcePath) }]
+    })),
+    value => {
+      for (const projection of JSON.parse(value) as Array<{ sessionId: string }>) {
+        const text = JSON.stringify(projection)
+        if (backgroundPublished.get(projection.sessionId) === text) continue
+        backgroundPublished.set(projection.sessionId, text)
+        const seq = nextDesktopRemoteEventSeq(projection.sessionId)
+        publish(projection.sessionId, {
+          version: 1, requestId: `event-${seq}`, type: 'session.event', sentAt: Date.now(),
+          payload: { ...projection, ...desktopRemoteEventCursor(projection.sessionId), seq },
+        })
+      }
+    },
+  )
   stopPublisher = () => {
     stopContext()
     stopState()
+    stopBackground()
     stopPublisher = null
   }
   return stopPublisher
@@ -191,8 +289,8 @@ export function desktopConversationContext() {
   }
 }
 
-function selectedRun() {
-  const selected = selectedConversation.value
+function remoteRun(sessionId: string) {
+  const selected = desktopRemoteSelection(sessionId)
   return selected ? desktopConversationRuns.get(memoryRunKey(selected.owner, selected.resourcePath)) ?? null : null
 }
 
@@ -201,31 +299,35 @@ type RemoteExecution = (run: MemoryRun, selected: DesktopConversationSelection) 
 export function createDesktopConversationHost(execute: RemoteExecution = executeDesktopRemoteText) {
   return new DesktopRemoteHost({
     getContext: desktopConversationContext,
+    hasSession: sessionId => desktopRemoteSelection(sessionId) !== null,
+    listProjects: listDesktopRemoteProjects,
+    listSessions: listDesktopRemoteSessions,
+    createSession: createDesktopRemoteSession,
     readSession: readDesktopConversationSession,
-    sendMessage: async text => {
+    sendMessage: async (text, sessionId) => {
       const { beginDesktopUpdateTask } = await import('./desktopUpdater')
       const release = await beginDesktopUpdateTask()
-      try { return startDesktopRemoteTextRun(text, execute) }
+      try { return startDesktopRemoteTextRun(text, execute, sessionId) }
       finally { await release() }
     },
-    stopRun: async () => {
-      const run = selectedRun()
+    stopRun: async sessionId => {
+      const run = remoteRun(sessionId)
       if (run) stopRun(run)
       return run?.phase || 'idle'
     },
-    respondApproval: async (approvalId, decision) => {
-      const run = selectedRun()
+    respondApproval: async (approvalId, decision, sessionId) => {
+      const run = remoteRun(sessionId)
       if (!run?.approval || run.approval.id !== approvalId) throw new RemoteProtocolError('APPROVAL_NOT_FOUND')
       settleApproval(run, decision === 'approve' ? 'once' : decision)
     },
     subscribe: () => () => undefined, // Rust LAN bridge owns the connection subscription.
-    isBusy: () => selectedRun()?.phase === 'running',
+    isBusy: sessionId => remoteRun(sessionId)?.phase === 'running',
   })
 }
 
-function startDesktopRemoteTextRun(text: string, execute: RemoteExecution) {
-  const selected = selectedConversation.value
-  if (!selected) throw new RemoteProtocolError('SESSION_NOT_CURRENT')
+function startDesktopRemoteTextRun(text: string, execute: RemoteExecution, sessionId: string) {
+  const selected = desktopRemoteSelection(sessionId)
+  if (!selected) throw new RemoteProtocolError('SESSION_NOT_FOUND')
   const userTurn: ConversationTurn = {
     id: `turn-${crypto.randomUUID()}`, role: 'user', content: text,
     createdAt: new Date().toISOString(), skillNames: selected.skillNames || [],
@@ -403,10 +505,9 @@ export function desktopConversationLiveState(owner: string, path: string) {
 }
 
 function assertSelectedSession(sessionId: string, selected: DesktopConversationSelection) {
-  const current = selectedConversation.value
-  if (!current || deepSeekSessionId(current.conversationId, current.owner) !== sessionId
-    || current.owner !== selected.owner || current.resourcePath !== selected.resourcePath)
-    throw new Error('SESSION_NOT_CURRENT')
+  const current = desktopRemoteSelection(sessionId)
+  if (!current || current.owner !== selected.owner || current.resourcePath !== selected.resourcePath)
+    throw new RemoteProtocolError('SESSION_NOT_FOUND')
 }
 
 function desktopConversationProjection(
@@ -428,9 +529,8 @@ function desktopConversationProjection(
 }
 
 export async function readDesktopConversationSession(sessionId: string) {
-  const selected = selectedConversation.value
-  if (!selected) throw new Error('SESSION_NOT_CURRENT')
-  assertSelectedSession(sessionId, selected)
+  const selected = desktopRemoteSelection(sessionId)
+  if (!selected) throw new RemoteProtocolError('SESSION_NOT_FOUND')
   const config = await resolveApiConfig({ modelId: selected.modelId, modelProviderId: selected.modelProviderId })
   const query = {
     cwd: selected.owner,
@@ -449,6 +549,9 @@ export async function readDesktopConversationSession(sessionId: string) {
     return desktopConversationProjection(sessionId, selected)
   const snapshot = await readDeepSeekHarnessSession(query)
   assertSelectedSession(sessionId, selected)
+  // 后台对话下一次发送按官方历史计基线、做交接。
+  const target = remoteSessionTargets.get(sessionId)
+  if (target) target.turns = deepSeekSessionTurns(snapshot)
   const run = desktopConversationRuns.get(memoryRunKey(selected.owner, selected.resourcePath))
   if ((run?.phase === 'done' || run?.phase === 'stopped') && !run.officialHistoryReady && run.conversationId === selected.conversationId)
     finishDesktopRemoteOfficialSession(run, selected, snapshot)

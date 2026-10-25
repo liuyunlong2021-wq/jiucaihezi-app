@@ -20,6 +20,11 @@ import {
   startDesktopConversationPublisher,
   type MemoryRun,
 } from '@/services/desktopConversationRuntime'
+import {
+  listHarnessConversationCatalog,
+  refreshHarnessConversationCatalog,
+  upsertHarnessConversationCatalogEntry,
+} from '@/runtime/memory/harnessConversationCatalog'
 
 const context = {
   projectName: '项目 A', conversationTitle: '对话 A', conversationId: 'a', sessionId: 'jc-v1-a',
@@ -87,7 +92,7 @@ test('Desktop bridge rejects another Session and unsupported protocol messages',
   })
   await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host, {
     requestId: 'r1', type: 'session.read', payload: { sessionId: 'jc-v1-b' }, deviceId: 'iphone-1',
-  }), /SESSION_NOT_CURRENT/)
+  }), /SESSION_NOT_FOUND/)
   await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host, {
     requestId: 'r2', type: 'project.delete', payload: {}, deviceId: 'iphone-1',
   }), /UNSUPPORTED_MESSAGE/)
@@ -190,7 +195,7 @@ test('application-owned selection remains readable without a workbench view and 
   })
   try {
     assert.deepEqual(desktopConversationContext(), context)
-    await assert.rejects(() => readDesktopConversationSession('jc-v1-b'), /SESSION_NOT_CURRENT/)
+    await assert.rejects(() => readDesktopConversationSession('jc-v1-b'), /SESSION_NOT_FOUND/)
   } finally {
     setDesktopConversationSelection(null)
   }
@@ -275,7 +280,8 @@ test('application publisher sends run progress after the workbench view is gone'
       owner: '/project', resourcePath: 'chat-a', modelId: 'model-a', fileAccessEnabled: false, turns: [],
     })
     desktopConversationRuns.set(key, {
-      runId: 'run-1', phase: 'running', status: '正在思考', error: '', streamingText: '', steps: [],
+      runId: 'run-1', owner: '/project', resourcePath: 'chat-a', conversationId: 'a',
+      phase: 'running', status: '正在思考', error: '', streamingText: '', steps: [],
       userTurn: null, approval: null,
     } as MemoryRun)
     desktopConversationRuns.get(key)!.status = '正在执行工具'
@@ -494,4 +500,179 @@ test('live official deliveries deduplicate and clear at the next turn without tr
     assert.deepEqual(run.deliverables, [])
     return 'OK'
   })
+})
+
+// ---- M2 任选对话：同一项目内列出、新建、后台推进 ----
+
+const m2Owner = '/Users/someone/secret-project'
+
+function m2Selection() {
+  return {
+    projectName: 'secret-project', conversationTitle: '对话 A', conversationId: 'm2-a',
+    owner: m2Owner, resourcePath: '.harness-conversations/m2-a.md', modelId: 'model-a',
+    permissionTier: 'workspace-write' as const, skillNames: ['jc-manju-pipeline'], turns: [],
+  }
+}
+
+function m2Entry(id: string, title: string, updatedAt: string) {
+  return {
+    conversationId: id, sessionId: `jc-v1-${id}`, workspaceKey: m2Owner, title,
+    createdAt: '2026-10-25T00:00:00.000Z', updatedAt,
+  }
+}
+
+function m2Request(type: string, payload: Record<string, unknown> = {}) {
+  return { requestId: crypto.randomUUID(), type, payload, deviceId: 'iphone-m2' }
+}
+
+async function m2Fixture() {
+  setDesktopConversationSelection(m2Selection())
+  upsertHarnessConversationCatalogEntry(m2Entry('m2-a', '对话 A', '2026-10-25T01:00:00.000Z'))
+  upsertHarnessConversationCatalogEntry(m2Entry('m2-b', '对话 B', '2026-10-25T02:00:00.000Z'))
+  const host = createDesktopConversationHost(async () => await new Promise<string>(() => undefined))
+  const projects = await __desktopRemoteBridgeForTests.dispatch(host, m2Request('project.list')) as {
+    projects: Array<{ projectId: string; name: string; current: boolean }>
+  }
+  return { host, projects }
+}
+
+function m2Cleanup() {
+  for (const [key, run] of [...desktopConversationRuns.entries()]) {
+    if (!key.startsWith(m2Owner)) continue
+    stopRun(run)
+    desktopConversationRuns.delete(key)
+  }
+  setDesktopConversationSelection(null)
+}
+
+test('M2-1：手机拿到项目与对话列表，返回内容不带电脑上的文件路径', async () => {
+  try {
+    const { host, projects } = await m2Fixture()
+    assert.equal(projects.projects.length, 1)
+    assert.equal(projects.projects[0]!.name, 'secret-project')
+    assert.equal(projects.projects[0]!.current, true)
+    const listed = await __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.list', { projectId: projects.projects[0]!.projectId })) as {
+      sessions: Array<{ sessionId: string; title: string; current: boolean; running: boolean }>
+    }
+    assert.deepEqual(listed.sessions.map(item => [item.sessionId, item.title, item.current]), [
+      ['jc-v1-m2-b', '对话 B', false],
+      ['jc-v1-m2-a', '对话 A', true],
+    ], '按最近更新排在前面，并标出电脑当前打开的那个')
+    const wire = JSON.stringify([projects, listed])
+    assert.doesNotMatch(wire, /\/Users\/|someone|harness-conversations|\.md|legacyRawPath|workspaceKey|owner/)
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.list', { projectId: 'p-not-mine' })), /PROJECT_NOT_FOUND/)
+  } finally { m2Cleanup() }
+})
+
+test('M2-2：手机新建对话，电脑当前打开的对话不被切走', async () => {
+  const created: string[] = []
+  try {
+    const { host, projects } = await m2Fixture()
+    await refreshHarnessConversationCatalog({ cwd: m2Owner } as never, async (_input, params) => {
+      if (params.action === 'create') created.push(String(params.conversationId))
+      const entries = [...listHarnessConversationCatalog(m2Owner),
+        ...created.map(id => m2Entry(id, '新对话', '2026-10-25T03:00:00.000Z'))]
+      return { entries, hiddenIds: [], warnings: [] }
+    })
+    const context = await __desktopRemoteBridgeForTests.dispatch(host,
+      m2Request('session.create', { projectId: projects.projects[0]!.projectId })) as { sessionId: string; conversationTitle: string }
+    assert.equal(created.length, 1)
+    assert.equal(context.sessionId, `jc-v1-${created[0]}`)
+    assert.equal(context.conversationTitle, '新对话')
+    assert.equal(desktopConversationContext().sessionId, 'jc-v1-m2-a', '电脑仍停在 A')
+    // 新建的对话立即可以发消息：已登记为本机对话。
+    assert.ok((await host.sendMessage(context.sessionId, '第一句')).runId)
+  } finally { m2Cleanup() }
+})
+
+test('M2-3/4：电脑停在 A，手机推进 B——B 在后台跑，进的就是电脑打开 B 时读的同一张运行表', async () => {
+  const executed: Array<{ conversationId: string; resourcePath: string; skills: string[] }> = []
+  try {
+    await m2Fixture()
+    const host = createDesktopConversationHost(async (_run, selected) => {
+      executed.push({ conversationId: selected.conversationId, resourcePath: selected.resourcePath,
+        skills: selected.skillNames || [] })
+      return await new Promise<string>(() => undefined)
+    })
+    const { projects } = await m2Fixture()
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    const receipt = await host.sendMessage('jc-v1-m2-b', '后台推进 B')
+    assert.deepEqual(executed, [{ conversationId: 'm2-b', resourcePath: '.harness-conversations/m2-b.md', skills: [] }],
+      '按 B 自己的对话执行，不带上 A 在电脑上勾选的 Skill')
+    assert.equal(desktopConversationContext().sessionId, 'jc-v1-m2-a', '电脑界面仍停在 A')
+    const run = desktopConversationRuns.get(memoryRunKey(m2Owner, '.harness-conversations/m2-b.md'))
+    assert.equal(run?.runId, receipt.runId)
+    assert.equal(run?.phase, 'running')
+    assert.equal(run?.userTurn?.content, '后台推进 B')
+    // 电脑打开 B 时按同一路径取运行：工作台用的就是这张表和这个路径格式。
+    const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+    assert.match(workbench, /const runs = desktopOnlyRuntime \? desktopConversationRuns/)
+    assert.match(workbench, /const HARNESS_CONVERSATION_PREFIX = '\.harness-conversations'/)
+    assert.match(workbench, /path: `\$\{HARNESS_CONVERSATION_PREFIX\}\/\$\{entry\.conversationId\}\.md`/)
+  } finally { m2Cleanup() }
+})
+
+test('M2-5：后台对话正在跑时再发同一对话得到 SESSION_BUSY，不会执行两次；A 不受影响', async () => {
+  let executions = 0
+  try {
+    const { projects } = await m2Fixture()
+    const host = createDesktopConversationHost(async () => { executions += 1; return await new Promise<string>(() => undefined) })
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    await host.sendMessage('jc-v1-m2-b', '第一条')
+    await assert.rejects(() => host.sendMessage('jc-v1-m2-b', '第二条'), /SESSION_BUSY/)
+    assert.equal(executions, 1)
+    // 电脑自己在 B 上点发送，走的也是 beginMemoryRun 的同一把锁。
+    assert.throws(() => beginMemoryRun(desktopConversationRuns, {
+      owner: m2Owner, resourcePath: '.harness-conversations/m2-b.md', conversationId: 'm2-b',
+      editTargetId: '', runtime: 'dh', userTurn: { id: 'desk', role: 'user', content: '电脑也发', createdAt: '' },
+    }), /SESSION_BUSY/)
+    await host.sendMessage('jc-v1-m2-a', 'A 照常')
+    assert.equal(executions, 2)
+  } finally { m2Cleanup() }
+})
+
+test('M2-6：没列出过的对话、别的项目的对话一律拒绝', async () => {
+  try {
+    const { host, projects } = await m2Fixture()
+    upsertHarnessConversationCatalogEntry(m2Entry('m2-c', '对话 C', '2026-10-25T04:00:00.000Z'))
+    await assert.rejects(() => host.sendMessage('jc-v1-m2-c', '没列过就发'), /SESSION_NOT_FOUND/)
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    assert.ok((await host.sendMessage('jc-v1-m2-c', '列过之后能发')).runId)
+    await assert.rejects(() => host.readSession('jc-v1-made-up'), /SESSION_NOT_FOUND/)
+    // 电脑切到别的项目后，旧项目的后台对话不再接受新命令（那个工作区已不归这个窗口）。
+    setDesktopConversationSelection({ ...m2Selection(), owner: '/Users/someone/other', conversationId: 'x',
+      resourcePath: '.harness-conversations/x.md' })
+    await assert.rejects(() => host.sendMessage('jc-v1-m2-b', '跨项目'), /SESSION_NOT_FOUND/)
+  } finally { m2Cleanup() }
+})
+
+test('M2：后台对话的运行进度推给订阅它的手机，不夹带历史轮次', async () => {
+  const previousWindow = globalThis.window
+  const published: Array<{ sessionId?: string; event?: { payload?: Record<string, unknown> } }> = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: { invoke: async (command: string, args?: typeof published[number]) => {
+      if (command === 'remote_bridge_publish' && args) published.push(args)
+    } } },
+  })
+  const stop = startDesktopConversationPublisher()
+  try {
+    const { projects } = await m2Fixture()
+    const host = createDesktopConversationHost(async () => await new Promise<string>(() => undefined))
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    await host.sendMessage('jc-v1-m2-b', '后台推进')
+    desktopConversationRuns.get(memoryRunKey(m2Owner, '.harness-conversations/m2-b.md'))!.status = '正在读取文件'
+    await until(() => published.some(item => item.sessionId === 'jc-v1-m2-b'
+      && (item.event?.payload?.run as { status?: string } | undefined)?.status === '正在读取文件'))
+    const event = published.find(item => item.sessionId === 'jc-v1-m2-b'
+      && (item.event?.payload?.run as { status?: string } | undefined)?.status === '正在读取文件')
+    assert.ok(event, '后台对话的进度必须推给手机')
+    assert.equal('turns' in (event!.event!.payload || {}), false)
+  } finally {
+    stop()
+    m2Cleanup()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
 })

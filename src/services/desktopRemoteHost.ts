@@ -14,18 +14,32 @@ export type DesktopRemoteEvent = {
   payload: unknown
 }
 
+export type DesktopRemoteProject = { projectId: string; name: string; current: boolean }
+export type DesktopRemoteSessionSummary = {
+  sessionId: string
+  title: string
+  updatedAt: string
+  current: boolean
+  running: boolean
+}
+
 type DesktopRemoteHostDependencies = {
   getContext: () => DesktopRemoteContext
+  /** 电脑当前对话之外、手机可以操作的对话（M2）。缺省即只认当前对话。 */
+  hasSession?: (sessionId: string) => boolean
+  listProjects?: () => Promise<DesktopRemoteProject[]>
+  listSessions?: (projectId: string) => Promise<DesktopRemoteSessionSummary[]>
+  createSession?: (projectId: string) => Promise<DesktopRemoteContext>
   readSession: (sessionId: string) => Promise<unknown>
-  sendMessage: (text: string) => Promise<{ runId: string } | void>
-  stopRun: () => Promise<string>
-  respondApproval: (approvalId: string, decision: 'approve' | 'reject' | 'always') => Promise<void>
+  sendMessage: (text: string, sessionId: string) => Promise<{ runId: string } | void>
+  stopRun: (sessionId: string) => Promise<string>
+  respondApproval: (approvalId: string, decision: 'approve' | 'reject' | 'always', sessionId: string) => Promise<void>
   subscribe: (listener: (event: DesktopRemoteEvent) => void) => () => void
-  isBusy?: () => boolean
+  isBusy?: (sessionId: string) => boolean
 }
 
 export class DesktopRemoteHost {
-  private sending = false
+  private readonly sending = new Set<string>()
 
   constructor(private readonly dependencies: DesktopRemoteHostDependencies) {}
 
@@ -39,35 +53,49 @@ export class DesktopRemoteHost {
     }
   }
 
+  async listProjects() {
+    return await this.dependencies.listProjects?.() ?? []
+  }
+
+  async listSessions(projectId: string) {
+    if (!this.dependencies.listSessions) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
+    return await this.dependencies.listSessions(projectId)
+  }
+
+  async createSession(projectId: string) {
+    if (!this.dependencies.createSession) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
+    return await this.dependencies.createSession(projectId)
+  }
+
   async readSession(sessionId: string) {
-    this.assertCurrentSession(sessionId)
+    this.assertKnownSession(sessionId)
     return await this.dependencies.readSession(sessionId)
   }
 
   subscribeSession(sessionId: string, emit: (event: DesktopRemoteEvent) => void) {
-    this.assertCurrentSession(sessionId)
+    this.assertKnownSession(sessionId)
     return this.dependencies.subscribe(event => {
-      if (event.sessionId === this.context().sessionId && event.sessionId === sessionId) emit(event)
+      if (event.sessionId === sessionId) emit(event)
     })
   }
 
   async sendMessage(sessionId: string, text: string) {
-    this.assertCurrentSession(sessionId)
+    this.assertKnownSession(sessionId)
     if (!text.trim()) throw new RemoteProtocolError('MESSAGE_EMPTY')
-    if (this.sending || this.dependencies.isBusy?.()) throw new RemoteProtocolError('SESSION_BUSY')
-    this.sending = true
+    if (this.sending.has(sessionId) || this.dependencies.isBusy?.(sessionId)) throw new RemoteProtocolError('SESSION_BUSY')
+    this.sending.add(sessionId)
     try {
-      const receipt = await this.dependencies.sendMessage(text)
+      const receipt = await this.dependencies.sendMessage(text, sessionId)
       if (!receipt?.runId) throw new RemoteProtocolError('RUN_NOT_STARTED')
       return receipt
     } finally {
-      this.sending = false
+      this.sending.delete(sessionId)
     }
   }
 
   async stopRun(sessionId: string) {
-    this.assertCurrentSession(sessionId)
-    return await this.dependencies.stopRun()
+    this.assertKnownSession(sessionId)
+    return await this.dependencies.stopRun(sessionId)
   }
 
   async respondApproval(
@@ -75,12 +103,13 @@ export class DesktopRemoteHost {
     approvalId: string,
     decision: 'approve' | 'reject' | 'always',
   ) {
-    this.assertCurrentSession(sessionId)
+    this.assertKnownSession(sessionId)
     if (!approvalId) throw new RemoteProtocolError('APPROVAL_NOT_FOUND')
-    await this.dependencies.respondApproval(approvalId, decision)
+    await this.dependencies.respondApproval(approvalId, decision, sessionId)
   }
 
-  private assertCurrentSession(sessionId: string) {
-    if (sessionId !== this.context().sessionId) throw new RemoteProtocolError('SESSION_NOT_CURRENT')
+  assertKnownSession(sessionId: string) {
+    if (sessionId && (sessionId === this.context().sessionId || this.dependencies.hasSession?.(sessionId))) return
+    throw new RemoteProtocolError('SESSION_NOT_FOUND')
   }
 }

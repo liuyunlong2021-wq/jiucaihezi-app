@@ -47,6 +47,12 @@ async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequ
   }
   if (!host) throw new RemoteProtocolError('RUNTIME_UNAVAILABLE')
   if (request.type === 'context.get') return host.context()
+  if (request.type === 'project.list') return { projects: await host.listProjects() }
+  if (request.type === 'session.list') {
+    const projectId = requiredString(payload, 'projectId', 200)
+    return { projectId, sessions: await host.listSessions(projectId) }
+  }
+  if (request.type === 'session.create') return await host.createSession(requiredString(payload, 'projectId', 200))
   if (request.type === 'session.attach') {
     const sessionId = requiredString(payload, 'sessionId', 200)
     // Rust 已先绑定订阅；读取官方历史期间发生的事件必须高于这条基线，交给 Mobile 重放。
@@ -62,7 +68,7 @@ async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequ
   if (request.type === 'session.read') return await host.readSession(requiredString(payload, 'sessionId', 200))
   if (request.type === 'session.subscribe') {
     const sessionId = requiredString(payload, 'sessionId', 200)
-    if (sessionId !== host.context().sessionId) throw new Error('SESSION_NOT_CURRENT')
+    host.assertKnownSession(sessionId)
     return { subscribed: true, sessionId }
   }
   if (request.type === 'message.send') {

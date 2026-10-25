@@ -34,6 +34,15 @@ export type MobileRemoteRun = {
 
 export type MobileRemoteState = 'idle' | 'connecting' | 'connected' | 'offline'
 
+export type MobileRemoteProject = { projectId: string; name: string; current: boolean }
+export type MobileRemoteSessionSummary = {
+  sessionId: string
+  title: string
+  updatedAt: string
+  current: boolean
+  running: boolean
+}
+
 export type MobilePendingMessage = {
   commandId: string
   content: string
@@ -51,6 +60,8 @@ export type MobileRemoteView = {
   run: MobileRemoteRun
   lastSeq: number
   pendingMessages: MobilePendingMessage[]
+  /** true：跟着电脑当前打开的对话走；false：停在手机自己选的对话上（M2）。 */
+  following: boolean
 }
 
 export type MobileRemoteApprovalDecision = 'approve' | 'reject' | 'always'
@@ -87,6 +98,8 @@ function errorCode(cause: unknown): string {
 export class MobileRemoteClient {
   private state: MobileRemoteState = 'idle'
   private context: MobileRemoteContext | null = null
+  /** 手机自己选定的对话；为 null 时跟随电脑当前对话。 */
+  private pinned: MobileRemoteContext | null = null
   private contextRetry: ReturnType<typeof setInterval> | undefined
   private refreshTimer: ReturnType<typeof setTimeout> | undefined
   private turns: MobileRemoteTurn[] = []
@@ -120,6 +133,7 @@ export class MobileRemoteClient {
       run: this.run,
       lastSeq: this.lastSeq,
       pendingMessages: this.pendingMessages,
+      following: this.pinned === null,
     }
   }
 
@@ -142,7 +156,8 @@ export class MobileRemoteClient {
         await this.listenerReady
       }
       if (this.view.state === 'offline') throw new RemoteProtocolError('REMOTE_NOT_CONNECTED')
-      await this.enterWith(parseContext(await this.transport.request({ type: 'context.get', payload: {} })))
+      await this.enterWith(this.pinned
+        ?? parseContext(await this.transport.request({ type: 'context.get', payload: {} })))
       return
     } catch (error) {
       // 电脑上还没打开对话时不能就此离线：离线状态下 handle() 会忽略一切事件。
@@ -172,6 +187,7 @@ export class MobileRemoteClient {
   }
 
   private async refreshContext() {
+    if (this.pinned) return false
     const sessionId = this.context?.sessionId
     let next: MobileRemoteContext
     try {
@@ -255,6 +271,36 @@ export class MobileRemoteClient {
     this.notify()
   }
 
+  async listProjects() {
+    const result = await this.transport.request({ type: 'project.list', payload: {} }) as { projects?: unknown }
+    return Array.isArray(result?.projects) ? result.projects as MobileRemoteProject[] : []
+  }
+
+  async listSessions(projectId: string) {
+    const result = await this.transport.request({ type: 'session.list', payload: { projectId } }) as { sessions?: unknown }
+    return Array.isArray(result?.sessions) ? result.sessions as MobileRemoteSessionSummary[] : []
+  }
+
+  async createSession(projectId: string) {
+    return parseContext(await this.transport.request({ type: 'session.create', payload: { projectId } }))
+  }
+
+  /** 停在手机选的这个对话上：电脑切换对话、断线重连都不再把手机带走。 */
+  async openSession(context: MobileRemoteContext) {
+    this.pinned = parseContext(context)
+    this.state = 'connecting'
+    this.notify()
+    await this.enterWith(this.pinned)
+  }
+
+  /** 回到跟随电脑当前对话。 */
+  async followDesktop() {
+    this.pinned = null
+    this.state = 'connecting'
+    this.notify()
+    await this.enterWith(parseContext(await this.transport.request({ type: 'context.get', payload: {} })))
+  }
+
   /** 合同 §11：副作用命令在未取得回执时不得自动重发，由用户决定。 */
   async sendMessage(text: string) {
     if (!text.trim()) throw new RemoteProtocolError('MESSAGE_EMPTY')
@@ -308,7 +354,8 @@ export class MobileRemoteClient {
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined
       void this.readCurrentSession(false).catch(async cause => {
-        if (errorCode(cause) === 'SESSION_NOT_CURRENT' && this.state === 'connected') {
+        const code = errorCode(cause)
+        if ((code === 'SESSION_NOT_CURRENT' || code === 'SESSION_NOT_FOUND') && this.state === 'connected') {
           try { await this.refreshContext() } catch { /* 下一次补读继续尝试。 */ }
         }
       }).finally(() => this.scheduleRefresh())
@@ -448,7 +495,7 @@ export class MobileRemoteClient {
   }
 
   private handleContextChange(next: MobileRemoteContext) {
-    if (this.context?.sessionId === next?.sessionId) return
+    if (this.pinned || this.context?.sessionId === next?.sessionId) return
     if (!next?.sessionId) {
       this.waitForContext()
       return

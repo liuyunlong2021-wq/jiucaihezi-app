@@ -121,3 +121,16 @@ test('控制器对外只有只读投影与三条控制动作', () => {
   assert.match(remote, /const stop = \(\) => run\(\(\) => client\.stopRun\(\)\)/)
   assert.match(remote, /const respondApproval = \(approvalId: string, decision: MobileRemoteApprovalDecision\)/)
 })
+
+test('M2：聊天页能打开对话列表；列表先列项目再列对话，可新建、可跟随电脑', () => {
+  const session = source('src/mobile/MobileSessionView.vue')
+  const list = source('src/mobile/MobileConversationList.vue')
+  const controller = source('src/mobile/MobileController.vue')
+  assert.match(session, /\$emit\('browse'\)/)
+  assert.match(controller, /<MobileConversationList/)
+  assert.match(list, /listProjects\(\)/)
+  assert.match(list, /listSessions\(/)
+  assert.match(list, /新建对话/)
+  assert.match(list, /跟随电脑当前对话/)
+  assert.match(list, /电脑正在运行/)
+})

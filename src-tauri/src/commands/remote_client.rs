@@ -37,6 +37,9 @@ const MOBILE_REQUEST_TYPES: &[&str] = &[
     "session.read",
     "session.attach",
     "session.subscribe",
+    "project.list",
+    "session.list",
+    "session.create",
     "message.send",
     "run.stop",
     "approval.respond",
@@ -1015,6 +1018,17 @@ mod tests {
             assert!(
                 bridge.contains(&format!("\"{message_type}\"")),
                 "{message_type} 不在 Desktop 白名单里"
+            );
+        }
+    }
+
+    /// M2 任选对话：列项目、列对话、新建对话三种请求手机能发出。
+    #[test]
+    fn mobile_can_browse_and_create_conversations() {
+        for message_type in ["project.list", "session.list", "session.create"] {
+            assert!(
+                MOBILE_REQUEST_TYPES.contains(&message_type),
+                "{message_type} 不在手机白名单里"
             );
         }
     }
