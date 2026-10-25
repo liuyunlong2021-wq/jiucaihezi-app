@@ -45,3 +45,12 @@ test('crowds are one shared lineup asset per group, referenced with headcount an
   assert.match(read('jc-seedance'), /太虚宗弟子一千余人站成方阵/)
   assert.match(read('h3-prompt-writing'), /crowd from <Picture 4>/)
 })
+
+test('the identity close-up of the character sheet is a 30–35° three-quarter chest-up head shot, not facing the camera', () => {
+  for (const file of ['9-16.md', '16-9.md']) {
+    const text = readFileSync(`public/skills/jc-juese-geshi/references/${file}`, 'utf8')
+    assert.match(text, /约30°至35°斜侧齐胸头部特写/, file)
+    assert.match(text, /不正对镜头/, file)
+    assert.doesNotMatch(text, /双眼直视镜头/, file)
+  }
+})
