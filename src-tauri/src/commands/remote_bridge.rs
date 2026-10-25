@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
+use super::remote_relay::{self, RelayTicket};
+
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 const CHUNK_BYTES: usize = 60 * 1024;
 // ponytail: bounded reassembly; paginate old history if a snapshot ever exceeds 8 MiB.
@@ -54,6 +56,9 @@ pub struct RemotePairingOffer {
     pub desktop_public_key: String,
     pub offer_id: String,
     pub expires_at: u64,
+    /// 中继房间（M3b）：手机不在同一网络时经它连回来。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<RelayTicket>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -81,6 +86,7 @@ pub struct RemoteBridgeCore {
     addresses: Vec<String>,
     offer: Option<(RemotePairingOffer, bool)>,
     devices: HashMap<String, RemoteDevice>,
+    relay: Option<RelayTicket>,
 }
 
 impl RemoteBridgeCore {
@@ -93,7 +99,12 @@ impl RemoteBridgeCore {
             addresses: Vec::new(),
             offer: None,
             devices: HashMap::new(),
+            relay: None,
         }
+    }
+
+    pub fn set_relay(&mut self, relay: Option<RelayTicket>) {
+        self.relay = relay;
     }
 
     pub fn status(&self) -> RemoteBridgeStatus {
@@ -131,6 +142,7 @@ impl RemoteBridgeCore {
             desktop_public_key: STANDARD_NO_PAD.encode(&self.public_key),
             offer_id,
             expires_at: self.now + PAIRING_TTL_MS,
+            relay: self.relay.clone(),
         };
         self.offer = Some((offer.clone(), false));
         offer
@@ -486,6 +498,19 @@ fn start_bridge(app: &AppHandle, state: &RemoteBridgeState) -> Result<RemoteBrid
         .lock()
         .map_err(lock_error)?
         .set_listener(addresses);
+    // 中继拿不到（钥匙串出错）不影响局域网使用。
+    let relay = load_or_create_relay_ticket()
+        .map_err(|error| bridge_log(&format!("relay ticket unavailable: {error}")))
+        .ok();
+    state.core.lock().map_err(lock_error)?.set_relay(relay.clone());
+    if let Some(ticket) = relay {
+        let relay_state = state.clone();
+        thread::spawn(move || {
+            remote_relay::run_desktop(ticket, port, move || {
+                generation_is_current(&relay_state, generation)
+            })
+        });
+    }
     let server_state = state.clone();
     let app = app.clone();
     thread::spawn(move || accept_loop(listener, app, server_state, generation));
@@ -886,11 +911,14 @@ fn handle_connection_with_dispatch(
         ) {
             return Err("AUTH_INVALID".to_string());
         }
-        let addresses = state.core.lock().map_err(lock_error)?.addresses.clone();
+        let (addresses, relay) = {
+            let core = state.core.lock().map_err(lock_error)?;
+            (core.addresses.clone(), core.relay.clone())
+        };
         write_encrypted_json(
             &mut stream,
             &transport,
-            &serde_json::json!({ "ok": true, "addresses": addresses }),
+            &serde_json::json!({ "ok": true, "addresses": addresses, "relay": relay }),
         )?;
         auth.device_id
     } else {
@@ -1403,6 +1431,32 @@ fn load_or_create_keypair() -> Result<Keypair, String> {
     Ok(keypair)
 }
 
+/// 房间号与密钥一经生成就固定：已配对的手机靠它们找回这台电脑。
+/// `JIUCAIHEZI_RELAY_URL` 只改去哪个中继（开发时指到 wrangler dev），不换房间。
+fn load_or_create_relay_ticket() -> Result<RelayTicket, String> {
+    let url = std::env::var("JIUCAIHEZI_RELAY_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| remote_relay::DEFAULT_RELAY_URL.to_string());
+    let stored = crate::secure_store::get_remote_bridge_relay()?
+        .and_then(|value| serde_json::from_str::<RelayTicket>(&value).ok());
+    let ticket = match stored {
+        Some(ticket) => RelayTicket { url, ..ticket },
+        None => {
+            let ticket = RelayTicket::generate(&url);
+            crate::secure_store::set_remote_bridge_relay(
+                &serde_json::to_string(&ticket).map_err(|error| error.to_string())?,
+            )?;
+            ticket
+        }
+    };
+    if ticket.is_valid() {
+        Ok(ticket)
+    } else {
+        Err("RELAY_TICKET_INVALID".to_string())
+    }
+}
+
 fn persist_devices(core: &RemoteBridgeCore) -> Result<(), String> {
     crate::secure_store::set_remote_bridge_devices(&core.serialized_devices())
 }
@@ -1670,6 +1724,9 @@ mod tests {
             let mut core = state.core.lock().unwrap();
             core.authorize_device("iphone-1", "iPhone", "test-token", &mobile.public);
             core.set_listener(vec!["192.168.1.2:9527".into(), "Mac.local:9527".into()]);
+            core.set_relay(Some(crate::commands::remote_relay::RelayTicket::generate(
+                crate::commands::remote_relay::DEFAULT_RELAY_URL,
+            )));
             core.public_key.clone()
         };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1750,6 +1807,9 @@ mod tests {
             auth["addresses"],
             serde_json::json!(["192.168.1.2:9527", "Mac.local:9527"])
         );
+        // 已配对的手机在家连一次就拿到中继票据，出门后才连得回来（M3b）。
+        assert_eq!(auth["relay"]["url"], crate::commands::remote_relay::DEFAULT_RELAY_URL);
+        assert_eq!(auth["relay"]["roomId"].as_str().unwrap().len(), 32);
 
         let request = |id: &str, kind: &str, payload: serde_json::Value| {
             serde_json::json!({
@@ -1971,5 +2031,24 @@ mod tests {
                 "100.64.0.7".to_string(),
             ]
         );
+    }
+
+    /// M3b：二维码带上中继房间号与密钥，手机第一次就能在外面连回来。
+    #[test]
+    fn the_pairing_offer_carries_the_relay_room() {
+        let mut core = RemoteBridgeCore::new(noise_keypair(), 1);
+        core.set_listener(vec!["192.168.1.2:9527".into()]);
+        let offer = core.create_offer("offer-1".into(), 1);
+        assert_eq!(offer.relay, None);
+        assert!(!serde_json::to_string(&offer).unwrap().contains("relay"), "没有中继时不写这个字段");
+        let ticket = crate::commands::remote_relay::RelayTicket::generate(
+            crate::commands::remote_relay::DEFAULT_RELAY_URL,
+        );
+        core.set_relay(Some(ticket.clone()));
+        let offer = core.create_offer("offer-2".into(), 1);
+        assert_eq!(offer.relay, Some(ticket.clone()));
+        let wire = serde_json::to_value(&offer).unwrap();
+        assert_eq!(wire["relay"]["roomId"], ticket.room_id);
+        assert_eq!(wire["relay"]["secret"], ticket.secret);
     }
 }

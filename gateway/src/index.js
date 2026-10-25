@@ -17,6 +17,9 @@ import {
   sessionCookie
 } from './auth-service.js';
 import { deleteSyncUserData, handleSync } from './sync-service.js';
+import { handleRelay } from './relay-room.js';
+
+export { RelayRoom } from './relay-room.js';
 
 async function handleLogin(request, env) {
   const body = await readJson(request);
@@ -515,6 +518,7 @@ export default {
       if (request.method === 'OPTIONS') return handleOptions(request);
       const url = new URL(request.url);
       if (ROOT_ICON_REDIRECTS.has(url.pathname)) return await handleRootIcon(request, env, url.pathname);
+      if (url.pathname.startsWith('/relay/v1/')) return await handleRelay(request, env);
       if (request.method === 'GET' && url.pathname === '/health') return handleHealth(request);
       if (url.pathname.startsWith('/landing/')) return await handleLandingAsset(request, env, url.pathname);
       if (url.pathname === '/support' || url.pathname === '/privacy' || url.pathname === '/terms') {

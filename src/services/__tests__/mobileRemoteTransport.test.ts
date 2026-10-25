@@ -77,3 +77,24 @@ test('桌面生成的配对信息能被手机端解析（二维码与粘贴通�
 
   assert.deepEqual(parsePairingOffer(JSON.stringify(created)), created)
 })
+
+const relay = {
+  url: 'wss://api.jiucaihezi.studio/relay/v1',
+  roomId: 'a'.repeat(32),
+  secret: 'b'.repeat(64),
+}
+
+test('M3b：二维码可带中继房间，配对时原样交给 Rust；字段不全或格式不对一律拒绝', () => {
+  assert.deepEqual(parsePairingOffer(JSON.stringify({ ...offer, relay })), { ...offer, relay })
+  for (const bad of [
+    { ...relay, url: 'http://evil.example/relay' },
+    { ...relay, roomId: '../desktop' },
+    { ...relay, secret: 'short' },
+    { ...relay, extra: 1 },
+    'wss://api.jiucaihezi.studio/relay/v1',
+  ]) {
+    assert.throws(() => parsePairingOffer(JSON.stringify({ ...offer, relay: bad })), /PAIRING_OFFER_INVALID/)
+  }
+  const transport = readFileSync('src/services/mobileRemoteTransport.ts', 'utf8')
+  assert.match(transport, /relay: offer\.relay \?\? null/)
+})

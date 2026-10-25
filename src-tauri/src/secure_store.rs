@@ -6,6 +6,7 @@ const GATEWAY_SESSION_ACCOUNT: &str = "gateway-session-token";
 const COMFY_WORKFLOW_ACCOUNT: &str = "comfy-workflow-api-key";
 const REMOTE_BRIDGE_IDENTITY_ACCOUNT: &str = "remote-bridge-identity-v1";
 const REMOTE_BRIDGE_DEVICES_ACCOUNT: &str = "remote-bridge-devices-v1";
+const REMOTE_BRIDGE_RELAY_ACCOUNT: &str = "remote-bridge-relay-v1";
 const MOBILE_REMOTE_IDENTITY_ACCOUNT: &str = "mobile-remote-identity-v1";
 const MOBILE_REMOTE_CREDENTIAL_ACCOUNT: &str = "mobile-remote-credential-v1";
 
@@ -72,6 +73,17 @@ pub(crate) fn get_remote_bridge_devices() -> Result<Option<String>, String> {
 
 pub(crate) fn set_remote_bridge_devices(value: &str) -> Result<(), String> {
     remote_bridge_entry(REMOTE_BRIDGE_DEVICES_ACCOUNT)?
+        .set_password(value)
+        .map_err(|error| error.to_string())
+}
+
+/// 手机控制器中继的房间号与密钥（M3b），与 Desktop 的 Noise 身份同级保管。
+pub(crate) fn get_remote_bridge_relay() -> Result<Option<String>, String> {
+    get_entry_value(remote_bridge_entry(REMOTE_BRIDGE_RELAY_ACCOUNT)?)
+}
+
+pub(crate) fn set_remote_bridge_relay(value: &str) -> Result<(), String> {
+    remote_bridge_entry(REMOTE_BRIDGE_RELAY_ACCOUNT)?
         .set_password(value)
         .map_err(|error| error.to_string())
 }

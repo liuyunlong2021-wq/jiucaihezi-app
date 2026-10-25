@@ -9,6 +9,21 @@ export type RemotePairingOffer = {
   desktopPublicKey: string
   offerId: string
   expiresAt: number
+  /** 电脑的中继房间（M3b）：手机不在同一网络时经它连回去。 */
+  relay?: RemoteRelayTicket
+}
+
+export type RemoteRelayTicket = { url: string; roomId: string; secret: string }
+
+function parseRelayTicket(value: unknown): RemoteRelayTicket {
+  const relay = value as Record<string, unknown> | null
+  if (!relay || typeof relay !== 'object'
+    || Object.keys(relay).sort().join(',') !== 'roomId,secret,url'
+    || typeof relay.url !== 'string' || !/^wss?:\/\/[^\s]+$/.test(relay.url)
+    || typeof relay.roomId !== 'string' || !/^[a-f0-9]{32}$/.test(relay.roomId)
+    || typeof relay.secret !== 'string' || relay.secret.length < 32 || relay.secret.length > 256)
+    throw new Error('PAIRING_OFFER_INVALID')
+  return { url: relay.url, roomId: relay.roomId, secret: relay.secret }
 }
 
 export type MobileRemoteStatus = {
@@ -44,7 +59,8 @@ export function parsePairingOffer(raw: string): RemotePairingOffer {
   }
   const offer = parsed as Record<string, unknown> | null
   if (!offer || typeof offer !== 'object') throw new Error('PAIRING_OFFER_INVALID')
-  if (Object.keys(offer).sort().join(',') !== 'address,desktopPublicKey,expiresAt,offerId,version')
+  const keys = Object.keys(offer).filter(key => key !== 'relay').sort().join(',')
+  if (keys !== 'address,desktopPublicKey,expiresAt,offerId,version')
     throw new Error('PAIRING_OFFER_INVALID')
   if (offer.version !== 1
     || typeof offer.address !== 'string' || !offer.address.trim()
@@ -58,6 +74,7 @@ export function parsePairingOffer(raw: string): RemotePairingOffer {
     desktopPublicKey: String(offer.desktopPublicKey).trim(),
     offerId: String(offer.offerId).trim(),
     expiresAt: offer.expiresAt,
+    ...'relay' in offer ? { relay: parseRelayTicket(offer.relay) } : {},
   }
 }
 
@@ -95,6 +112,7 @@ export const pairMobileRemote = (offer: RemotePairingOffer, deviceName: string) 
     offerId: offer.offerId,
     desktopPublicKey: offer.desktopPublicKey,
     deviceName,
+    relay: offer.relay ?? null,
   })
 
 export const connectMobileRemote = (address?: string) =>

@@ -38,7 +38,7 @@ function submitPasted() {
     <p class="state" :class="{ offline: !status?.connected }">
       <JcIcon :name="status?.connected ? 'check_circle' : 'link_off'" />
       <span v-if="status?.connected && waitingForConversation">已连接电脑，等待电脑打开对话：请在电脑上打开一个对话</span>
-      <span v-else-if="status?.connected">已连接到 {{ status.address }}</span>
+      <span v-else-if="status?.connected">已连接到 {{ status.address === 'relay' ? '云端中继' : status.address }}</span>
       <span v-else-if="status?.paired">已配对该电脑，可直接重新连接</span>
       <span v-else>还没有和电脑配对</span>
     </p>
@@ -70,7 +70,7 @@ function submitPasted() {
 
     <details v-if="status?.paired && !status?.connected" class="fallback">
       <summary>编辑电脑地址（在外面用 Tailscale 时）</summary>
-      <p>填电脑在 Tailscale 里的地址（100. 开头）或主机名；不写端口就用配对时的端口。上次连上的地址：{{ status?.address || '无' }}</p>
+      <p>填电脑在 Tailscale 里的地址（100. 开头）或主机名；不写端口就用配对时的端口。上次连上的地址：{{ status?.address === 'relay' ? '云端中继' : status?.address || '无' }}</p>
       <input
         v-model="manualAddress"
         type="text"

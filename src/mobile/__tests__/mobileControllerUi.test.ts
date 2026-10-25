@@ -142,3 +142,8 @@ test('M3a：配对过的手机可手填电脑地址（Tailscale 地址或主机�
   assert.match(pairing, /\$emit\('connect', manualAddress\.trim\(\)\)/)
   assert.match(remote, /const reconnect = \(address\?: string\) => run\(async \(\) => \{\n\s+status\.value = await connectMobileRemote\(address\)/)
 })
+
+test('M3b：经中继连上时状态写「云端中继」，不显示内部候选名', () => {
+  const pairing = source('src/mobile/MobilePairingView.vue')
+  assert.match(pairing, /status\.address === 'relay' \? '云端中继' : status\.address/)
+})

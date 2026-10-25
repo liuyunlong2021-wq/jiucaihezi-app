@@ -44,6 +44,8 @@ dirs-next = "2.0"
 notify = "8.2"
 tauri-plugin-opener = "2.5.4"
 local-ip-address = "0.6"
+# 手机控制器中继（M3b）：两端都只做出站 WebSocket；复用已有的 rustls/ring。
+tungstenite = { version = "0.26", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # 单实例：没有它，双击图标会起第二个完整进程（各自一份 runner 与 Rust 全局状态）。

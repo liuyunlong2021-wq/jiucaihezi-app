@@ -18,6 +18,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+use super::remote_relay::{self, RELAY_CANDIDATE, RelayTicket};
 use super::remote_bridge::{
     MAX_FRAME_BYTES, NOISE_PATTERN, lock_error, noise_keypair, now_ms, read_encrypted,
     read_encrypted_json, read_frame, write_encrypted_json, write_frame,
@@ -77,6 +78,9 @@ struct StoredCredential {
     /// Desktop 认证时报上的全部地址（IP + Bonjour 名）。信任只认公钥，地址只是去哪找它。
     #[serde(default)]
     addresses: Vec<String>,
+    /// 电脑的中继房间（M3b）：局域网地址都不通时经它连回去。
+    #[serde(default)]
+    relay: Option<RelayTicket>,
 }
 
 type EventCallback = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
@@ -88,6 +92,8 @@ struct DesktopSession {
     address: String,
     /// 本次认证时 Desktop 报上的地址清单，连上后写回凭证。
     advertised: Vec<String>,
+    /// 本次认证时 Desktop 报上的中继房间，连上后写回凭证。
+    relay: Option<RelayTicket>,
     device_id: String,
     stream: Mutex<TcpStream>,
     transport: Arc<Mutex<TransportState>>,
@@ -205,6 +211,7 @@ fn socket_address(raw: &str) -> &str {
 /// 完成 Noise XX 发起方握手，并校验对端就是二维码里那把静态公钥。
 fn open_encrypted(
     address: &str,
+    relay: Option<&RelayTicket>,
     identity: &Keypair,
     desktop_public_key: &[u8],
 ) -> Result<(TcpStream, TransportState), String> {
@@ -216,7 +223,12 @@ fn open_encrypted(
         .map_err(|error| error.to_string())?
         .build_initiator()
         .map_err(|error| error.to_string())?;
-    let mut stream = connect_tcp(socket_address(address))?;
+    // 中继只换传输：下面的 Noise 握手与公钥校验照旧，中继看不到明文。
+    let mut stream = if address == RELAY_CANDIDATE {
+        remote_relay::connect_mobile(relay.ok_or_else(|| "RELAY_TICKET_MISSING".to_string())?)?
+    } else {
+        connect_tcp(socket_address(address))?
+    };
     stream
         .set_read_timeout(Some(TRANSPORT_TIMEOUT))
         .map_err(|error| error.to_string())?;
@@ -281,11 +293,19 @@ fn candidate_addresses(credential: &StoredCredential, explicit: Option<&str>) ->
         }];
     }
     let mut candidates: Vec<String> = Vec::new();
-    for address in std::iter::once(&credential.address).chain(&credential.addresses) {
+    let relay = credential.relay.as_ref().map(|_| RELAY_CANDIDATE.to_string());
+    for address in std::iter::once(&credential.address)
+        .chain(&credential.addresses)
+        .chain(&relay)
+    {
         let address = address.trim();
         if !address.is_empty() && !candidates.iter().any(|known| known == address) {
             candidates.push(address.to_string());
         }
+    }
+    // 没有中继票据时不能把上次成功的「relay」当地址去连。
+    if credential.relay.is_none() {
+        candidates.retain(|address| address != RELAY_CANDIDATE);
     }
     candidates
 }
@@ -321,6 +341,7 @@ fn connect_first(
     Err(failure.unwrap_or_else(|| "PAIRING_ADDRESS_INVALID".to_string()))
 }
 
+#[cfg(test)]
 fn pair_with_desktop(
     address: &str,
     offer_id: &str,
@@ -329,7 +350,61 @@ fn pair_with_desktop(
     identity: &StoredDeviceIdentity,
     keypair: &Keypair,
 ) -> Result<StoredCredential, String> {
-    let (mut stream, transport) = open_encrypted(address, keypair, desktop_public_key)?;
+    pair_first(
+        &[address.to_string()],
+        None,
+        offer_id,
+        desktop_public_key,
+        device_name,
+        identity,
+        keypair,
+    )
+}
+
+/// 依次尝试候选地址，用**第一个完成 Noise 握手**的那条去配对。握手之后不再换地址：
+/// 电脑那边已经在等用户点允许，再从另一条路发一次会变成第二个配对请求。
+fn pair_first(
+    candidates: &[String],
+    relay: Option<&RelayTicket>,
+    offer_id: &str,
+    desktop_public_key: &[u8],
+    device_name: &str,
+    identity: &StoredDeviceIdentity,
+    keypair: &Keypair,
+) -> Result<StoredCredential, String> {
+    let mut failure = "PAIRING_ADDRESS_INVALID".to_string();
+    for address in candidates {
+        match open_encrypted(address, relay, keypair, desktop_public_key) {
+            Ok((stream, transport)) => {
+                return pair_over(
+                    stream,
+                    transport,
+                    address,
+                    relay,
+                    offer_id,
+                    desktop_public_key,
+                    device_name,
+                    identity,
+                );
+            }
+            Err(error) if error == "DESKTOP_KEY_MISMATCH" => return Err(error),
+            Err(error) => failure = error,
+        }
+    }
+    Err(failure)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pair_over(
+    mut stream: TcpStream,
+    transport: TransportState,
+    address: &str,
+    relay: Option<&RelayTicket>,
+    offer_id: &str,
+    desktop_public_key: &[u8],
+    device_name: &str,
+    identity: &StoredDeviceIdentity,
+) -> Result<StoredCredential, String> {
     let transport = Arc::new(Mutex::new(transport));
     write_encrypted_json(
         &mut stream,
@@ -364,6 +439,7 @@ fn pair_with_desktop(
         desktop_public_key: STANDARD_NO_PAD.encode(desktop_public_key),
         address: address.to_string(),
         addresses: Vec::new(),
+        relay: relay.cloned(),
     })
 }
 
@@ -376,7 +452,12 @@ fn connect_session(
 ) -> Result<Arc<DesktopSession>, String> {
     let desktop_public_key = decode_key(&credential.desktop_public_key)
         .ok_or_else(|| "DESKTOP_KEY_INVALID".to_string())?;
-    let (mut stream, transport) = open_encrypted(address, keypair, &desktop_public_key)?;
+    let (mut stream, transport) = open_encrypted(
+        address,
+        credential.relay.as_ref(),
+        keypair,
+        &desktop_public_key,
+    )?;
     let transport = Arc::new(Mutex::new(transport));
     write_encrypted_json(
         &mut stream,
@@ -404,6 +485,10 @@ fn connect_session(
                 .collect()
         })
         .unwrap_or_default();
+    let relay = response
+        .get("relay")
+        .and_then(|value| serde_json::from_value::<RelayTicket>(value.clone()).ok())
+        .filter(RelayTicket::is_valid);
     // 认证之后这是一条长期连接：留着读超时会把空闲连接读死。
     stream
         .set_read_timeout(None)
@@ -422,6 +507,7 @@ fn connect_session(
     Ok(Arc::new(DesktopSession {
         address: address.to_string(),
         advertised,
+        relay,
         device_id: credential.device_id.clone(),
         stream: Mutex::new(stream),
         transport,
@@ -526,8 +612,10 @@ pub async fn mobile_remote_pair(
     offer_id: String,
     desktop_public_key: String,
     device_name: String,
+    relay: Option<RelayTicket>,
 ) -> Result<MobileRemoteStatus, String> {
     let target = address.trim().to_string();
+    let relay = relay.filter(RelayTicket::is_valid);
     if target.is_empty() || target.len() > 256 {
         return Err("PAIRING_ADDRESS_INVALID".to_string());
     }
@@ -545,7 +633,20 @@ pub async fn mobile_remote_pair(
     // 这一等可能要接近 5 分钟（用户要在 Desktop 上点允许），不能占着 IPC 线程。
     let credential = tokio::task::spawn_blocking(move || {
         let (identity, keypair) = load_or_create_identity()?;
-        pair_with_desktop(&target, &offer, &public_key, &name, &identity, &keypair)
+        // 先走二维码里的局域网地址，不通再经中继（手机与电脑不在同一网络时）。
+        let mut candidates = vec![target];
+        if relay.is_some() {
+            candidates.push(RELAY_CANDIDATE.to_string());
+        }
+        pair_first(
+            &candidates,
+            relay.as_ref(),
+            &offer,
+            &public_key,
+            &name,
+            &identity,
+            &keypair,
+        )
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -592,6 +693,7 @@ pub async fn mobile_remote_connect(
     .map_err(|error| error.to_string())??;
     let target = session.address.clone();
     let advertised = session.advertised.clone();
+    let relay = session.relay.clone().or_else(|| credential.relay.clone());
 
     let mut guard = state.session.lock().map_err(lock_error)?;
     if let Some(previous) = guard.take() {
@@ -605,10 +707,11 @@ pub async fn mobile_remote_connect(
     } else {
         advertised
     };
-    if credential.address != target || credential.addresses != addresses {
+    if credential.address != target || credential.addresses != addresses || credential.relay != relay {
         let updated = StoredCredential {
             address: target.clone(),
             addresses,
+            relay,
             ..credential.clone()
         };
         let serialized = serde_json::to_string(&updated).map_err(|error| error.to_string())?;
@@ -700,6 +803,7 @@ mod tests {
             desktop_public_key: STANDARD_NO_PAD.encode(desktop_public_key),
             address: address.to_string(),
             addresses: Vec::new(),
+            relay: None,
         }
     }
 
@@ -1058,16 +1162,139 @@ mod tests {
         private: Vec<u8>,
         advertised: serde_json::Value,
     ) -> thread::JoinHandle<()> {
+        spawn_desktop_replying(
+            listener,
+            private,
+            serde_json::json!({ "ok": true, "addresses": advertised }),
+        )
+    }
+
+    fn spawn_desktop_replying(
+        listener: TcpListener,
+        private: Vec<u8>,
+        reply: serde_json::Value,
+    ) -> thread::JoinHandle<()> {
         thread::spawn(move || {
             let (mut stream, transport) = accept_encrypted(&listener, &private);
-            let _auth: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
-            write_encrypted_json(
-                &mut stream,
-                &transport,
-                &serde_json::json!({ "ok": true, "addresses": advertised }),
-            )
-            .unwrap();
+            let _request: serde_json::Value =
+                read_encrypted_json(&mut stream, &transport).unwrap();
+            write_encrypted_json(&mut stream, &transport, &reply).unwrap();
         })
+    }
+
+    const RELAY_SECRET: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
+    fn relay_ticket(url: &str) -> RelayTicket {
+        RelayTicket {
+            url: url.to_string(),
+            room_id: "c".repeat(32),
+            secret: RELAY_SECRET.to_string(),
+        }
+    }
+
+    /// 电脑端的中继代理：把中继来的连接接到假电脑的监听端口。
+    fn relay_desktop(ticket: RelayTicket, port: u16) -> Arc<AtomicBool> {
+        let alive = Arc::new(AtomicBool::new(true));
+        let running = Arc::clone(&alive);
+        thread::spawn(move || {
+            remote_relay::run_desktop(ticket, port, move || running.load(Ordering::Acquire))
+        });
+        alive
+    }
+
+    /// 电脑的中继控制连接上线前，手机会先得到 RELAY_DESKTOP_OFFLINE。
+    fn until_relay_online<T>(mut attempt: impl FnMut() -> Result<T, String>) -> T {
+        for _ in 0..80 {
+            match attempt() {
+                Ok(value) => return value,
+                Err(error) if error == "RELAY_DESKTOP_OFFLINE" => {
+                    thread::sleep(Duration::from_millis(50))
+                }
+                Err(error) => panic!("unexpected error: {error}"),
+            }
+        }
+        panic!("relay never came online");
+    }
+
+    #[test]
+    fn candidates_end_with_the_relay_when_the_desktop_gave_one() {
+        let mut cred = credential("192.168.1.2:9527", &[0; 32]);
+        cred.relay = Some(relay_ticket("wss://relay.example/relay/v1"));
+        assert_eq!(
+            candidate_addresses(&cred, None),
+            vec!["192.168.1.2:9527".to_string(), RELAY_CANDIDATE.to_string()]
+        );
+        // 手填地址仍只试那一个。
+        assert_eq!(
+            candidate_addresses(&cred, Some("10.0.0.8:9527")),
+            vec!["10.0.0.8:9527".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_phone_outside_reaches_the_paired_desktop_through_the_relay() {
+        let url = remote_relay::fake::spawn(RELAY_SECRET);
+        let (listener, live, server) = desktop_listener();
+        let port = listener.local_addr().unwrap().port();
+        let ticket = relay_ticket(&url);
+        let desktop = spawn_desktop_replying(
+            listener,
+            server.private.clone(),
+            serde_json::json!({ "ok": true, "addresses": [live], "relay": ticket }),
+        );
+        let stop = relay_desktop(ticket.clone(), port);
+        let (_, keypair) = device_identity();
+        let mut cred = credential(&dead_address(), &server.public);
+        cred.relay = Some(ticket.clone());
+
+        let session = until_relay_online(|| {
+            connect_first(
+                &candidate_addresses(&cred, None),
+                &cred,
+                &keypair,
+                Arc::new(|_| {}),
+                Arc::new(|| {}),
+            )
+        });
+
+        assert_eq!(session.address, RELAY_CANDIDATE, "局域网地址不通时经中继连上");
+        assert_eq!(session.relay, Some(ticket), "认证回包里的中继票据要交给凭证");
+        desktop.join().unwrap();
+        stop.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn pairing_goes_through_the_relay_when_the_lan_address_is_unreachable() {
+        let url = remote_relay::fake::spawn(RELAY_SECRET);
+        let (listener, _, server) = desktop_listener();
+        let port = listener.local_addr().unwrap().port();
+        let ticket = relay_ticket(&url);
+        let desktop = spawn_desktop_replying(
+            listener,
+            server.private.clone(),
+            serde_json::json!({ "ok": true, "deviceId": "iphone-1", "token": TOKEN }),
+        );
+        let stop = relay_desktop(ticket.clone(), port);
+        let (identity, keypair) = device_identity();
+        let dead = dead_address();
+
+        let paired = until_relay_online(|| {
+            pair_first(
+                &[dead.clone(), RELAY_CANDIDATE.to_string()],
+                Some(&ticket),
+                "offer-1",
+                &server.public,
+                "iPhone",
+                &identity,
+                &keypair,
+            )
+        });
+
+        assert_eq!(paired.address, RELAY_CANDIDATE);
+        assert_eq!(paired.relay, Some(ticket));
+        assert_eq!(paired.token, TOKEN);
+        desktop.join().unwrap();
+        stop.store(false, Ordering::Release);
     }
 
     #[test]
