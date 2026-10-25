@@ -9,7 +9,7 @@
 export const ASSET_REGISTRY_PATH = '制作流水线/资产注册表.json'
 /** 首次提交 + 2 次重试（2026-10-25 用户确认）。 */
 const MAX_ATTEMPTS = 3
-const MODERATION = /审核|敏感|违规|moderation|content.?policy|sensitive|safety/i
+export const MODERATION = /审核|敏感|违规|moderation|content.?policy|sensitive|safety/i
 
 export type AssetKind = 'character' | 'scene' | 'prop'
 
@@ -31,12 +31,15 @@ export interface AssetRegistryEntry {
   episode: number
 }
 
-export interface AssetSchedulerDeps {
+export interface WikiTaskDeps {
   readText(path: string): Promise<string>
   writeText(path: string, content: string): Promise<void>
   exists(path: string): Promise<boolean>
-  submitImage(input: { requestId: string; prompt: string; kind: AssetKind }): Promise<string>
   getTask(taskId: string): Promise<{ status: string; localPath?: string; error?: string } | undefined>
+}
+
+export interface AssetSchedulerDeps extends WikiTaskDeps {
+  submitImage(input: { requestId: string; prompt: string; kind: AssetKind }): Promise<string>
   sleep(ms: number): Promise<void>
   now?(): number
 }
@@ -61,7 +64,7 @@ function saveRegistry(wikiRoot: string, registry: Registry, deps: AssetScheduler
 }
 
 /** 提示词文档去掉开头的 Markdown 标题，只提交正文。 */
-function promptBody(text: string): string {
+export function promptBody(text: string): string {
   return text.replace(/^(?:\s*#[^\n]*\n)+/, '').trim()
 }
 

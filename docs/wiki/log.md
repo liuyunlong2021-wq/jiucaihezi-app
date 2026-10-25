@@ -3058,3 +3058,4 @@
 - 验证：`wiki-artifact-writer`、`production-capabilities` 等 node 测试全部通过。H3 的 refs 尚未纳入；真实模型、安装包未验收。
 
 - 同日 P1 调度内核：新增 `src/runtime/manjuAuto/assetScheduler.ts` 与桌面适配，持久化资产注册表去重、重试 2 次、审核不重试、审图锁定；桥导出 `runCreationOperation` 并支持 `canvas:false`。尚未接入触发，等全自动入口 UI；未做真实生图验证。
+- 同日 P2 调度内核：新增 `videoScheduler.ts`（按 refs 顺序提交视频、整集预检模型约束、每集任务登记去重、单次检查重试 1 次）与 `mediaParams.ts`（按模型字段名、时长档位、参考图上限组装参数）；desktopAssetDeps 改名 desktopDeps 并加视频适配。未接入触发；未做真实出片验证。
