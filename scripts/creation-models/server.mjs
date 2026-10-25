@@ -60,6 +60,7 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'XN2-Seedance 2.5 满血 480-720p', aliases: ['XN2-Seedance 2.5 满血 480-720p'] },
   { id: '官方渠道-Seedance 2.5 满血 720p', aliases: ['官方渠道-Seedance 2.5 满血 720p'] },
   { id: '特价渠道 MiniMax H3 480p-1080p', aliases: ['特价渠道 MiniMax H3 480p-1080p', 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'] },
+  { id: '特价渠道 Seedance 2.5 满血 720p（可过真人）', aliases: ['特价渠道 Seedance 2.5 满血 720p（可过真人）', 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70'] },
   { id: 'newapi/zx/mj_fast_imagine', aliases: ['mj_fast_imagine'] },
   { id: 'newapi/t8/mj_relax_imagine', aliases: ['mj_relax_imagine'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },

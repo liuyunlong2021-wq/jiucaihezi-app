@@ -255,7 +255,7 @@ test('FK 历史视频保留兼容轮询及 content 回收，examples 覆盖完�
  assert.equal(plugin.buildQueryRequest(previous).url, 'https://ai.fanke2026.xyz/v1/videos/compat-job')
  assert.equal(plugin.parseTaskResult(previous, { status: 'completed' }).status, 'SUCCESS')
  assert.equal(plugin.extractUsage({ ...ctx('ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'), requestBody: { duration: 3, resolution: '768p' } }).seconds, 3)
- assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 6)
+ assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 7)
  for (const example of plugin.meta.usageExamples) assert.deepEqual(Object.keys(example.facts).sort(), Object.keys(plugin.meta.usageSchema).sort())
 })
 

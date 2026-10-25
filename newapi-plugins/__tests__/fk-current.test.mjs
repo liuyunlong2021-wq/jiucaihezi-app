@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as plugin from '../fk.plugin.js'
 
-test('FK current six models and resolution-specific H3 usage', () => {
+test('FK current seven models and resolution-specific H3 usage', () => {
   const ids = plugin.meta.models.filter(id => id.startsWith('ft-video-'))
-  assert.equal(ids.length, 6)
+  assert.equal(ids.length, 7)
   const model = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
   for (const resolution of ['480p', '768p', '1080p']) {
     const intent = plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: { prompt: 'p', duration: 5, resolution } } })
@@ -18,28 +18,40 @@ test('FK current six models and resolution-specific H3 usage', () => {
   assert.equal(plugin.extractUsage({ model: model933, requestBody: intent.requestBody }).calls, 1)
   assert.throws(() => decode({ resolution: '720p' }))
   assert.throws(() => decode({ duration: 3 }))
+  const real = 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70'
+  const decodeReal = value => plugin.protocols.openai_video.decodeRequest({ model: real, body: { kind: 'json', value: { prompt: 'p', duration: 15, resolution: '720p', ...value } } })
+  for (const duration of [15, 30]) {
+    const realIntent = decodeReal({ duration })
+    const usage = plugin.extractUsage({ model: real, requestBody: realIntent.requestBody })
+    assert.equal(usage.calls, 1)
+    assert.equal(usage.seconds, 0)
+  }
+  assert.equal(decodeReal({ resolution: undefined }).requestBody.resolution, '720p')
+  for (const value of [{ duration: 20 }, { duration: 4 }, { resolution: '480p' }, { ratio: '21:9' }, { videoUrls: ['https://a/v.mp4'] }, { audioUrls: ['https://a/a.mp3'] }, { imageUrls: Array(10).fill('https://a/i.png') }]) {
+    assert.throws(() => decodeReal(value))
+  }
 })
 
 test('FK mapping covers every current public name and rejects retired names', async () => {
   const { readFileSync } = await import('node:fs')
   const mapping = JSON.parse(readFileSync(new URL('../fk-video-model-mapping.json', import.meta.url)))
-  assert.equal(Object.keys(mapping).length, 6)
+  assert.equal(Object.keys(mapping).length, 7)
   assert.deepEqual(plugin.meta.models.filter(id => id.startsWith('ft-video-')).sort(), Object.values(mapping).sort())
   for (const [name, model] of Object.entries(mapping)) {
     const resolution = name.includes('(933)') || name.includes('480-720p') ? '480p' : name.includes('H3') ? '768p' : '720p'
-    const value = { prompt: 'p', duration: name.startsWith('XN2') ? 15 : 5, resolution }
+    const value = { prompt: 'p', duration: name.startsWith('XN2') || name.includes('可过真人') ? 15 : 5, resolution }
     const intent = plugin.protocols.openai_video.decodeRequest({ model: name, body: { kind: 'json', value } })
     assert.equal(intent.requestBody.model, model)
     const request = plugin.buildSubmitRequest({ model: name, requestBody: intent.requestBody, baseUrl: plugin.meta.baseUrl, apiKey: 'fixture' })
     assert.equal(request.body.model, model)
     assert.equal(request.headers['X-Public-Model-Ids'], '1')
   }
-  for (const model of ['特价渠道 Seedance 2.5 满血 720p', '特价渠道 Seedance 2.5 满血 720p（可过真人）', '长期特惠 Seedance 2.5 满血 720p']) {
+  for (const model of ['特价渠道 Seedance 2.5 满血 720p', '长期特惠 Seedance 2.5 满血 720p']) {
     assert.throws(() => plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: { prompt: 'p', duration: 30 } } }), /Unsupported/)
   }
 })
 
-test('FK all six pricing expressions charge only the relevant settled usage', async () => {
+test('FK all seven pricing expressions charge only the relevant settled usage', async () => {
   const { readFileSync } = await import('node:fs')
   const pricing = JSON.parse(readFileSync(new URL('../fk-pricing.json', import.meta.url)))
   const mapping = JSON.parse(readFileSync(new URL('../fk-video-model-mapping.json', import.meta.url)))
@@ -48,7 +60,7 @@ test('FK all six pricing expressions charge only the relevant settled usage', as
     assert.equal(row.upstreamModel, mapping[row.model])
     const cost = facts => Function('u', 'tier', `return (${row.expression})`)(key => facts[key] || 0, (_, value) => value)
     if (row.salePriceCnyPerRequest) {
-      assert.equal(cost({ calls: 1, seconds: 15 }), 2)
+      assert.equal(cost({ calls: 1, seconds: 30 }), row.salePriceCnyPerRequest)
     } else if (typeof row.salePriceCnyPerSecond === 'object') {
       for (const [resolution, price] of Object.entries(row.salePriceCnyPerSecond)) {
         assert.equal(cost({ ['seconds_' + resolution]: 10, seconds: 10, calls: 0 }), 10 * price)

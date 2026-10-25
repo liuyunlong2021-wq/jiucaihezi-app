@@ -457,6 +457,10 @@ const FK_SEEDANCE_MODELS: Array<{
     model: 'ft-video-v1-43644108aaba72b7cbad4cd322737f6c', label: '特价渠道 Seedance 2.0 满血 480p (933)', price: '¥2/次',
     ratios: ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], resolutions: ['480p'],
     duration: { min: 4, max: 15 }, defaultDuration: 4, maxImages: 9, maxVideos: 3, maxAudios: 3,
+  },  {
+    model: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', label: '特价渠道 Seedance 2.5 满血 720p（可过真人）', price: '¥5/次',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'], resolutions: ['720p'],
+    duration: { allowedValues: [15, 30] }, defaultDuration: 15, maxImages: 9,
   },
 ]
 const FK_IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']

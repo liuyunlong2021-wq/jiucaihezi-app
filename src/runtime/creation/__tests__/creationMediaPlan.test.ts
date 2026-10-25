@@ -1365,6 +1365,7 @@ test('FK当前Seedance型号规格与执行目录一致', () => {
     ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '¥0.5/秒'],
     ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '¥0.5/秒'],
     ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1/秒 · 视频参考 ¥31.5/百万Token'],
+    ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [15, 30], 9, 0, 0, '¥5/次'],
   ] as const
   const plugin = readFileSync('newapi-plugins/fk.plugin.js', 'utf8')
   const availability = readFileSync('scripts/creation-models/server.mjs', 'utf8')
@@ -1646,10 +1647,10 @@ test('FK Wan 3.0 在面板显示公开名、两档售价和独立分组，执行
   }
 })
 
-test('FK six current video choices share public names, specs and content recovery', () => {
+test('FK seven current video choices share public names, specs and content recovery', () => {
   const mapping = JSON.parse(readFileSync('newapi-plugins/fk-video-model-mapping.json', 'utf8')) as Record<string, string>
   const visible = listCreationModels({ task: 'video' }).filter(model => model.id.startsWith('newapi/fk/'))
-  assert.equal(visible.length, 6)
+  assert.equal(visible.length, 7)
   for (const [name, id] of Object.entries(mapping)) {
     const spec = getCreationModelSpec(`newapi/fk/${id}`)!
     assert.equal(spec.model, name)
@@ -1661,7 +1662,7 @@ test('FK six current video choices share public names, specs and content recover
     }
     assert.equal(usesNewApiContentEndpoint({ model: name }), true)
     const resolution = spec.capabilities.resolutions![0]
-    const duration = spec.capabilities.duration!.min!
+    const duration = spec.capabilities.duration!.min ?? spec.capabilities.duration!.allowedValues![0]
     assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', duration, resolution, ratio: '16:9' } }).model, name)
   }
 })

@@ -783,6 +783,17 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     ],
   },
   {
+    id: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', label: '特价渠道 Seedance 2.5 满血 720p（可过真人）', model: '特价渠道 Seedance 2.5 满血 720p（可过真人）', task: 'video', provider: 'gateway-video',
+    maxFiles: 9, acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 15, options: options([15, 30]) },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+    ],
+  },
+  {
     id: 'minimax_h3_image_audio_to_video_v2_15s',
     label: 'MiniMax H3 参考生视频 · 菠萝',
     task: 'video',

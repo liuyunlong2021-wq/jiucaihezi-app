@@ -24,6 +24,7 @@ const VIDEO_SPECS = {
   'ft-video-v1-756e0feb4b3e1f893726314109762123': { min: 15, max: 30, refs: [30, 0, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
   'ft-video-v1-451adae35b0c4a3d275c2c46394abc98': { min: 4, max: 30, refs: [30, 10, 10], wide: true, tokenWithVideo: true },
   'ft-video-v1-43644108aaba72b7cbad4cd322737f6c': { min: 4, max: 15, refs: [9, 3, 3], resolutions: ['480p'], wide: true, unit: 'request' },
+  'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70': { durations: [15, 30], refs: [9, 0, 0], resolutions: ['720p'], unit: 'request' },
 }
 const VIDEO_MODEL_IDS = Object.keys(VIDEO_SPECS)
 const VIDEO_MODEL_ALIASES = {
@@ -32,7 +33,8 @@ const VIDEO_MODEL_ALIASES = {
   "Wan 3.0 720-1080p": "ft-video-v1-9cf6b90d6d04866453951fc3a26720aa",
   "Seedance 2.5 满血 480-720p": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848",
   "XN2-Seedance 2.5 满血 480-720p": "ft-video-v1-756e0feb4b3e1f893726314109762123",
-  "官方渠道-Seedance 2.5 满血 720p": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98"
+  "官方渠道-Seedance 2.5 满血 720p": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98",
+  "特价渠道 Seedance 2.5 满血 720p（可过真人）": "ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70"
 }
 
 
@@ -73,7 +75,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.9',
+  version: '0.4.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
