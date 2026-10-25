@@ -11,7 +11,9 @@ import {
 import { NOVEL_MODE, restoreNovelSelection } from '../novelProduction'
 
 test('the production bundle includes both video routes and excludes the portrait skill', () => {
-  assert.equal(MANJU_SKILLS.length, 15)
+  assert.equal(MANJU_SKILLS.length, 17)
+  assert.ok(MANJU_SKILLS.includes('jc-fuzhuang-prompt'), '服装换装随漫剧白名单内置')
+  assert.ok(MANJU_SKILLS.includes('jc-renqun'), '人群群像随漫剧白名单内置')
   assert.ok(!MANJU_SKILLS.includes('jc-duanju'))
   assert.ok(MANJU_SKILLS.includes('h3-prompt-writing'))
   assert.ok(MANJU_SKILLS.includes('jc-seedance'))
@@ -163,11 +165,18 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   const prepare = controller.slice(controller.indexOf('async function prepare'), controller.indexOf('async function start'))
   assert.doesNotMatch(prepare, /submit|runAuto/)
   assert.match(panel, /emit\('start'/)
-  assert.match(panel, /第 1 集资产出齐后暂停审图/)
+  assert.match(panel, /<option value="new">每集有新资产就审（只看新图）<\/option>/)
+  assert.match(panel, /reviewMode: reviewMode\.value/)
+  // 审图可单独重新生成或改提示词重生成，重生成期间不能确认（2026-10-25 用户要求）。
+  assert.match(panel, /emit\('regenerate', id\)/)
+  assert.match(panel, /保存并重新生成/)
+  assert.match(panel, /:disabled="anyBusy"/)
+  assert.match(workbench, /@regenerate="\(id, prompt\) => manjuAuto\.regenerate\(id, prompt\)"/)
+  assert.match(controller, /await regenerateAsset\(deps\.wikiRoot, id, deps\.asset, hash\)/)
   // 切换模式时没有分集剧本不弹卡，避免挡住待发送的剧本（2026-10-25 用户反馈）。
   assert.match(workbench, /manjuAuto\.prepare\(\{ onlyIfReady: true \}\)/)
   assert.match(controller, /onlyIfReady && !episodes\.length/)
-  assert.match(controller, /遵守本对话入稿时用户提出的制作要求/)
+  assert.match(readFileSync('src/runtime/manjuAuto/autoRunner.ts', 'utf8'), /遵守本对话入稿时用户提出的制作要求/)
   // 模型选项：与 @影音 同一默认顺序、去掉已退出面板的型号、视频只列可收参考图的、Seedance 优先、读全部分页。
   assert.match(controller, /prioritizedCreationModelIds\(kind\)/)
   assert.match(controller, /spec\?\.hidden/)
@@ -177,10 +186,36 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // 目录查询网络超时沿用上次成功目录（dynamic 或 legacy），不把云端模型降级为只允许本机 ComfyUI（2026-10-25 实测）。
   const bridge = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
   assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, result\)/)
+  // 回归（2026-10-25 实测“参数不是 JSON 数据”）：目录缓存键不能把 undefined 交给 canonicalCreationJson。
+  assert.doesNotMatch(bridge, /catalogKey = canonicalCreationJson/)
+  assert.match(bridge, /params\[name\] \?\? null/)
   assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, legacy\)/)
   assert.match(bridge, /!\(error instanceof CreationProtocolError\) && cached/)
+  // 回归（2026-10-25 实测重启后“该能力当前不可执行”）：已确认 legacy 的服务端，网络抖动不降级为只允许本机 ComfyUI。
+  assert.match(bridge, /const networkOnLegacy = !\(error instanceof CreationProtocolError\) && serverIsLegacy/)
+  // 视频依次提交：桥暴露 submitted，桌面适配等上一段交给模型再交下一段。
+  assert.match(bridge, /submitted: Boolean\(task\.upstreamTaskId\)/)
+  assert.match(readFileSync('src/runtime/manjuAuto/desktopDeps.ts', 'utf8'), /async waitSubmitted\(taskId\)/)
   // 续做按确认卡上新的模型继续（生图线路故障后换模型）。
   assert.match(panel, /@click="startNew\(true\)"/)
+  // 暂停原因直接显示，不只藏在悬停提示里（2026-10-25 用户反馈“看到暂停有点懵”）。
+  assert.match(panel, /暂停原因：\{\{ episode\.reason \}\}/)
+  // 视频分辨率可选、默认最低档，分档价格按所选档参与预算（2026-10-25 用户反馈 wan 无法选 480P）。
+  assert.match(panel, /视频分辨率/)
+  // H3 路线：确认卡选路线，模型限制（秒数、参考图张数）写进配置与每集指令（2026-10-25）。
+  assert.match(panel, /<option value="H3">MiniMax H3 提示词<\/option>/)
+  assert.match(panel, /limits: limits\.value/)
+  assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config\)/)
+  assert.match(controller, /checkpointPath\(wikiRoot, state\.config\.videoModel, episode\)/)
+  // 每次运行独立停止开关 + runId 落盘守卫：旧运行（含热更新遗留）发现记录属于新运行就退出（2026-10-25 实测两个运行互相覆盖）。
+  assert.doesNotMatch(controller, /stopRequested/)
+  assert.match(controller, /shouldStop: \(\) => mine\.stopped/)
+  assert.match(controller, /onDisk\.runId !== next\.runId/)
+  // 回归（2026-10-25 实测新运行把自己判成旧运行）：第一次保存先认领，不检查旧 runId。
+  assert.match(controller, /const onDisk = claimed \? await readJson/)
+  assert.match(controller, /runId: crypto\.randomUUID\(\)/)
+  assert.match(panel, /videoResolution: videoResolution\.value/)
+  assert.match(controller, /resolution: state\.config\.videoResolution/)
   // 设计系统没有 --danger，警示色必须用 --jc-error。
   assert.doesNotMatch(panel, /var\(--danger\)/)
   assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)

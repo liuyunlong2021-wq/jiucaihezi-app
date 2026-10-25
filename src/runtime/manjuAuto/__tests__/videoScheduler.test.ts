@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { checkEpisodeVideos, submitEpisodeVideos, videoRegistryPath, type VideoCheckpoint, type VideoSchedulerDeps } from '../videoScheduler'
+import { checkEpisodeVideos, retryFailedVideos, submitEpisodeVideos, videoRegistryPath, type VideoCheckpoint, type VideoSchedulerDeps } from '../videoScheduler'
 
 type FakeTask = { status: string; localPath?: string; error?: string }
 
@@ -115,4 +115,72 @@ test('model constraint failure on any segment blocks the whole episode before sp
   deps.checkVideo = input => { if (input.durationSeconds > 15) throw new Error('片段 28 秒超过该模型最长 15 秒') }
   await assert.rejects(submitEpisodeVideos(wiki, checkpoint, images, deps), /最长 15/)
   assert.equal(submits.length, 0)
+})
+
+test('rate-limited video failures resubmit at the next check without using the single retry', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  tasks.set('v1', { status: 'success', localPath: '/p/1.mp4' })
+  tasks.set('v2', { status: 'failed', error: '请求过于频繁，请稍后再试' })
+  await checkEpisodeVideos(wiki, checkpoint, deps)
+  tasks.set('v3', { status: 'failed', error: '请求过于频繁' })
+  const second = await checkEpisodeVideos(wiki, checkpoint, deps)
+  assert.equal(second.status, 'pending')
+  assert.equal(registry(fs)[1].attempts, 1)
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length)
+})
+
+test('interrupted video tasks resubmit with the same reference images without using the single retry', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  tasks.set('v1', { status: 'interrupted' })
+  tasks.set('v2', { status: 'interrupted' })
+  const result = await checkEpisodeVideos(wiki, checkpoint, deps)
+  assert.equal(result.status, 'pending')
+  assert.equal(submits.length, 4)
+  assert.deepEqual(submits[2].images, ['/p/石道.png', '/p/莫甘娜.png'])
+  assert.deepEqual(registry(fs).map((s: { attempts: number }) => s.attempts), [1, 1])
+})
+
+test('a later run gives finally-failed video segments a fresh retry with their registered images', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  tasks.set('v1', { status: 'success', localPath: '/p/1.mp4' })
+  tasks.set('v2', { status: 'failed', error: 'HTTP 500 上游异常' })
+  await checkEpisodeVideos(wiki, checkpoint, deps)
+  tasks.set('v3', { status: 'failed', error: 'HTTP 500 上游异常' })
+  assert.equal((await checkEpisodeVideos(wiki, checkpoint, deps)).status, 'failed')
+  const before = submits.length
+  assert.deepEqual(await retryFailedVideos(wiki, checkpoint, deps), [2])
+  assert.equal(submits.length, before + 1)
+  assert.deepEqual(submits.at(-1)!.images, ['/p/莫甘娜.png'])
+  assert.equal(registry(fs)[1].status, 'pending')
+  assert.equal(registry(fs)[1].attempts, 1)
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length)
+})
+
+test('network hiccups resubmit without using the single retry, up to a cap', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  tasks.set('v1', { status: 'success', localPath: '/p/1.mp4' })
+  for (let round = 0; round < 7; round += 1) {
+    const last = `v${submits.length}`
+    tasks.set(last === 'v1' ? 'v2' : last, { status: 'failed', error: 'HTTP 请求失败: error sending request' })
+    await checkEpisodeVideos(wiki, checkpoint, deps)
+  }
+  const entry = registry(fs)[1]
+  assert.equal(entry.transient, 5, '网络重提最多 5 次')
+  assert.equal(entry.status, 'failed', '超过上限后按普通失败处理（再重试 1 次后失败）')
+})
+
+test('segments are submitted one at a time: each waits until the previous upload has been handed to the model', async () => {
+  const { deps } = fakeDeps(prompts)
+  const events: string[] = []
+  const original = deps.submitVideo
+  deps.submitVideo = async input => { const id = await original(input); events.push(`submit:${id}`); return id }
+  deps.waitSubmitted = async taskId => { events.push(`wait:${taskId}`) }
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  assert.deepEqual(events, ['submit:v1', 'wait:v1', 'submit:v2', 'wait:v2'])
 })

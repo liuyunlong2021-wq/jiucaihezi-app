@@ -753,7 +753,7 @@ async function requirePipelineReads(ctx, args, exec, agent) {
   const kind = args.artifact_kind
   const rules = {
     film_style: ['summary'], character_asset: ['style', 'bio'], character_voice: ['style', 'bio'],
-    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'],
+    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'], crowd_asset: ['style'], costume_asset: ['style'], character_look: ['style'],
     engineering_script: ['style', 'source', 'cast'], sound_direction: ['engineering', 'cast'],
     storyboard_prompt: ['engineering'], video_prompt: ['engineeringOrStoryboard'],
   }
@@ -773,14 +773,15 @@ async function requirePipelineReads(ctx, args, exec, agent) {
     summary: materials.filter(path => /\/故事梗概\.md$/.test(path)),
     style: Object.keys(state.files?.style || {}).filter(path => path === `${root}/项目风格/影片比例与风格.md`), source: [state.source_path],
     bio: candidates('人物小传'), scene: candidates('场景说明'), prop: candidates('道具说明'),
-    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`],
+    // 三格格式提示词可由已读的角色设计提示词，或（全自动成片一步出格式时）已读的人物小传支撑。
+    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`, ...candidates('人物小传')],
     engineering: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
     engineeringOrStoryboard: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
   }
   const cwd = exec.agent.session.header.cwd
   const observed = async path => {
     const target = await ctx.fs.resolve(path, { cwd, signal: exec.signal })
-    const prior = reads.get(target.targetKey)
+    const prior = reads.get(target.targetKey ?? target)
     return prior && JSON.stringify((await ctx.fs.stat(target, exec.signal))?.version) === JSON.stringify(prior.version)
   }
   if (kind === 'video_prompt' && args.video_model === 'Seedance') {
@@ -828,6 +829,11 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   if (input.status !== undefined && !['running', 'blocked', ...(input.stage === 'complete' ? ['completed'] : [])].includes(input.status)) throw new Error('流水线status无效')
   if (input.status === 'blocked' && !String(input.reason || '').trim()) throw new Error('暂停流水线必须说明原因')
   const state = stage === 0 ? {} : previous
+  // 模型限制：全自动按所选视频模型写入（每段最长秒数、最多参考图张数）；未写入时沿用默认 Seedance 30 / H3 15 秒。
+  const limits = stage === 0 ? input.limits : state.limits
+  if (limits !== undefined && (!limits || !Number.isFinite(limits.max_seconds) || limits.max_seconds <= 0 || limits.max_seconds > 30
+    || (limits.max_refs !== undefined && (!Number.isInteger(limits.max_refs) || limits.max_refs < 1)))) throw new Error('limits 需为 {max_seconds: 1–30, max_refs: 正整数}')
+  const maxSeconds = limits?.max_seconds ?? (args.video_model === 'H3' ? 15 : 30)
   const hashFile = async (path, output = true) => {
     if (typeof path !== 'string' || (output && !path.startsWith(`${wikiRoot}/`))) throw new Error('流水线产物必须位于当前Wiki')
     const file = await projectTarget(ctx, cwd, path, exec.signal, workspace)
@@ -855,11 +861,22 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   let assets = state.assets || {}
   if (input.stage === 'assets') {
     assets = {}
-    const kinds = { 角色: 'character', 场景: 'scene', 道具: 'prop' }
+    const kinds = { 角色: 'character', 场景: 'scene', 道具: 'prop', 人群: 'crowd' }
     for (const path of input.outputs) {
-      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词)\.md)$/)
+      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具|人群)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词|群像生图提示词|服装生图提示词|角色造型融合提示词)\.md)$/)
       if (!match) continue
+      // 换装造型：实体名“角色·造型”；服装图单独登记为“服装/…”，融合造型登记为“角色/…”并记下身份图与服装。
+      if (match[3] === '服装生图提示词') {
+        assets[`服装/${match[2]}`] = { kind: 'costume', prompt_path: path, prompt_hash: outputs[path] }
+        continue
+      }
       const id = `${match[1]}/${match[2]}`
+      if (match[3] === '角色造型融合提示词') {
+        const costumePath = `${wikiRoot}/资产/角色/${match[2]}/服装生图提示词.md`
+        if (!outputs[costumePath]) throw new Error(`造型 ${match[2]} 缺少服装生图提示词：请同阶段保存 costume_asset`)
+        assets[id] = { kind: 'look', prompt_path: path, prompt_hash: outputs[path], base: `角色/${match[2].split('·')[0]}`, costume: `服装/${match[2]}` }
+        continue
+      }
       if (assets[id]?.prompt_path.endsWith('/角色生图格式提示词.md')) continue
       assets[id] = { kind: kinds[match[1]], prompt_path: path, prompt_hash: outputs[path] }
     }
@@ -880,18 +897,28 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
       const path = `${wikiRoot}/剧本/视频提示词/${args.video_model}/第${args.episode_number}集${String(index + 1).padStart(3, '0')}视频提示词.md`
       if (segment.path !== path || !Number.isFinite(segment.start_seconds) || !Number.isFinite(segment.end_seconds)
         || Math.abs(segment.start_seconds - end) > 0.01 || segment.end_seconds <= end
-        || segment.end_seconds - segment.start_seconds > (args.video_model === 'H3' ? 15 : 30)) throw new Error('片段命名、连续时间或30/15秒上限不符合流水线合同')
+        || segment.end_seconds - segment.start_seconds > maxSeconds + 0.01) throw new Error(`片段命名、连续时间或每段${maxSeconds}秒上限不符合流水线合同`)
       await hashFile(path)
       if (stage === 5 && !outputs[path]) throw new Error('片段必须包含在本阶段outputs中')
-      if (stage === 5 && args.video_model === 'Seedance' && Object.keys(assets).length) {
+      if (stage === 5 && Object.keys(assets).length) {
         const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
-        const lines = [...text.matchAll(/^@图\d+[：:]([^\n]*)$/gm)].map(match => match[1])
-        if (!Array.isArray(segment.refs)) throw new Error(`片段${index + 1}缺少refs：按@图1起的顺序列出资产ID，例如["角色/某人","场景/某地"]`)
-        if (segment.refs.length !== lines.length) throw new Error(`片段${index + 1}的refs数量(${segment.refs.length})与@图行数量(${lines.length})不一致`)
+        // Seedance：每个“@图N：”行；H3 Ref2VA：所有含 <Picture N> 的行（subject_definitions 等处写明对应资产）。
+        const h3 = args.video_model === 'H3'
+        const label = h3 ? 'Picture' : '@图'
+        const lines = h3
+          ? (() => {
+            const numbers = [...new Set([...text.matchAll(/<Picture (\d+)>/g)].map(match => Number(match[1])))].sort((a, b) => a - b)
+            if (numbers.some((number, i) => number !== i + 1)) throw new Error(`片段${index + 1}的<Picture N>须从1连续编号`)
+            return numbers.map(number => text.split('\n').filter(line => line.includes(`<Picture ${number}>`)).join('\n'))
+          })()
+          : [...text.matchAll(/^@图\d+[：:]([^\n]*)$/gm)].map(match => match[1])
+        if (!Array.isArray(segment.refs)) throw new Error(`片段${index + 1}缺少refs：按${h3 ? '<Picture 1>' : '@图1'}起的顺序列出资产ID，例如["角色/某人","场景/某地"]`)
+        if (limits?.max_refs !== undefined && segment.refs.length > limits.max_refs) throw new Error(`片段${index + 1}用了${segment.refs.length}张参考图，所选视频模型最多 ${limits.max_refs} 张：请拆镜或减少本段入画资产`)
+        if (segment.refs.length !== lines.length) throw new Error(`片段${index + 1}的refs数量(${segment.refs.length})与${label}数量(${lines.length})不一致`)
         for (const [i, ref] of segment.refs.entries()) {
           if (!assets[ref]) throw new Error(`片段${index + 1}的refs引用了未登记资产：${ref}`)
           const name = ref.split('/')[1]
-          if (!lines[i].includes(name)) throw new Error(`片段${index + 1}的@图${i + 1}行未写${name}，refs顺序须与@图顺序一致`)
+          if (!lines[i].includes(name)) throw new Error(h3 ? `片段${index + 1}含<Picture ${i + 1}>的行未写${name}，refs顺序须与<Picture N>编号一致` : `片段${index + 1}的@图${i + 1}行未写${name}，refs顺序须与@图顺序一致`)
         }
       }
       end = segment.end_seconds
@@ -901,7 +928,7 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   files[input.stage] = outputs
   return JSON.stringify({ stage: input.stage, status: input.stage === 'complete' ? 'completed' : input.status || 'running', reason: input.stage === 'complete' ? '' : input.reason || '',
     video_model: args.video_model, episode_number: args.episode_number, source_path: source, source_hash: sourceHash,
-    files, assets, duration_seconds: duration, segments }, null, 2) + '\n'
+    files, assets, ...(limits && { limits }), duration_seconds: duration, segments }, null, 2) + '\n'
 }
 
 const adaptationStates = new WeakMap()

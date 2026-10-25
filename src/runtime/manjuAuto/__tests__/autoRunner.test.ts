@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createAutoRun, estimateUnitCost, handleCheckpointSaved, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
+import { createAutoRun, episodeInstruction, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
 
 /** 假世界：文字流水线一跑就写出完整进度；生图/视频任务按测试设定完成。 */
-function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number } = {}) {
+function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number; newAssetIn?: number } = {}) {
   const fs = new Map<string, string>()
   const tasks = new Map<string, Task>()
   const log: string[] = []
@@ -38,9 +38,13 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
       fs.set(`wiki/资产/场景/山门/场景生图提示词.md`, '# 山门\n山门')
       const seg = `wiki/剧本/视频提示词/Seedance/第${episode}集001视频提示词.md`
       fs.set(seg, `第${episode}集。\n@图1：甲\n@图2：山门`)
-      const assets = {
+      const assets: Record<string, { kind: 'character' | 'scene'; prompt_path: string; prompt_hash: string }> = {
         '角色/甲': { kind: 'character' as const, prompt_path: 'wiki/资产/角色/甲/角色生图格式提示词.md', prompt_hash: 'a'.repeat(64) },
         '场景/山门': { kind: 'scene' as const, prompt_path: 'wiki/资产/场景/山门/场景生图提示词.md', prompt_hash: 'b'.repeat(64) },
+      }
+      if (options.newAssetIn === episode) {
+        fs.set('wiki/资产/场景/大殿/场景生图提示词.md', '# 大殿\n大殿')
+        assets['场景/大殿'] = { kind: 'scene', prompt_path: 'wiki/资产/场景/大殿/场景生图提示词.md', prompt_hash: 'c'.repeat(64) }
       }
       // 资产阶段保存时宿主收到事件，提前提交生图
       await handleCheckpointSaved(run, { episode_number: episode, video_model: 'Seedance', stage: 'assets', assets, segments: [] }, deps)
@@ -174,4 +178,102 @@ test('resuming after an asset failure retries failed assets and can use a new im
   const done = await runAuto(resumed, w.deps)
   assert.equal(w.images.length - before, 2, '两个失败资产各重提一次')
   assert.equal(done.episodes['1'].phase, 'done')
+})
+
+test('tiered prices resolve to the chosen resolution, and ¥ prefixes parse', () => {
+  const wan = '480P ¥0.2/秒 · 720P ¥0.4/秒 · 1080P ¥0.5/秒'
+  assert.equal(priceForResolution(wan, '480P'), '0.2/秒')
+  assert.equal(priceForResolution(wan, '720p'), '0.4/秒')
+  assert.equal(priceForResolution('480P ¥11/次 · 720P ¥15/次', '720P'), '15/次')
+  assert.equal(priceForResolution('¥0.05/秒', '768P'), undefined, '不分档的价格原样使用')
+  assert.equal(estimateUnitCost('¥0.05/秒', 10), 0.5)
+  assert.equal(estimateUnitCost(priceForResolution(wan, '480P'), 27), 5.4)
+})
+
+test('resuming an episode already in the video phase checks videos immediately, before any 30-minute wait', async () => {
+  const w = world()
+  w.setApprove('stopped')
+  await runAuto(w.run, w.deps) // 停在第 1 集审图
+  w.setApprove('approved')
+  w.setStop(false)
+  const order: string[] = []
+  const originalSleep = w.deps.sleep
+  w.deps.sleep = async ms => { order.push('sleep'); await originalSleep(ms) }
+  const check = w.deps.video.getTask
+  w.deps.video.getTask = async id => { order.push('check'); return check(id) }
+  w.run.config.episodes = [1]
+  delete w.run.episodes['2']
+  await runAuto(w.run, w.deps) // 审图通过、视频提交，进入出片中
+  // 模拟 App 重启后续做：第 1 集处于 videos 阶段
+  order.length = 0
+  w.run.status = 'stopped'
+  w.run.episodes['1'].phase = 'videos'
+  const registryPath = 'wiki/制作流水线/Seedance/第1集视频任务.json'
+  const registry = JSON.parse(w.fs.get(registryPath)!)
+  for (const segment of registry.segments) segment.status = 'pending'
+  w.fs.set(registryPath, JSON.stringify(registry))
+  await runAuto(w.run, w.deps)
+  assert.equal(order[0], 'check', `续做应先检查视频，实际顺序：${order.join(',')}`)
+})
+
+test('resuming retries failed video segments of an episode before checking again', async () => {
+  const w = world({ videoOk: false })
+  w.run.config.episodes = [1]
+  delete w.run.episodes['2']
+  const blocked = await runAuto(w.run, w.deps)
+  assert.equal(blocked.episodes['1'].phase, 'blocked')
+  const before = w.videos.length
+  ;(w.deps.video as { getTask: unknown }).getTask = async () => ({ status: 'success', localPath: '/out/v.mp4' })
+  const done = await runAuto(blocked, w.deps)
+  assert.equal(w.videos.length - before, 1, '失败的那一段重新提交一次')
+  assert.equal(done.episodes['1'].phase, 'done')
+})
+
+test('model limits come from the chosen video model: fixed tiers use the largest ≤30s, ranges cap at 30s', () => {
+  assert.deepEqual(modelLimits('H3', { duration: { min: 1, max: 28 }, maxImages: 6 }), { max_seconds: 28, max_refs: 6 })
+  assert.deepEqual(modelLimits('Seedance', { duration: { allowedValues: [15, 30] }, maxImages: 9 }), { max_seconds: 30, max_refs: 9, allowed_seconds: [15, 30] })
+  assert.deepEqual(modelLimits('Seedance', { duration: { min: 2, max: 60 } }), { max_seconds: 30 })
+  assert.deepEqual(modelLimits('H3', {}), { max_seconds: 15 }, '未知限制时按路线默认')
+})
+
+test('episode instruction names the route and the model limits the pipeline must write into plan', () => {
+  const text = episodeInstruction(3, 'wiki', { videoModel: 'H3', limits: { max_seconds: 28, max_refs: 6 } })
+  assert.match(text, /【全自动成片·第3集】/)
+  assert.match(text, /视频模型 H3/)
+  assert.match(text, /每段不超过 28 秒/)
+  assert.match(text, /最多 6 张参考图/)
+  assert.match(text, /"limits":\{"max_seconds":28,"max_refs":6\}/)
+  const tiers = episodeInstruction(1, 'wiki', { videoModel: 'Seedance', limits: { max_seconds: 30, allowed_seconds: [15, 30] } })
+  assert.match(tiers, /只支持 15\/30 秒/)
+})
+
+test('resuming keeps the original video route even if the card changed it', () => {
+  const saved = createAutoRun({ episodes: [1], videoModel: 'H3', imageModelId: 'a', videoModelId: 'b', ratio: '9:16', review: true })
+  const resumed = resumeAutoRun(saved, { ...saved.config, videoModel: 'Seedance', videoModelId: 'c' })
+  assert.equal(resumed.config.videoModel, 'H3')
+  assert.equal(resumed.config.videoModelId, 'c')
+})
+
+test('review mode "new" pauses every episode that brings new assets, showing only the new ones', async () => {
+  const w = world({ newAssetIn: 2 })
+  w.run.config.reviewMode = 'new'
+  const reviewed: string[][] = []
+  w.deps.waitForReview = async ids => { reviewed.push(ids.slice().sort()); return 'approved' }
+  await runAuto(w.run, w.deps)
+  assert.deepEqual(reviewed, [['场景/山门', '角色/甲'], ['场景/大殿']])
+})
+
+test('review mode "new" skips the pause when an episode has no new assets; "off" never pauses', async () => {
+  const w = world()
+  w.run.config.reviewMode = 'new'
+  let calls = 0
+  w.deps.waitForReview = async () => { calls += 1; return 'approved' }
+  await runAuto(w.run, w.deps)
+  assert.equal(calls, 1)
+  const off = world()
+  off.run.config.reviewMode = 'off'
+  let offCalls = 0
+  off.deps.waitForReview = async () => { offCalls += 1; return 'approved' }
+  assert.equal((await runAuto(off.run, off.deps)).status, 'done')
+  assert.equal(offCalls, 0)
 })

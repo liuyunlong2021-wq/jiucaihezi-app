@@ -1,7 +1,7 @@
 {
   "plugin": "fk",
-  "version": "0.3.9",
-  "scope": "六个当前视频型号；保留既有对外售价，新增价格经用户2026-10-24确认",
+  "version": "0.5.0",
+  "scope": "七个当前视频型号；保留既有对外售价，新增价格经用户2026-10-24/10-25确认",
   "coefficientConvention": "沿用用户确认人民币与Task Usage系数同数值口径；实际分组倍率和实扣待验收",
   "videoReferenceBilling": "带参考视频按上游Token价格结算；完成后seconds=0，使用upstream_cost_yuan收取上游已结算人民币分金额，包含四舍五入和最低1分，不再叠加Token或秒费。预扣仍沿用宿主按请求秒数估算，不等于上游Token预扣，最终多退少补待真实验收。",
   "models": [
@@ -54,6 +54,12 @@
       "salePriceCnyPerSecond": 1,
       "videoReferencePriceCnyPerMillionTokens": 31.5,
       "expression": "u(\"seconds\") > 0 ? tier(\"base\", u(\"seconds\") * 1) : tier(\"video_reference\", u(\"upstream_cost_yuan\"))"
+    },
+    {
+      "model": "特价渠道 Seedance 2.5 满血 720p（可过真人）",
+      "upstreamModel": "ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70",
+      "salePriceCnyPerRequest": 5,
+      "expression": "tier(\"base\", u(\"calls\") * 5)"
     }
   ]
 }

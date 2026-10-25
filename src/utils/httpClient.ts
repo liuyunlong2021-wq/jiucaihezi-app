@@ -152,6 +152,8 @@ export async function normalizeRustHttpRequest(
 
 function pickTimeoutForUrl(url: string): number {
   if (/\/api\/creations\/uploads\b/.test(url)) return 120
+  // 参考图直传 R2：与上传授权（JS 侧 120 秒）一致；默认 30 秒会截断多张大图的上传。
+  if (/^https:\/\/[a-f0-9]+\.r2\.cloudflarestorage\.com\//.test(url)) return 120
   if (/\/v1\/models\b/.test(url)) return 5   // 模型列表探测，5 秒足够
   if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 630  // NewAPI rc40 openai_image 轮询上限 600 秒，留少量响应余量
   if (/\/v1\/videos\b/.test(url) && !/\/v1\/videos\/[^/]+$/.test(url)) return 150

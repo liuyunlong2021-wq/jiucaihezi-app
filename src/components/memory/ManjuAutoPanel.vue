@@ -16,9 +16,25 @@
       <label class="manju-auto-row"><span>视频模型</span>
         <select v-model="videoModelId"><option v-for="model in draft.videoModels" :key="model.id" :value="model.id">{{ model.label }}{{ model.price !== undefined ? ` · ${model.price}` : '' }}</option></select>
       </label>
-      <div class="manju-auto-row"><span>比例</span><span>{{ draft.ratio }}（项目风格已确认）· Seedance</span></div>
+      <label v-if="videoModel?.resolutions?.length" class="manju-auto-row"><span>视频分辨率</span>
+        <select v-model="videoResolution"><option v-for="resolution in videoModel.resolutions" :key="resolution" :value="resolution">{{ resolution }}{{ priceForResolution(videoModel.price, resolution) ? ` · ¥${priceForResolution(videoModel.price, resolution)}` : '' }}</option></select>
+      </label>
+      <label class="manju-auto-row"><span>视频路线</span>
+        <select v-model="route" :disabled="Boolean(draft.saved)" :title="draft.saved ? '续做沿用原路线；换路线请点「开始全自动」重新开始' : ''">
+          <option value="Seedance">Seedance 提示词</option>
+          <option value="H3">MiniMax H3 提示词</option>
+        </select>
+      </label>
+      <div class="manju-auto-row"><span>比例</span><span>{{ draft.ratio }}（项目风格已确认）</span></div>
+      <div class="manju-auto-row"><span>模型限制</span><span>每段 ≤{{ limits.max_seconds }} 秒{{ limits.allowed_seconds ? `（只支持 ${limits.allowed_seconds.join('/')} 秒）` : '' }}{{ limits.max_refs ? `，最多 ${limits.max_refs} 张参考图` : '' }}；写提示词时按此分段</span></div>
       <label class="manju-auto-row"><span>单集预算</span><span><input v-model="budget" type="number" min="0" step="1" placeholder="不限"> 元</span></label>
-      <label class="manju-auto-row manju-auto-check"><input v-model="reviewFirst" type="checkbox">第 1 集资产出齐后暂停审图</label>
+      <label class="manju-auto-row"><span>审图</span>
+        <select v-model="reviewMode">
+          <option value="new">每集有新资产就审（只看新图）</option>
+          <option value="first">只审第 1 集</option>
+          <option value="off">不审</option>
+        </select>
+      </label>
       <p class="manju-auto-note">{{ priceNote }}</p>
     </template>
     <div class="manju-auto-actions">
@@ -29,14 +45,31 @@
   </div>
 
   <div v-if="review" class="manju-auto-card manju-auto-review" role="dialog" aria-label="审核资产图">
-    <strong>审核第 1 集资产图</strong>
-    <p>确认后这些图会锁定，后续各集直接复用、不再重新生成。不满意可以停止，在文件树里替换图片或修改提示词后再续做。</p>
+    <strong>审核本集新资产图</strong>
+    <p>不满意的图可以单独「重新生成」或「改提示词」后重生成，其他图不受影响。确认后全部锁定，后续各集直接复用。</p>
     <div class="manju-auto-images">
-      <figure v-for="id in review.ids" :key="id"><img :src="displaySrc(review.images[id])" :alt="id"><figcaption>{{ id }}</figcaption></figure>
+      <figure v-for="id in review.ids" :key="id" :class="{ busy: reviewBusy[id] }">
+        <img :src="displaySrc(review.images[id])" :alt="id">
+        <span v-if="reviewBusy[id]" class="manju-auto-busy">生成中…</span>
+        <figcaption>{{ id }}</figcaption>
+        <div class="manju-auto-image-actions">
+          <button type="button" :disabled="reviewBusy[id]" @click="emit('regenerate', id)">重新生成</button>
+          <button type="button" :disabled="reviewBusy[id]" @click="openPromptEditor(id)">改提示词</button>
+        </div>
+        <small v-if="reviewErrors[id]" class="manju-auto-image-error">{{ reviewErrors[id] }}</small>
+      </figure>
+    </div>
+    <div v-if="editingId" class="manju-auto-prompt-editor">
+      <span>修改「{{ editingId }}」的提示词（保存后写回 Wiki 并重新生成）</span>
+      <textarea v-model="editingText" rows="6" :disabled="loadingPrompt" />
+      <div class="manju-auto-actions">
+        <button type="button" @click="editingId = ''">取消</button>
+        <button type="button" class="primary" :disabled="loadingPrompt || !editingText.trim()" @click="savePrompt">保存并重新生成</button>
+      </div>
     </div>
     <div class="manju-auto-actions">
       <button type="button" @click="emit('stop')">停止</button>
-      <button type="button" class="primary" @click="emit('approve')">确认并继续</button>
+      <button type="button" class="primary" :disabled="anyBusy" :title="anyBusy ? '等重新生成的图出来再确认' : ''" @click="emit('approve')">确认并继续</button>
     </div>
   </div>
 
@@ -45,6 +78,8 @@
     <span class="manju-auto-status">{{ statusLabel }}</span>
     <span v-for="(episode, key) in run.episodes" :key="key" class="manju-auto-chip" :class="episode.phase" :title="episode.reason || episode.output || ''">第{{ key }}集 {{ phaseLabels[episode.phase] }}</span>
     <button v-if="run.status === 'running'" type="button" @click="emit('stop')">停止</button>
+    <p v-for="(episode, key) in blockedEpisodes" :key="`reason-${key}`" class="manju-auto-reason">第{{ key }}集暂停原因：{{ episode.reason }}</p>
+    <p v-if="run.status === 'blocked' || run.status === 'stopped'" class="manju-auto-reason">处理后从「漫剧·全自动」菜单重新选「全自动成片」，点「从第 N 集续做」；已完成的文字和已出的图不会重做。</p>
   </div>
   <p v-if="error" class="manju-auto-error">{{ error }}</p>
 </template>
@@ -53,32 +88,57 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 import type { ManjuAutoDraft } from '@/composables/useManjuAuto'
-import { estimateUnitCost, type AutoRunConfig, type AutoRunState, type EpisodePhase } from '@/runtime/manjuAuto/autoRunner'
+import { estimateUnitCost, modelLimits, priceForResolution, type AutoRunConfig, type VideoRoute, type AutoRunState, type EpisodePhase } from '@/runtime/manjuAuto/autoRunner'
 
 const props = defineProps<{
   draft: ManjuAutoDraft | null
   run: AutoRunState | null
   review: { ids: string[]; images: Record<string, string> } | null
+  reviewBusy: Record<string, boolean>
+  reviewErrors: Record<string, string>
+  loadPrompt: (id: string) => Promise<string>
   error: string
 }>()
-const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; stop: []; approve: [] }>()
+const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; stop: []; approve: []; regenerate: [id: string, prompt?: string] }>()
+
+const editingId = ref('')
+const editingText = ref('')
+const loadingPrompt = ref(false)
+const anyBusy = computed(() => Object.values(props.reviewBusy).some(Boolean))
+async function openPromptEditor(id: string) {
+  editingId.value = id
+  editingText.value = ''
+  loadingPrompt.value = true
+  try { editingText.value = await props.loadPrompt(id) } catch (cause) { editingText.value = `读取提示词失败：${cause instanceof Error ? cause.message : String(cause)}` } finally { loadingPrompt.value = false }
+}
+function savePrompt() {
+  const id = editingId.value
+  if (!id || !editingText.value.trim()) return
+  emit('regenerate', id, editingText.value)
+  editingId.value = ''
+}
 
 const episodes = ref<number[]>([])
 const imageModelId = ref('')
 const videoModelId = ref('')
 const budget = ref<number | string>('')
-const reviewFirst = ref(true)
+const reviewMode = ref<'new' | 'first' | 'off'>('new')
+const videoResolution = ref('')
+const route = ref<VideoRoute>('Seedance')
+const resolutionHeight = (value: string) => Number(value.replace(/\D/g, '')) || Infinity
 
 watch(() => props.draft, draft => {
   if (!draft) return
   episodes.value = draft.episodes.slice()
   imageModelId.value = draft.imageModels[0]?.id || ''
   videoModelId.value = draft.videoModels[0]?.id || ''
+  if (draft.saved) route.value = draft.saved.config.videoModel
 }, { immediate: true })
 
 const phaseLabels: Record<EpisodePhase, string> = {
   queued: '待做', text: '写提示词', assets: '生图中', review: '待审图', videos: '出片中', concat: '拼接中', done: '已成片', blocked: '已暂停',
 }
+const blockedEpisodes = computed(() => Object.fromEntries(Object.entries(props.run?.episodes || {}).filter(([, episode]) => episode.phase === 'blocked' && episode.reason)))
 const statusLabel = computed(() => ({ running: '全自动成片运行中', blocked: '全自动成片已暂停', stopped: '全自动成片已停止', done: '全自动成片已完成' })[props.run!.status])
 const resumeEpisode = computed(() => {
   const saved = props.draft?.saved
@@ -86,10 +146,16 @@ const resumeEpisode = computed(() => {
 })
 const imageModel = computed(() => props.draft?.imageModels.find(model => model.id === imageModelId.value))
 const videoModel = computed(() => props.draft?.videoModels.find(model => model.id === videoModelId.value))
+// 换模型时默认最低分辨率（测试最省钱）；分档价格按所选分辨率参与预算。
+watch(videoModel, model => {
+  videoResolution.value = model?.resolutions?.slice().sort((a, b) => resolutionHeight(a) - resolutionHeight(b))[0] || ''
+}, { immediate: true })
+const limits = computed(() => modelLimits(route.value, videoModel.value || {}))
+const videoPrice = computed(() => priceForResolution(videoModel.value?.price, videoResolution.value) ?? videoModel.value?.price)
 const priceNote = computed(() => {
-  const known = estimateUnitCost(imageModel.value?.price) !== undefined && estimateUnitCost(videoModel.value?.price) !== undefined
+  const known = estimateUnitCost(imageModel.value?.price) !== undefined && estimateUnitCost(videoPrice.value) !== undefined
   return known
-    ? `生图 ${imageModel.value!.price}，视频 ${videoModel.value!.price}。每集按新增资产与片段时长实时估算，超过单集预算即暂停。`
+    ? `生图 ${imageModel.value!.price}，视频 ${videoPrice.value}。每集按新增资产与片段时长实时估算，超过单集预算即暂停。`
     : '所选模型价格无法自动估算，单集预算不会拦截，请留意用量。'
 })
 const canStart = computed(() => Boolean(props.draft?.ratio && episodes.value.length && imageModelId.value && videoModelId.value))
@@ -100,14 +166,17 @@ function startNew(resume = false) {
   const cap = Number(budget.value)
   emit('start', {
     episodes: episodes.value.slice().sort((a, b) => a - b),
-    videoModel: 'Seedance',
+    videoModel: route.value,
+    limits: limits.value,
     imageModelId: imageModelId.value,
     videoModelId: videoModelId.value,
     ratio: draft.ratio,
-    review: reviewFirst.value,
+    review: reviewMode.value !== 'off',
+    reviewMode: reviewMode.value,
     budgetPerEpisode: budget.value !== '' && Number.isFinite(cap) && cap > 0 ? cap : undefined,
     imagePrice: imageModel.value?.price,
-    videoPrice: videoModel.value?.price,
+    videoResolution: videoResolution.value || undefined,
+    videoPrice: videoPrice.value,
   }, resume)
 }
 
@@ -135,6 +204,15 @@ function displaySrc(path?: string) {
 .manju-auto-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 300px; overflow-y: auto; }
 .manju-auto-images figure { margin: 0; }
 .manju-auto-images img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+.manju-auto-images figure { position: relative; display: grid; gap: 3px; }
+.manju-auto-images figure.busy img { opacity: .35; }
+.manju-auto-busy { position: absolute; top: 34%; left: 0; right: 0; color: var(--ink1); font-size: 11px; text-align: center; }
+.manju-auto-image-actions { display: flex; gap: 4px; }
+.manju-auto-image-actions button { flex: 1; padding: 2px 0; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 10px; }
+.manju-auto-image-actions button:disabled { opacity: .45; cursor: default; }
+.manju-auto-image-error { color: var(--jc-error); font-size: 10px; line-height: 1.3; }
+.manju-auto-prompt-editor { display: grid; gap: 6px; }
+.manju-auto-prompt-editor textarea { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; font-size: 12px; resize: vertical; }
 .manju-auto-images figcaption { overflow: hidden; color: var(--ink3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .manju-auto-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 14px 6px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--jc-error) 30%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--jc-error) 5%, var(--paper)); color: var(--ink2); font-size: 12px; }
 .manju-auto-progress.done { border-color: color-mix(in srgb, var(--olive) 35%, var(--line)); background: color-mix(in srgb, var(--olive) 6%, var(--paper)); }
@@ -145,5 +223,6 @@ function displaySrc(path?: string) {
 .manju-auto-chip.blocked { background: color-mix(in srgb, var(--jc-error) 14%, transparent); color: var(--jc-error); }
 .manju-auto-chip.review { background: color-mix(in srgb, #d08a00 18%, transparent); color: #a86d00; }
 .manju-auto-progress button { margin-left: auto; padding: 3px 10px; }
+.manju-auto-reason { flex-basis: 100%; margin: 2px 0 0; color: var(--ink2); font-size: 11px; line-height: 1.5; }
 .manju-auto-error { margin: 0 14px 6px; color: var(--jc-error); font-size: 12px; }
 </style>

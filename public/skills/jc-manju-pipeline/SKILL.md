@@ -12,6 +12,8 @@ description: 将用户提供的分集剧本与已确认的影片比例和风格�
 
 - **【全自动成片·入稿】**：只做入稿；用户在剧本之外提出的制作要求（如镜头、时长、风格补充）不在本轮执行，原样记住，供后续单集执行。读取本轮剧本（粘贴、附件或引用文件），按集拆分，每集用 episode_source_script 原样保存（episode_number 为集号，不改写、不删减正文）；已存在且内容相同的集不重复保存。再检查 `项目风格/影片比例与风格.md` 是否已确认比例与风格，没有则按 [项目风格](../jc-film-style/SKILL.md) 询问并保存。本轮不执行 plan 及之后阶段，不保存 pipeline_checkpoint；结束时列出已保存的集号与大致字数。
 - **【全自动成片·第N集】**：按下文固定阶段执行指令中的那一集，同时遵守本对话入稿消息里用户提出的制作要求，剧本用该集分集剧本，比例/风格沿用已确认内容，从 plan 连续执行到 complete，中途不向用户提问或等待确认；确实无法继续时按合同保存 blocked 进度并写明原因。不提交生图或视频，由宿主根据进度自动处理。
+  - 全自动的 assets 阶段，角色**一步出三格参考图提示词**：read 影片比例与风格和该角色人物小传，按 [角色形象](../jc-juese-sheji/SKILL.md) 的设计规则确定骨相、五官、身材与造型，直接套用 [角色格式](../jc-juese-geshi/SKILL.md) 对应横竖屏模板，写成完整三格人物设定图提示词，只保存 character_format；不单独生成或保存 character_asset（角色生图提示词）。场景、道具、声音照常。宿主用三格图作为视频的角色参考图。
+  - 全自动的 assets 阶段，角色**一步出三格参考图提示词**：read 影片比例与风格和该角色人物小传，按 [角色形象](../jc-juese-sheji/SKILL.md) 的设计规则确定骨相、五官、身材与造型，直接套用 [角色格式](../jc-juese-geshi/SKILL.md) 对应横竖屏模板，写成完整三格人物设定图提示词，只保存 character_format；不单独生成或保存 character_asset（角色生图提示词）。场景、道具、声音照常。宿主用三格图作为视频的角色参考图。
 
 ## 输入与恢复
 
@@ -23,9 +25,9 @@ description: 将用户提供的分集剧本与已确认的影片比例和风格�
 ## 固定执行阶段
 
 - **plan**：确认模型、集号、剧本路径和已确认比例/风格，保存初始checkpoint。不可生成媒体。
-- **materials**：实际读取 [项目资料](../jc-xiangmuziliao/SKILL.md) 并完成本集范围的故事梗概、人物小传、场景说明、道具说明及必要背景/规则；需要完整来源时实际读完，不能从简介冒充全文。分别保存对应类型。
+- **materials**：实际读取 [项目资料](../jc-xiangmuziliao/SKILL.md) 并完成本集范围的故事梗概、人物小传、场景说明、道具说明及必要背景/规则；道具说明只建符合其“道具判定标准”的剧情道具与角色标志物，日常物件写进场景说明的陈设；群众与无独立戏份的配角写进场景说明的“人群”，不建人物小传；需要完整来源时实际读完，不能从简介冒充全文。分别保存对应类型。
 - **style**：用户已确认比例/风格直接填入film_style，不重新推荐另一套方向；缺明确风格才按 [项目风格](../jc-film-style/SKILL.md) 从故事梗概和本轮消息生成并等待必要确认。
-- **assets**：先read影片比例与风格；每个实体先read对应人物小传、场景说明或道具说明，形象生成后先read该角色生图提示词再生成格式提示词。刚写入不等于读取，不能凭聊天复用未读正文。按本集真实实体分别读取 [角色形象](../jc-juese-sheji/SKILL.md)、[角色格式](../jc-juese-geshi/SKILL.md)、[场景](../jc-scene-prompt/SKILL.md)、[道具](../jc-prop-prompt/SKILL.md)，有发声角色时读取 [角色声音](../jc-shengyin-sheji/SKILL.md)。各自输出并保存独立提示词；不生成图片，不虚构已存在参考图。
+- **assets**：先read影片比例与风格；每个实体先read对应人物小传、场景说明或道具说明，形象生成后先read该角色生图提示词再生成格式提示词。刚写入不等于读取，不能凭聊天复用未读正文。按本集真实实体分别读取 [角色形象](../jc-juese-sheji/SKILL.md)、[角色格式](../jc-juese-geshi/SKILL.md)、[场景](../jc-scene-prompt/SKILL.md)、[道具](../jc-prop-prompt/SKILL.md)，有发声角色时读取 [角色声音](../jc-shengyin-sheji/SKILL.md)。场景说明记有“人群”的，每个群体按 [人群群像](../jc-renqun/SKILL.md) 保存一份 crowd_asset（跨集复用，已有则不重做）。本集用到人物小传“造型表”里尚未建立的造型时，按 [服装](../jc-fuzhuang-prompt/SKILL.md) 同阶段保存 costume_asset 与 character_look（entity_name 均为“角色名·造型名”），宿主先出身份图与服装图再融合成该造型的三格参考图；已有造型直接复用。各自输出并保存独立提示词；不生成图片，不虚构已存在参考图。
 - **engineering**：先read本集来源剧本、比例/风格及出场人物小传正文，再读取 [工程剧本](../jc-gongchengjuben/SKILL.md)，交付影片比例/风格、整集资产清单和逐镜正文。提前按选定模型上限设计自然切点，记录整集时长预算。已确认声音稿存在时继承，不额外增加未经要求的内容。
 - **prompts**：H3实际读取 [H3](../h3-prompt-writing/SKILL.md)，每段≤15秒；Seedance实际读取 [Seedance](../jc-seedance/SKILL.md)，每段≤30秒。只有用户选择分镜路线时才额外使用对应分镜Skill。每段按实际入画资产生成有序参考图占位，即使没有图片也写全，正文引用同一编号，提交正文不写待上传等操作备注；逐段read工程稿/对应分镜和所需资产正文，不用刚生成的聊天内容代替。逐段完整转写，不加速对白、不删动作、不机械截断；片段承接角色、位置、持物、场景、光线与声音状态。每段时间从0起。工程镜映射、全片时间与未实测的预算只记在工程稿/进度中，不写入Seedance提示词。
 - **complete**：核对所有阶段文件仍存在、视频段连续覆盖工程总时长、格式与参考占位一致，保存完成checkpoint，再报告真实路径与时长预算。
@@ -36,10 +38,10 @@ description: 将用户提供的分集剧本与已确认的影片比例和风格�
 
 使用既有wiki_save_artifact，artifact_kind="pipeline_checkpoint"，episode_number与video_model必填。content传JSON字符串。阶段严格为plan → materials → style → assets → engineering → prompts → complete。
 
-- plan：`{"stage":"plan","source_path":"项目内真实剧本路径","outputs":[]}`。
+- plan：`{"stage":"plan","source_path":"项目内真实剧本路径","outputs":[]}`。全自动指令给出 `"limits":{...}` 时原样写入 plan（如 `"limits":{"max_seconds":28,"max_refs":6}`）：程序据此校验每段时长与参考图张数，工程分段与视频提示词都按它设计；不写时默认 Seedance 30 秒、H3 15 秒。
 - 中间阶段：`{"stage":"materials","outputs":["wiki/项目资料/故事梗概.md", "其他真实路径"]}`；每阶段只登记已成功写入的实际文件，不传示例占位。
 - engineering另传 `duration_seconds`（整集时间预算）。
-- prompts另传 `segments:[{"path":"wiki/剧本/视频提示词/Seedance/第1集001视频提示词.md","start_seconds":0,"end_seconds":28,"refs":["角色/顾云舟","场景/石道"]}, ...]`，使用整集连续时间、实际模型/集数/序号，末段终点等于工程总时长；outputs包括每段视频提示词。Seedance每段必传refs：按@图1起的顺序列出资产ID（`角色|场景|道具/实体名`，即assets阶段登记的资产），数量等于本段@图行数，第N个ID的实体名须出现在@图N行；refs只记在进度里，不写进提示词正文。
+- prompts另传 `segments:[{"path":"wiki/剧本/视频提示词/Seedance/第1集001视频提示词.md","start_seconds":0,"end_seconds":28,"refs":["角色/顾云舟","场景/石道"]}, ...]`，使用整集连续时间、实际模型/集数/序号，末段终点等于工程总时长；outputs包括每段视频提示词。每段必传refs：按参考图编号顺序列出资产ID（`角色|场景|道具/实体名`，即assets阶段登记的资产），数量不超过 limits.max_refs。Seedance：数量等于本段@图行数，第N个ID的实体名须出现在@图N行。H3：使用 Ref2VA，`<Picture N>` 从1连续编号，数量等于本段不同的 `<Picture N>` 个数，第N个ID的实体名须出现在含 `<Picture N>` 的行（subject_definitions 逐行定义）。refs只记在进度里，不写进提示词正文。
 - complete：`{"stage":"complete","outputs":[]}`，其他事实由程序继承校验，不手造files或source_hash；程序将最终status写为completed，不能同时blocked。
 
 程序拒绝跳阶段、缺文件、上游已变化、时长超限与片段漏覆盖；被拒绝后修复具体问题再试，不能以普通write篡改进度绕过校验。若缺资料不能继续，以当前已完成阶段的outputs记录 `status:"blocked", reason:"具体缺项"`，然后说明暂停原因。用户取消立即停止，重新明确继续后才恢复。

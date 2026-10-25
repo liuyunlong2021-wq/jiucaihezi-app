@@ -153,6 +153,8 @@ test('Desktop video submission leaves headroom above the adapter deadline', () =
   assert.equal(picker.includes("if (/\\/v1\\/videos\\b/.test(url) && !/\\/v1\\/videos\\/[^/]+$/.test(url)) return 150"), true)
   assert.equal(picker.includes("if (/\\/suno\\/submit/.test(url)) return 60"), true)
   assert.equal(picker.includes('return 30'), true)
+  // 回归（2026-10-25 实测）：参考图直传 R2 落入默认 30 秒，多张 2MB 参考图上传被截断报 error sending request。
+  assert.equal(picker.includes("if (/^https:\\/\\/[a-f0-9]+\\.r2\\.cloudflarestorage\\.com\\//.test(url)) return 120"), true)
 })
 
 test('Tauri opens external URLs through the official opener plugin', () => {

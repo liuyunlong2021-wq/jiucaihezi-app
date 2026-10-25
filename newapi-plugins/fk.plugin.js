@@ -14,27 +14,48 @@ const LEGACY_VIDEO_IDS = [
   'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
   'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
 ]
+// 面板目录：标记之间必须是纯 JSON，可用性服务不执行插件代码，按标记截取后下发创作面板。
+// 改型号只改这里；下方插件校验与公开名映射都由它推导。price 仅在 NewAPI 表达式无法换算时显示。
+export const catalog = /*jc-catalog*/{
+  "schema": "jc-catalog-v1",
+  "models": [
+    { "name": "Wan 3.0 720-1080p", "upstream": "ft-video-v1-9cf6b90d6d04866453951fc3a26720aa", "task": "video", "group": "FK · Wan 3.0",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["720p", "1080p"], "duration": { "min": 2, "max": 30, "default": 5 },
+      "refs": { "images": 10, "videos": 5, "audios": 5 }, "billing": "second", "price": "720p ¥0.2/秒 · 1080p ¥0.25/秒" },
+    { "name": "官方渠道-Seedance 2.5 满血 720p", "upstream": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "1:1", "21:9", "4:3", "3:4"], "resolutions": ["720p"], "duration": { "min": 4, "max": 30, "default": 4 },
+      "refs": { "images": 30, "videos": 10, "audios": 10 }, "billing": "token-with-video", "price": "¥1/秒 · 视频参考 ¥31.5/百万Token" },
+    { "name": "Seedance 2.5 满血 480-720p", "upstream": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["480p", "720p"], "duration": { "min": 4, "max": 30, "default": 4 },
+      "refs": { "images": 30, "videos": 10, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "¥0.5/秒" },
+    { "name": "XN2-Seedance 2.5 满血 480-720p", "upstream": "ft-video-v1-756e0feb4b3e1f893726314109762123", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1"], "resolutions": ["480p", "720p"], "duration": { "min": 15, "max": 30, "default": 15 },
+      "refs": { "images": 30, "videos": 0, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "¥0.5/秒" },
+    { "name": "特价渠道 Seedance 2.0 满血 480p (933)", "upstream": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], "resolutions": ["480p"], "duration": { "min": 4, "max": 15, "default": 4 },
+      "refs": { "images": 9, "videos": 3, "audios": 3 }, "billing": "request", "price": "¥2/次" },
+    { "name": "特价渠道 Seedance 2.5 满血 720p（可过真人）", "upstream": "ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["720p"], "duration": { "values": [15, 30], "default": 15 },
+      "refs": { "images": 9, "videos": 0, "audios": 0 }, "billing": "request", "price": "¥5/次" },
+    { "name": "特价渠道 MiniMax H3 480p-1080p", "upstream": "ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746", "task": "video", "group": "FK · H3",
+      "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16"], "resolutions": ["768p", "480p", "1080p"], "duration": { "min": 1, "max": 15, "default": 1 },
+      "refs": { "images": 9, "videos": 0, "audios": 3 }, "billing": "second", "price": "480p/768p ¥0.08/秒 · 1080p ¥0.25/秒" }
+  ]
+}/*end-jc-catalog*/
 const WAN_MODEL = 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
-const H3_MODEL = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
-const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4']
-const VIDEO_SPECS = {
-  [WAN_MODEL]: { min: 2, max: 30, refs: [10, 5, 5], resolutions: ['720p', '1080p'] },
-  [H3_MODEL]: { min: 1, max: 15, refs: [9, 0, 3], resolutions: ['768p', '480p', '1080p'] },
-  'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848': { min: 4, max: 30, refs: [30, 10, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
-  'ft-video-v1-756e0feb4b3e1f893726314109762123': { min: 15, max: 30, refs: [30, 0, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
-  'ft-video-v1-451adae35b0c4a3d275c2c46394abc98': { min: 4, max: 30, refs: [30, 10, 10], wide: true, tokenWithVideo: true },
-  'ft-video-v1-43644108aaba72b7cbad4cd322737f6c': { min: 4, max: 15, refs: [9, 3, 3], resolutions: ['480p'], wide: true, unit: 'request' },
-}
+const VIDEO_SPECS = Object.fromEntries(catalog.models.map(model => [model.upstream, {
+  min: model.duration.min,
+  max: model.duration.max,
+  durations: model.duration.values,
+  refs: [model.refs.images, model.refs.videos, model.refs.audios],
+  ratios: model.ratios,
+  resolutions: model.resolutions,
+  promptMax: model.promptMax,
+  unit: model.billing === 'request' ? 'request' : undefined,
+  tokenWithVideo: model.billing === 'token-with-video',
+}]))
 const VIDEO_MODEL_IDS = Object.keys(VIDEO_SPECS)
-const VIDEO_MODEL_ALIASES = {
-  "特价渠道 MiniMax H3 480p-1080p": "ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746",
-  "特价渠道 Seedance 2.0 满血 480p (933)": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c",
-  "Wan 3.0 720-1080p": "ft-video-v1-9cf6b90d6d04866453951fc3a26720aa",
-  "Seedance 2.5 满血 480-720p": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848",
-  "XN2-Seedance 2.5 满血 480-720p": "ft-video-v1-756e0feb4b3e1f893726314109762123",
-  "官方渠道-Seedance 2.5 满血 720p": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98"
-}
-
+const VIDEO_MODEL_ALIASES = Object.fromEntries(catalog.models.map(model => [model.name, model.upstream]))
 
 function videoModel(value) {
   const model = String(value || '')
@@ -73,7 +94,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.9',
+  version: '0.5.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -189,7 +210,7 @@ function normalizeRequest(body, fileRefs = []) {
     prompt: String(body.prompt),
     ratio: String(body.ratio || body.aspect_ratio || '16:9'),
     duration: Number(body.duration === undefined ? body.seconds : body.duration),
-    resolution: String(body.resolution || (spec ? (spec.resolutions || ['720p'])[0] : '768p')),
+    resolution: String(body.resolution || (spec ? spec.resolutions[0] : '768p')),
   }
 
   if (model === WAN_MODEL) {
@@ -203,9 +224,8 @@ function normalizeRequest(body, fileRefs = []) {
   if (videos.length) payload.videoUrls = videos
   if (audios.length) payload.audioUrls = audios
   if (spec) {
-    const ratios = spec.wide ? [...VIDEO_RATIOS, '21:9'] : VIDEO_RATIOS
-    if (!ratios.includes(payload.ratio)) fail('Unsupported Fk video ratio: ' + payload.ratio)
-    if (!(spec.resolutions || ['720p']).includes(payload.resolution)) fail('Unsupported Fk video resolution: ' + payload.resolution)
+    if (!spec.ratios.includes(payload.ratio)) fail('Unsupported Fk video ratio: ' + payload.ratio)
+    if (!spec.resolutions.includes(payload.resolution)) fail('Unsupported Fk video resolution: ' + payload.resolution)
     if (!Number.isInteger(payload.duration) || (spec.durations ? !spec.durations.includes(payload.duration) : payload.duration < spec.min || payload.duration > spec.max)) fail('Unsupported Fk video duration: ' + payload.duration)
     if (spec.promptMax && payload.prompt.length > spec.promptMax) fail('prompt accepts at most ' + spec.promptMax + ' characters')
     ;['images', 'videos', 'audios'].forEach((kind, index) => {

@@ -181,7 +181,7 @@ test('production scopes deny foreign Skill resources and cross-route artifacts b
   assert.doesNotMatch(f.results()[0], /小说世界模型/)
   assert.match(f.results()[1], /Error:/)
   const schema = f.requests[0].tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters
-  assert.equal(schema.properties.artifact_kind.enum.length, 24)
+  assert.equal(schema.properties.artifact_kind.enum.length, 27)
   assert.equal(schema.properties.chapter_number, undefined)
   assert.equal(schema.properties.user_confirmed, undefined)
 })
@@ -308,7 +308,7 @@ test('ordinary single business Skill selection retains general capabilities and 
   assert.match(f.results()[0], /合法改编输入/)
   await f.run('none', { mode: 'skills:jc-novel', sessionId: 'personal-skill' })
   assert.ok(f.tools().includes('bash'))
-  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 42)
+  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 45)
 })
 
 test('old capability handshake fails before a prompt is sent', async () => {
@@ -448,8 +448,8 @@ test('actual SDK resumes a stopped pipeline until verified completion for both m
     calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/资产/场景/山门/场景生图提示词.md') } })
     const path = `wiki/剧本/视频提示词/${model}/第1集001视频提示词.md`
     if (model === 'Seedance') save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '# 第一段\n没有参考图，省略图号')
-    save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '古装宗门云海中的电影片段。\n@图1：山门，青灰石门与云海。\n山门位于画面中央，@图1石台通向门内。\n【全局设定】\n日间，9:16二维动画，左上日光。\n【时间戳剧本分镜】\n镜头1【0—10秒】：【建立】 ｜ 全景，固定 ｜ @图1山门空镜。\n【全局补充】\n保持光向一致，无字幕和BGM。')
-    checkpoint({ stage: 'prompts', outputs: [path], segments: [{ path, start_seconds: 0, end_seconds: 10, ...(model === 'Seedance' && { refs: ['场景/山门'] }) }] })
+    save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, model === 'H3' ? 'subject_definitions\n<Picture 1> is the 山门 environment, blue-gray stone gate above clouds.\nsummary\nA still establishing shot of <Picture 1>.' : '古装宗门云海中的电影片段。\n@图1：山门，青灰石门与云海。\n山门位于画面中央，@图1石台通向门内。\n【全局设定】\n日间，9:16二维动画，左上日光。\n【时间戳剧本分镜】\n镜头1【0—10秒】：【建立】 ｜ 全景，固定 ｜ @图1山门空镜。\n【全局补充】\n保持光向一致，无字幕和BGM。')
+    checkpoint({ stage: 'prompts', outputs: [path], segments: [{ path, start_seconds: 0, end_seconds: 10, refs: ['场景/山门'] }] })
     checkpoint({ stage: 'complete', outputs: [] })
     f.plan(calls)
     await f.run('manju', { sessionId: 'pipeline-both-models' })

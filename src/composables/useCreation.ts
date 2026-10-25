@@ -31,6 +31,7 @@ import {
 } from '@/runtime/creation/creationMediaPlan'
 import type { CreationFieldSpec, CreationModelSpec, CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
 import { fetchCreationModelAvailability } from '@/services/creationModelAvailability'
+import { applyRemoteCatalog, restoreRemoteCatalog } from '@/runtime/creation/remoteCreationCatalog'
 import { normalizeCreationTextField, sanitizeCreationResults } from '@/utils/creationResults'
 import type { ProjectResource } from '@/utils/projectResource'
 
@@ -286,9 +287,18 @@ function durationValuesFor(spec: CreationModelSpec): number[] {
   return []
 }
 
-export const CREATION_PANEL_MODELS: Record<string, CreationModel> = Object.fromEntries(
-  CREATION_MODEL_REGISTRY.map(spec => [spec.id, specToCreationModel(spec)]),
-)
+// 先装上次缓存的插件目录，面板首屏即用最近一次下发的型号。
+restoreRemoteCatalog()
+
+export const CREATION_PANEL_MODELS: Record<string, CreationModel> = {}
+// 插件目录替换条目后递增，让依赖注册表的计算属性重新求值。
+const catalogVersion = ref(0)
+
+function rebuildCreationPanelModels() {
+  for (const key of Object.keys(CREATION_PANEL_MODELS)) delete CREATION_PANEL_MODELS[key]
+  for (const spec of CREATION_MODEL_REGISTRY) CREATION_PANEL_MODELS[spec.id] = specToCreationModel(spec)
+}
+rebuildCreationPanelModels()
 
 export function getVisibleCreationTasks(): CreationTask[] {
   return (Object.keys(MEDIA_TASK_LABELS) as CreationTask[])
@@ -446,13 +456,14 @@ function resolveCreationModelKey(key: string): string {
 }
 
 export const currentModel = computed<CreationModel | undefined>(() => {
+  void catalogVersion.value
   const direct = CREATION_PANEL_MODELS[cpState.modelKey]
   if (direct) return direct
   return CREATION_PANEL_MODELS[resolveCreationModelKey(cpState.modelKey)]
 })
-export const currentCreationSpec = computed(() => getCreationModelSpec(cpState.modelKey))
+export const currentCreationSpec = computed(() => (void catalogVersion.value, getCreationModelSpec(cpState.modelKey)))
 
-export const availableModels = computed(() => getModelsForTask(cpState.task))
+export const availableModels = computed(() => (void catalogVersion.value, getModelsForTask(cpState.task)))
 export const currentModelAvailability = computed(() => {
   const model = currentModel.value
   if (!model) return undefined
@@ -929,6 +940,10 @@ export function clearFiles() { cpState.files.splice(0) }
 export async function refreshCreationModelAvailability(): Promise<void> {
   try {
     const availability = await fetchCreationModelAvailability()
+    if (applyRemoteCatalog(availability)) {
+      rebuildCreationPanelModels()
+      catalogVersion.value += 1
+    }
     setMediaModelAvailability(availability)
     if (!availableModels.value.includes(cpState.modelKey)) {
       cpState.modelKey = availableModels.value[0] || 'gpt-image-2-1k'

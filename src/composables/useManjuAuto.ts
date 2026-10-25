@@ -6,12 +6,20 @@ import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
-import { createAutoRun, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
+import { createAutoRun, episodeInstruction, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
+import { ASSET_REGISTRY_PATH, awaitAsset, promptBody, regenerateAsset, type AssetRegistryEntry } from '@/runtime/manjuAuto/assetScheduler'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import { emitEvent } from '@/utils/eventBus'
 
-export interface ManjuAutoModelOption { id: string; label: string; price?: number | string }
+export interface ManjuAutoModelOption {
+  id: string
+  label: string
+  price?: number | string
+  resolutions?: string[]
+  duration?: { min?: number; max?: number; allowedValues?: number[] }
+  maxImages?: number
+}
 
 export interface ManjuAutoDraft {
   wikiRoot: string
@@ -23,11 +31,6 @@ export interface ManjuAutoDraft {
 }
 
 export const AUTO_INTAKE_PREFIX = '【全自动成片·入稿】'
-const VIDEO_MODEL = 'Seedance'
-
-export function episodeInstruction(episode: number, wikiRoot: string) {
-  return `【全自动成片·第${episode}集】请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${VIDEO_MODEL}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求，从 plan 连续执行到 complete。`
-}
 
 /**
  * 确认卡的模型选项：与 @影音 面板同一份默认顺序（prioritizedCreationModelIds），
@@ -54,6 +57,9 @@ export function normalizeModels(models: Array<Record<string, unknown>>, kind: 'i
     id: String(model.id),
     label: String(model.label || model.display_name || model.id),
     price: typeof model.price === 'number' || typeof model.price === 'string' ? model.price : undefined,
+    resolutions: getCreationModelSpec(String(model.id))?.capabilities.resolutions,
+    duration: getCreationModelSpec(String(model.id))?.capabilities.duration,
+    maxImages: getCreationModelSpec(String(model.id))?.files?.images?.max,
   })).sort((a, b) => rank(a) - rank(b))
 }
 
@@ -65,17 +71,21 @@ export function useManjuAuto(options: {
   const run = ref<AutoRunState | null>(null)
   const draft = ref<ManjuAutoDraft | null>(null)
   const review = shallowRef<{ ids: string[]; images: Record<string, string> } | null>(null)
+  /** 审图时正在单独重新生成的图，以及每张图最近一次重新生成的错误。 */
+  const reviewBusy = ref<Record<string, boolean>>({})
+  const reviewErrors = ref<Record<string, string>>({})
   const error = ref('')
   const preparing = ref(false)
-  let stopRequested = false
-  let wakeSleep: (() => void) | undefined
+  /** 每次运行独立的停止开关：新运行不会把旧运行的“停止”重置掉。 */
+  let session: { stopped: boolean; wake?: () => void } | undefined
+  let runFinished: Promise<void> | undefined
   let reviewResolve: ((value: 'approved' | 'stopped') => void) | undefined
   let liveDeps: Parameters<typeof runAuto>[1] | undefined
   // runAuto 原地修改这份状态；事件处理必须改同一个对象，run.value 只是界面快照。
   let liveState: AutoRunState | undefined
 
   const files = (owner: string) => createSkillDraftFiles(createRuntimeProjectFileService(), owner)
-  const checkpointPath = (wikiRoot: string, episode: number) => `${wikiRoot}/制作流水线/${VIDEO_MODEL}/第${episode}集进度.json`
+  const checkpointPath = (wikiRoot: string, route: string, episode: number) => `${wikiRoot}/制作流水线/${route}/第${episode}集进度.json`
 
   async function readJson<T>(owner: string, path: string): Promise<T | undefined> {
     const list = await createRuntimeProjectFileService().list(owner)
@@ -127,49 +137,72 @@ export function useManjuAuto(options: {
     const owner = options.owner()
     const current = draft.value
     if (!owner || !current || run.value?.status === 'running') return
-    const state = resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)
+    if (runFinished) {
+      error.value = '上一轮全自动还在收尾，请稍等几秒再续做'
+      return
+    }
+    const state = { ...(resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)), runId: crypto.randomUUID() }
     const { wikiRoot } = current
+    const mine = { stopped: false } as { stopped: boolean; wake?: () => void }
+    let claimed = false
+    session = mine
     draft.value = null
     error.value = ''
-    stopRequested = false
     run.value = state
+    let finish: () => void = () => {}
+    runFinished = new Promise(resolve => { finish = resolve })
     try {
       const [imageProfile, videoProfile] = await Promise.all([loadMediaParamProfile(state.config.imageModelId), loadMediaParamProfile(state.config.videoModelId)])
       const projectFiles = files(owner)
       const deps: Parameters<typeof runAuto>[1] = {
         wikiRoot,
-        runEpisodeText: episode => options.sendText(episodeInstruction(episode, wikiRoot)),
-        readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, episode)),
+        runEpisodeText: episode => options.sendText(episodeInstruction(episode, wikiRoot, state.config)),
+        readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, state.config.videoModel, episode)),
         asset: createDesktopAssetDeps(owner, { imageModelId: state.config.imageModelId, ratio: state.config.ratio }, imageProfile),
-        video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio }, videoProfile),
+        video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio, resolution: state.config.videoResolution }, videoProfile),
         async concat(videos, durations, outputPath) {
           await invoke('media_concat_videos', { input: { inputs: videos, durations, outputPath: `${owner.replace(/[\\/]+$/, '')}/${outputPath}` } })
           emitEvent('project-filetree:locate', { path: outputPath, owner, refresh: true, quiet: true })
         },
         waitForReview(ids, images) {
+          reviewBusy.value = {}
+          reviewErrors.value = {}
           review.value = { ids, images }
           return new Promise(resolve => { reviewResolve = resolve })
         },
         async save(next) {
-          run.value = { ...next, episodes: { ...next.episodes } }
+          // 第一次保存是“认领”：直接写入本轮 runId；之后每次保存才检查是否已被更新的运行接管。
+          const onDisk = claimed ? await readJson<AutoRunState>(owner, `${wikiRoot}/${AUTO_RUN_PATH}`) : undefined
+          claimed = true
+          if (onDisk?.runId && onDisk.runId !== next.runId) {
+            mine.stopped = true
+            throw new Error('已有更新的全自动运行，本轮退出')
+          }
+          if (session === mine) run.value = { ...next, episodes: { ...next.episodes } }
           await projectFiles.writeText(`${wikiRoot}/${AUTO_RUN_PATH}`, JSON.stringify(next, null, 2) + '\n')
         },
-        shouldStop: () => stopRequested,
+        shouldStop: () => mine.stopped,
         sleep: ms => new Promise(resolve => {
           const timer = setTimeout(resolve, ms)
-          wakeSleep = () => { clearTimeout(timer); resolve() }
+          mine.wake = () => { clearTimeout(timer); resolve() }
         }),
       }
       liveDeps = deps
       liveState = state
       await runAuto(state, deps)
     } catch (cause) {
-      error.value = `全自动成片已暂停：${cause instanceof Error ? cause.message : String(cause)}`
-      if (run.value) run.value = { ...run.value, status: 'stopped' }
+      if (session === mine) {
+        error.value = `全自动成片已暂停：${cause instanceof Error ? cause.message : String(cause)}`
+        if (run.value) run.value = { ...run.value, status: 'stopped' }
+      }
     } finally {
-      liveDeps = undefined
-      liveState = undefined
-      review.value = null
+      if (session === mine) {
+        liveDeps = undefined
+        liveState = undefined
+        review.value = null
+      }
+      runFinished = undefined
+      finish()
     }
   }
 
@@ -184,19 +217,68 @@ export function useManjuAuto(options: {
     })
   }
 
+  async function registryEntry(id: string): Promise<AssetRegistryEntry> {
+    const owner = options.owner()
+    const entry = owner && liveDeps ? (await readJson<{ assets: Record<string, AssetRegistryEntry> }>(owner, `${liveDeps.wikiRoot}/${ASSET_REGISTRY_PATH}`))?.assets[id] : undefined
+    if (!entry) throw new Error(`找不到资产：${id}`)
+    return entry
+  }
+
+  /** 审图面板读取一张图的提示词正文（不含标题）。 */
+  async function loadPrompt(id: string): Promise<string> {
+    const owner = options.owner()!
+    return promptBody(await files(owner).readText((await registryEntry(id)).prompt_path))
+  }
+
+  /** 审图时单独重新生成一张：可先把改过的提示词写回 Wiki（保留原标题），只动这一张。 */
+  async function regenerate(id: string, newPrompt?: string) {
+    const owner = options.owner()
+    const deps = liveDeps
+    if (!owner || !deps || !review.value || reviewBusy.value[id]) return
+    reviewBusy.value = { ...reviewBusy.value, [id]: true }
+    reviewErrors.value = { ...reviewErrors.value, [id]: '' }
+    let touched = [id]
+    try {
+      let hash: string | undefined
+      if (newPrompt !== undefined) {
+        const entry = await registryEntry(id)
+        const original = await files(owner).readText(entry.prompt_path)
+        const heading = original.match(/^(?:\s*#[^\n]*\n)+/)?.[0] || ''
+        const text = `${heading}${newPrompt.trim()}\n`
+        await files(owner).writeText(entry.prompt_path, text)
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+        hash = [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+      }
+      // 身份图或服装图重做后，由它融合出的造型也跟着重做，一并在面板里更新。
+      const dependents = await regenerateAsset(deps.wikiRoot, id, deps.asset, hash)
+      touched = [id, ...dependents]
+      reviewBusy.value = { ...reviewBusy.value, ...Object.fromEntries(dependents.map(dependent => [dependent, true])) }
+      for (const target of [id, ...dependents]) {
+        const image = await awaitAsset(deps.wikiRoot, target, deps.asset, { timeoutMs: 30 * 60_000, pollMs: 5000 })
+        if (review.value) review.value = { ...review.value, images: { ...review.value.images, [target]: image } }
+        if (target !== id) reviewBusy.value = { ...reviewBusy.value, [target]: false }
+      }
+    } catch (cause) {
+      reviewErrors.value = { ...reviewErrors.value, [id]: cause instanceof Error ? cause.message : String(cause) }
+    } finally {
+      reviewBusy.value = { ...reviewBusy.value, ...Object.fromEntries(touched.map(target => [target, false])) }
+    }
+  }
+
   function approveReview() {
+    if (Object.values(reviewBusy.value).some(Boolean)) return
     review.value = null
     reviewResolve?.('approved')
   }
 
   function stop() {
-    stopRequested = true
-    wakeSleep?.()
+    if (session) session.stopped = true
+    session?.wake?.()
     if (review.value) {
       review.value = null
       reviewResolve?.('stopped')
     }
   }
 
-  return { run, draft, review, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
+  return { run, draft, review, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
 }

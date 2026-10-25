@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   ASSET_REGISTRY_PATH,
+  awaitAsset,
   awaitEpisodeAssets,
   lockAssets,
+  regenerateAsset,
   submitEpisodeAssets,
   type AssetSchedulerDeps,
   type EpisodeCheckpoint,
@@ -14,7 +16,7 @@ type FakeTask = { status: 'pending' | 'running' | 'success' | 'failed' | 'cancel
 function fakeDeps(files: Record<string, string> = {}) {
   const fs = new Map(Object.entries(files))
   const tasks = new Map<string, FakeTask>()
-  const submits: Array<{ requestId: string; prompt: string; kind: string }> = []
+  const submits: Array<{ requestId: string; prompt: string; kind: string; images?: string[] }> = []
   const deps: AssetSchedulerDeps = {
     async readText(path) {
       const text = fs.get(path)
@@ -163,4 +165,130 @@ test('assets that finally failed get a fresh retry series on the next run (e.g. 
   assert.equal(submits.length, 3, '只重提失败的石道，已就绪的不动')
   assert.equal(registry(fs)['场景/石道'].status, 'pending')
   assert.equal(registry(fs)['场景/石道'].attempts, 1)
+})
+
+test('rate-limited failures wait and resubmit without using up attempts, each with a fresh requestId', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/a.png' })
+  tasks.set('t2', { status: 'failed', error: '请求过于频繁，请稍后再试' })
+  let clock = 0, limited = 4
+  deps.now = () => clock
+  deps.sleep = async ms => {
+    clock += ms
+    for (const [id, task] of tasks) if (id !== 't1' && task.status === 'pending')
+      tasks.set(id, limited-- > 0 ? { status: 'failed', error: 'HTTP 429 Too Many Requests' } : { status: 'success', localPath: `/p/${id}.png` })
+  }
+  const result = await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 30 * 60_000, pollMs: 30_000 })
+  assert.equal(result.status, 'ready')
+  assert.equal(registry(fs)['场景/石道'].attempts, 1, '限流不计入失败次数')
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length, '每次提交 requestId 都不同')
+})
+
+test('retrying a finally-failed asset on a later run never reuses an earlier requestId', async () => {
+  const { deps, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/a.png' })
+  tasks.set('t2', { status: 'failed', error: '内容审核未通过' })
+  await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 1000, pollMs: 1 })
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  const ids = submits.map(item => item.requestId)
+  assert.equal(new Set(ids).size, ids.length)
+})
+
+test('interrupted tasks (nobody tracking them after an app restart) resubmit immediately without using attempts', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'interrupted' })
+  tasks.set('t2', { status: 'success', localPath: '/p/b.png' })
+  deps.sleep = async () => { tasks.set('t3', { status: 'success', localPath: '/p/a.png' }) }
+  const result = await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 1000, pollMs: 1 })
+  assert.equal(result.status, 'ready')
+  assert.equal(submits.length, 3)
+  assert.equal(registry(fs)['角色/莫甘娜'].attempts, 1)
+})
+
+test('regenerating one asset during review resubmits only that asset, with a fresh requestId and optional new prompt hash', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/a.png' })
+  tasks.set('t2', { status: 'success', localPath: '/p/b.png' })
+  assert.equal((await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 1000, pollMs: 1, review: true })).status, 'awaiting_review')
+  fs.set('wiki/资产/场景/石道/场景生图提示词.md', '# 石道\n青灰石道，左侧加一株老松。')
+  await regenerateAsset(wiki, '场景/石道', deps, 'e'.repeat(64))
+  assert.equal(submits.length, 3)
+  assert.equal(submits[2].prompt, '青灰石道，左侧加一株老松。')
+  assert.notEqual(submits[2].requestId, submits[1].requestId)
+  const entry = registry(fs)['场景/石道']
+  assert.equal(entry.status, 'pending')
+  assert.equal(entry.prompt_hash, 'e'.repeat(64))
+  assert.equal(entry.image_path, undefined)
+  assert.equal(registry(fs)['角色/莫甘娜'].status, 'ready', '其他图不动')
+  tasks.set('t3', { status: 'success', localPath: '/p/b2.png' })
+  const one = await awaitAsset(wiki, '场景/石道', deps, { timeoutMs: 1000, pollMs: 1 })
+  assert.equal(one, '/p/b2.png')
+})
+
+test('regenerating a locked asset is refused so approved images stay stable', async () => {
+  const { deps } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  await lockAssets(wiki, ['角色/莫甘娜'], deps)
+  await assert.rejects(regenerateAsset(wiki, '角色/莫甘娜', deps), /已锁定/)
+})
+
+const lookPrompts = {
+  'wiki/资产/角色/顾云舟/角色生图格式提示词.md': '# 顾云舟\n三格',
+  'wiki/资产/角色/顾云舟·帝王/服装生图提示词.md': '# 帝王服\n龙袍',
+  'wiki/资产/角色/顾云舟·帝王/角色造型融合提示词.md': '# 融合\n以参考图1为人物身份，换上参考图2的服装，三格人物设定图。',
+}
+const lookCheckpoint = (): EpisodeCheckpoint => ({
+  episode_number: 12,
+  assets: {
+    '角色/顾云舟': { kind: 'character', prompt_path: 'wiki/资产/角色/顾云舟/角色生图格式提示词.md', prompt_hash: '1'.repeat(64) },
+    '服装/顾云舟·帝王': { kind: 'costume', prompt_path: 'wiki/资产/角色/顾云舟·帝王/服装生图提示词.md', prompt_hash: '2'.repeat(64) },
+    '角色/顾云舟·帝王': { kind: 'look', prompt_path: 'wiki/资产/角色/顾云舟·帝王/角色造型融合提示词.md', prompt_hash: '3'.repeat(64), base: '角色/顾云舟', costume: '服装/顾云舟·帝王' },
+  },
+})
+
+test('a costume look waits for its identity and costume images, then fuses them in order [identity, costume]', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(lookPrompts)
+  await submitEpisodeAssets(wiki, lookCheckpoint(), deps)
+  assert.equal(submits.length, 2, '先只提交身份图与服装图')
+  assert.equal(registry(fs)['角色/顾云舟·帝王'].status, 'waiting')
+  deps.sleep = async () => {
+    for (const [id, task] of tasks) if (task.status === 'pending') tasks.set(id, { status: 'success', localPath: `/p/${id}.png` })
+  }
+  const result = await awaitEpisodeAssets(wiki, lookCheckpoint(), deps, { timeoutMs: 60_000, pollMs: 1 })
+  assert.equal(result.status, 'ready')
+  const fusion = submits.find(item => item.requestId.startsWith('manju:角色/顾云舟·帝王'))!
+  assert.deepEqual(fusion.images, ['/p/t1.png', '/p/t2.png'])
+  assert.equal(fusion.prompt, '以参考图1为人物身份，换上参考图2的服装，三格人物设定图。')
+  assert.equal(result.images['角色/顾云舟·帝王'], '/p/t3.png')
+})
+
+test('a look fails with a clear reason when its costume image finally fails', async () => {
+  const { deps, tasks } = fakeDeps(lookPrompts)
+  await submitEpisodeAssets(wiki, lookCheckpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/base.png' })
+  tasks.set('t2', { status: 'failed', error: '内容审核未通过' })
+  const result = await awaitEpisodeAssets(wiki, lookCheckpoint(), deps, { timeoutMs: 1000, pollMs: 1 })
+  assert.equal(result.status, 'failed')
+  assert.deepEqual(result.failed.sort(), ['服装/顾云舟·帝王', '角色/顾云舟·帝王'])
+})
+
+test('regenerating a costume during review also redoes the looks built from it', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(lookPrompts)
+  await submitEpisodeAssets(wiki, lookCheckpoint(), deps)
+  deps.sleep = async () => { for (const [id, task] of tasks) if (task.status === 'pending') tasks.set(id, { status: 'success', localPath: `/p/${id}.png` }) }
+  await awaitEpisodeAssets(wiki, lookCheckpoint(), deps, { timeoutMs: 60_000, pollMs: 1 })
+  const dependents = await regenerateAsset(wiki, '服装/顾云舟·帝王', deps)
+  assert.deepEqual(dependents, ['角色/顾云舟·帝王'])
+  assert.equal(registry(fs)['角色/顾云舟·帝王'].status, 'waiting')
+  await awaitAsset(wiki, '服装/顾云舟·帝王', deps, { timeoutMs: 60_000, pollMs: 1 })
+  const look = await awaitAsset(wiki, '角色/顾云舟·帝王', deps, { timeoutMs: 60_000, pollMs: 1 })
+  const fusions = submits.filter(item => item.requestId.startsWith('manju:角色/顾云舟·帝王'))
+  assert.equal(fusions.length, 2)
+  assert.deepEqual(fusions[1].images, ['/p/t1.png', '/p/t4.png'], '用新服装图重新融合')
+  assert.equal(look, '/p/t5.png')
 })
