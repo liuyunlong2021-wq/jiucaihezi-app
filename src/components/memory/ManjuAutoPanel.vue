@@ -28,7 +28,13 @@
       <div class="manju-auto-row"><span>比例</span><span>{{ draft.ratio }}（项目风格已确认）</span></div>
       <div class="manju-auto-row"><span>模型限制</span><span>每段 ≤{{ limits.max_seconds }} 秒{{ limits.allowed_seconds ? `（只支持 ${limits.allowed_seconds.join('/')} 秒）` : '' }}{{ limits.max_refs ? `，最多 ${limits.max_refs} 张参考图` : '' }}；写提示词时按此分段</span></div>
       <label class="manju-auto-row"><span>单集预算</span><span><input v-model="budget" type="number" min="0" step="1" placeholder="不限"> 元</span></label>
-      <label class="manju-auto-row manju-auto-check"><input v-model="reviewFirst" type="checkbox">第 1 集资产出齐后暂停审图</label>
+      <label class="manju-auto-row"><span>审图</span>
+        <select v-model="reviewMode">
+          <option value="new">每集有新资产就审（只看新图）</option>
+          <option value="first">只审第 1 集</option>
+          <option value="off">不审</option>
+        </select>
+      </label>
       <p class="manju-auto-note">{{ priceNote }}</p>
     </template>
     <div class="manju-auto-actions">
@@ -39,7 +45,7 @@
   </div>
 
   <div v-if="review" class="manju-auto-card manju-auto-review" role="dialog" aria-label="审核资产图">
-    <strong>审核第 1 集资产图</strong>
+    <strong>审核本集新资产图</strong>
     <p>不满意的图可以单独「重新生成」或「改提示词」后重生成，其他图不受影响。确认后全部锁定，后续各集直接复用。</p>
     <div class="manju-auto-images">
       <figure v-for="id in review.ids" :key="id" :class="{ busy: reviewBusy[id] }">
@@ -116,7 +122,7 @@ const episodes = ref<number[]>([])
 const imageModelId = ref('')
 const videoModelId = ref('')
 const budget = ref<number | string>('')
-const reviewFirst = ref(true)
+const reviewMode = ref<'new' | 'first' | 'off'>('new')
 const videoResolution = ref('')
 const route = ref<VideoRoute>('Seedance')
 const resolutionHeight = (value: string) => Number(value.replace(/\D/g, '')) || Infinity
@@ -165,7 +171,8 @@ function startNew(resume = false) {
     imageModelId: imageModelId.value,
     videoModelId: videoModelId.value,
     ratio: draft.ratio,
-    review: reviewFirst.value,
+    review: reviewMode.value !== 'off',
+    reviewMode: reviewMode.value,
     budgetPerEpisode: budget.value !== '' && Number.isFinite(cap) && cap > 0 ? cap : undefined,
     imagePrice: imageModel.value?.price,
     videoResolution: videoResolution.value || undefined,

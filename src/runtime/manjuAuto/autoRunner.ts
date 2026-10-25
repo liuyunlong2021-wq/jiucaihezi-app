@@ -34,6 +34,8 @@ export interface AutoRunConfig {
   videoResolution?: string
   /** 第 1 集资产出齐后暂停审图（2026-10-25 用户确认默认开启）。 */
   review: boolean
+  /** 审图方式：first 只审第 1 集；new 每集有新资产就审（只列新资产）；off 不审。未设置时按 review 兼容旧记录。 */
+  reviewMode?: 'first' | 'new' | 'off'
   /** 单集预算上限（元）；价格无法估算时不拦截，由确认卡提示。 */
   budgetPerEpisode?: number
   imagePrice?: number | string
@@ -204,7 +206,8 @@ export async function runAuto(state: AutoRunState, deps: AutoRunnerDeps): Promis
     if (episode.phase !== 'review') episode.phase = 'assets'
     if (!await submitAssets(state, checkpoint, deps)) { await deps.save(state); return state }
     await deps.save(state)
-    let gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { ...ASSET_GATE, review: state.config.review && !state.reviewed })
+    const reviewMode = state.config.reviewMode ?? (state.config.review ? 'first' : 'off')
+    let gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { ...ASSET_GATE, review: reviewMode === 'new' || (reviewMode === 'first' && !state.reviewed) })
     if (gate.status === 'awaiting_review') {
       episode.phase = 'review'
       await deps.save(state)

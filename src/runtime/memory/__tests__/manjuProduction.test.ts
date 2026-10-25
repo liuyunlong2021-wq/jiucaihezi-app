@@ -164,7 +164,8 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   const prepare = controller.slice(controller.indexOf('async function prepare'), controller.indexOf('async function start'))
   assert.doesNotMatch(prepare, /submit|runAuto/)
   assert.match(panel, /emit\('start'/)
-  assert.match(panel, /第 1 集资产出齐后暂停审图/)
+  assert.match(panel, /<option value="new">每集有新资产就审（只看新图）<\/option>/)
+  assert.match(panel, /reviewMode: reviewMode\.value/)
   // 审图可单独重新生成或改提示词重生成，重生成期间不能确认（2026-10-25 用户要求）。
   assert.match(panel, /emit\('regenerate', id\)/)
   assert.match(panel, /保存并重新生成/)

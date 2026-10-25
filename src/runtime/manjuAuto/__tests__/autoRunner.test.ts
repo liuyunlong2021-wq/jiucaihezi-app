@@ -5,7 +5,7 @@ import { createAutoRun, episodeInstruction, estimateUnitCost, handleCheckpointSa
 type Task = { status: string; localPath?: string; error?: string }
 
 /** 假世界：文字流水线一跑就写出完整进度；生图/视频任务按测试设定完成。 */
-function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number } = {}) {
+function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number; newAssetIn?: number } = {}) {
   const fs = new Map<string, string>()
   const tasks = new Map<string, Task>()
   const log: string[] = []
@@ -38,9 +38,13 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
       fs.set(`wiki/资产/场景/山门/场景生图提示词.md`, '# 山门\n山门')
       const seg = `wiki/剧本/视频提示词/Seedance/第${episode}集001视频提示词.md`
       fs.set(seg, `第${episode}集。\n@图1：甲\n@图2：山门`)
-      const assets = {
+      const assets: Record<string, { kind: 'character' | 'scene'; prompt_path: string; prompt_hash: string }> = {
         '角色/甲': { kind: 'character' as const, prompt_path: 'wiki/资产/角色/甲/角色生图格式提示词.md', prompt_hash: 'a'.repeat(64) },
         '场景/山门': { kind: 'scene' as const, prompt_path: 'wiki/资产/场景/山门/场景生图提示词.md', prompt_hash: 'b'.repeat(64) },
+      }
+      if (options.newAssetIn === episode) {
+        fs.set('wiki/资产/场景/大殿/场景生图提示词.md', '# 大殿\n大殿')
+        assets['场景/大殿'] = { kind: 'scene', prompt_path: 'wiki/资产/场景/大殿/场景生图提示词.md', prompt_hash: 'c'.repeat(64) }
       }
       // 资产阶段保存时宿主收到事件，提前提交生图
       await handleCheckpointSaved(run, { episode_number: episode, video_model: 'Seedance', stage: 'assets', assets, segments: [] }, deps)
@@ -248,4 +252,28 @@ test('resuming keeps the original video route even if the card changed it', () =
   const resumed = resumeAutoRun(saved, { ...saved.config, videoModel: 'Seedance', videoModelId: 'c' })
   assert.equal(resumed.config.videoModel, 'H3')
   assert.equal(resumed.config.videoModelId, 'c')
+})
+
+test('review mode "new" pauses every episode that brings new assets, showing only the new ones', async () => {
+  const w = world({ newAssetIn: 2 })
+  w.run.config.reviewMode = 'new'
+  const reviewed: string[][] = []
+  w.deps.waitForReview = async ids => { reviewed.push(ids.slice().sort()); return 'approved' }
+  await runAuto(w.run, w.deps)
+  assert.deepEqual(reviewed, [['场景/山门', '角色/甲'], ['场景/大殿']])
+})
+
+test('review mode "new" skips the pause when an episode has no new assets; "off" never pauses', async () => {
+  const w = world()
+  w.run.config.reviewMode = 'new'
+  let calls = 0
+  w.deps.waitForReview = async () => { calls += 1; return 'approved' }
+  await runAuto(w.run, w.deps)
+  assert.equal(calls, 1)
+  const off = world()
+  off.run.config.reviewMode = 'off'
+  let offCalls = 0
+  off.deps.waitForReview = async () => { offCalls += 1; return 'approved' }
+  assert.equal((await runAuto(off.run, off.deps)).status, 'done')
+  assert.equal(offCalls, 0)
 })
