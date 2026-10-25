@@ -42,6 +42,30 @@ function parseMode(value: unknown): MobileRemoteMode | null {
   return MOBILE_REMOTE_MODES.includes(value as MobileRemoteMode) ? value as MobileRemoteMode : null
 }
 
+export type MobileRemoteFileKind = 'text' | 'image' | 'video'
+export type MobileRemoteFileEntry = {
+  path: string
+  name: string
+  isDir: boolean
+  size?: number
+  updatedAt?: number
+  kind?: MobileRemoteFileKind
+}
+
+/** 手机一次最多拉这么大；更大的视频请在电脑上看。 */
+const MAX_FILE_BYTES: Record<MobileRemoteFileKind, number> = {
+  text: 8 * 1024 * 1024,
+  image: 40 * 1024 * 1024,
+  video: 400 * 1024 * 1024,
+}
+
+function decodeBase64(text: string) {
+  const binary = atob(text)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
+}
+
 export type MobileRemoteProject = { projectId: string; name: string; current: boolean }
 export type MobileRemoteSessionSummary = {
   sessionId: string
@@ -296,6 +320,33 @@ export class MobileRemoteClient {
 
   async createSession(projectId: string) {
     return parseContext(await this.transport.request({ type: 'session.create', payload: { projectId } }))
+  }
+
+  async listFiles(projectId: string, path = '') {
+    const result = await this.transport.request({ type: 'file.list', payload: { projectId, path } }) as { entries?: unknown }
+    return Array.isArray(result?.entries) ? result.entries as MobileRemoteFileEntry[] : []
+  }
+
+  /** 分段从电脑取完整文件（视频动辄几十 MB）。`onProgress` 收到已取字节数。 */
+  async readFile(projectId: string, path: string, onProgress?: (received: number, size: number) => void) {
+    const parts: Uint8Array[] = []
+    let offset = 0
+    for (;;) {
+      const chunk = await this.transport.request({ type: 'file.read', payload: { projectId, path, offset } }) as {
+        kind: MobileRemoteFileKind; mime: string; size: number; base64: string; done: boolean
+      }
+      if (!MAX_FILE_BYTES[chunk.kind] || chunk.size > MAX_FILE_BYTES[chunk.kind]) throw new RemoteProtocolError('FILE_TOO_LARGE')
+      const bytes = decodeBase64(chunk.base64)
+      parts.push(bytes)
+      offset += bytes.length
+      onProgress?.(offset, chunk.size)
+      if (chunk.done || !bytes.length) {
+        const whole = new Uint8Array(offset)
+        let at = 0
+        for (const part of parts) { whole.set(part, at); at += part.length }
+        return { path, kind: chunk.kind, mime: chunk.mime, bytes: whole }
+      }
+    }
   }
 
   /** 切换这个对话的创作模式；以电脑回执为准，运行中电脑会拒绝。 */

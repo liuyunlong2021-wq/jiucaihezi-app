@@ -156,3 +156,17 @@ test('模式：聊天页有漫剧制作/短剧改编/小说创作三个模式按
   const controller = source('src/mobile/MobileController.vue')
   assert.match(controller, /@mode="setMode"/)
 })
+
+test('看成果：聊天页有「成果」入口，浏览器能看文字、图片和视频', () => {
+  const session = source('src/mobile/MobileSessionView.vue')
+  const browser = source('src/mobile/MobileFileBrowser.vue')
+  const controller = source('src/mobile/MobileController.vue')
+  assert.match(session, /\$emit\('files'\)/)
+  assert.match(controller, /<MobileFileBrowser/)
+  assert.match(browser, /listFiles\(/)
+  assert.match(browser, /readFile\(/)
+  assert.match(browser, /<img /)
+  assert.match(browser, /<video [^>]*controls[^>]*playsinline/)
+  assert.match(browser, /renderStreamingText\(/)
+  assert.match(browser, /URL\.revokeObjectURL/)
+})

@@ -127,6 +127,9 @@ export function useMobileRemote() {
   const createSession = (projectId: string) => run(async () => client.openSession(await client.createSession(projectId)))
   const followDesktop = () => run(() => client.followDesktop())
   const setMode = (mode: MobileRemoteMode) => run(() => client.setMode(mode))
+  const listFiles = (projectId: string, path?: string) => client.listFiles(projectId, path)
+  const readFile = (projectId: string, path: string, onProgress?: (received: number, size: number) => void) =>
+    client.readFile(projectId, path, onProgress)
 
   const send = (text: string) => run(() => client.sendMessage(text))
   const stop = () => run(() => client.stopRun())
@@ -136,6 +139,6 @@ export function useMobileRemote() {
   return {
     view, status, error, busy,
     refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
-    listProjects, listSessions, openSession, createSession, followDesktop, setMode,
+    listProjects, listSessions, openSession, createSession, followDesktop, setMode, listFiles, readFile,
   }
 }

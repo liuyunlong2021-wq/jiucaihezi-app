@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import MobileConversationList from './MobileConversationList.vue'
+import MobileFileBrowser from './MobileFileBrowser.vue'
 import MobilePairingView from './MobilePairingView.vue'
 import MobileSessionView from './MobileSessionView.vue'
 import { useMobileRemote } from './useMobileRemote'
@@ -9,10 +10,11 @@ import { useMobileRemote } from './useMobileRemote'
 const {
   view, status, error, busy,
   refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
-  listProjects, listSessions, openSession, createSession, followDesktop, setMode,
+  listProjects, listSessions, openSession, createSession, followDesktop, setMode, listFiles, readFile,
 } = useMobileRemote()
 
 const browsing = ref(false)
+const viewingFiles = ref(false)
 const pick = async (action: () => Promise<unknown>) => {
   browsing.value = false
   await action()
@@ -24,8 +26,15 @@ onMounted(() => { void refreshStatus() })
 </script>
 
 <template>
+  <MobileFileBrowser
+    v-if="connected && viewingFiles"
+    :list-projects="listProjects"
+    :list-files="listFiles"
+    :read-file="readFile"
+    @close="viewingFiles = false"
+  />
   <MobileConversationList
-    v-if="connected && browsing"
+    v-else-if="connected && browsing"
     :following="view.following"
     :current-session-id="view.context?.sessionId || ''"
     :list-projects="listProjects"
@@ -44,6 +53,7 @@ onMounted(() => { void refreshStatus() })
     @approve="respondApproval"
     @disconnect="disconnect"
     @browse="browsing = true"
+    @files="viewingFiles = true"
     @mode="setMode"
   />
   <MobilePairingView

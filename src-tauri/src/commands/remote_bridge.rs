@@ -34,6 +34,8 @@ const MESSAGE_TYPES: &[&str] = &[
     "session.list",
     "session.create",
     "session.mode.set",
+    "file.list",
+    "file.read",
     "message.send",
     "run.stop",
     "approval.respond",

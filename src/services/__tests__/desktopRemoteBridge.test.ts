@@ -816,3 +816,32 @@ test('标题：会话投影与后台进度都带电脑上的最新标题（对�
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
+test('看成果：file.list / file.read 只认电脑当前项目，路径交给成果目录规则', async () => {
+  const previousWindow = globalThis.window
+  const seen: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: { invoke: async (command: string, args: { input?: { root: string; relativePath: string } }) => {
+      if (command === 'dev_list_directory') { seen.push(`${args.input?.root}|${args.input?.relativePath}`); return [{ path: 'wiki/index.md', isDir: false, size: 3 }] }
+      if (command === 'dev_read_file') return { base64: Buffer.from('abc').toString('base64'), size: 3, truncated: false }
+      return null
+    } } },
+  })
+  try {
+    const { host, projects } = await m2Fixture()
+    const projectId = projects.projects[0]!.projectId
+    const listed = await __desktopRemoteBridgeForTests.dispatch(host, m2Request('file.list', { projectId, path: 'wiki' })) as { entries: Array<{ path: string }> }
+    assert.deepEqual(listed.entries.map(entry => entry.path), ['wiki/index.md'])
+    assert.ok(seen.includes(`${m2Owner}|wiki`))
+    const read = await __desktopRemoteBridgeForTests.dispatch(host, m2Request('file.read', { projectId, path: 'wiki/index.md', offset: 0 })) as { base64: string; done: boolean }
+    assert.equal(Buffer.from(read.base64, 'base64').toString(), 'abc')
+    assert.equal(read.done, true)
+    assert.doesNotMatch(JSON.stringify([listed, read]), /\/Users\/someone/, '不回传绝对路径')
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host, m2Request('file.list', { projectId: 'p-other', path: 'wiki' })), /PROJECT_NOT_FOUND/)
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host, m2Request('file.read', { projectId, path: '.env', offset: 0 })), /FILE_PATH_INVALID/)
+  } finally {
+    m2Cleanup()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})

@@ -33,6 +33,9 @@ type DesktopRemoteHostDependencies = {
   listSessions?: (projectId: string) => Promise<DesktopRemoteSessionSummary[]>
   createSession?: (projectId: string) => Promise<DesktopRemoteContext>
   setMode?: (sessionId: string, mode: string) => Promise<{ mode: string }>
+  /** 手机看成果：只读成果目录（见 desktopRemoteFiles）。 */
+  listFiles?: (projectId: string, path: string) => Promise<unknown[]>
+  readFile?: (projectId: string, path: string, offset: number) => Promise<unknown>
   readSession: (sessionId: string) => Promise<unknown>
   sendMessage: (text: string, sessionId: string) => Promise<{ runId: string } | void>
   stopRun: (sessionId: string) => Promise<string>
@@ -68,6 +71,16 @@ export class DesktopRemoteHost {
   async createSession(projectId: string) {
     if (!this.dependencies.createSession) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
     return await this.dependencies.createSession(projectId)
+  }
+
+  async listFiles(projectId: string, path: string) {
+    if (!this.dependencies.listFiles) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
+    return await this.dependencies.listFiles(projectId, path)
+  }
+
+  async readFile(projectId: string, path: string, offset: number) {
+    if (!this.dependencies.readFile) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
+    return await this.dependencies.readFile(projectId, path, offset)
   }
 
   async setMode(sessionId: string, mode: string) {

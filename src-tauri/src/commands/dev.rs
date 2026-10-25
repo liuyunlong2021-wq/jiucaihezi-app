@@ -1446,6 +1446,9 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
         return Err("读取路径必须是文件".into());
     }
     let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 30_000_000);
+    if let Some(offset) = input.offset {
+        return read_file_range(&root, &path, offset, max_bytes);
+    }
     let before = resource_revision(&path)?;
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
     let revision = resource_revision(&path)?;
@@ -1466,6 +1469,33 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
         base64: base64_str,
         truncated,
         size: bytes.len(),
+        revision,
+    })
+}
+
+/// 只读 `[offset, offset + max_bytes)` 这一段：手机分段取视频，不能每段都把整个文件读进内存。
+fn read_file_range(
+    root: &Path,
+    path: &Path,
+    offset: u64,
+    max_bytes: usize,
+) -> Result<DevReadFileOutput, String> {
+    use std::io::{Seek, SeekFrom};
+    let revision = resource_revision(path)?;
+    let size = revision.size;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("读取文件失败: {}", e))?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    let mut slice = Vec::with_capacity(max_bytes.min(size.saturating_sub(offset as usize)));
+    file.take(max_bytes as u64)
+        .read_to_end(&mut slice)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    Ok(DevReadFileOutput {
+        path: display_relative(root, path),
+        content: String::new(),
+        base64: general_purpose::STANDARD.encode(&slice),
+        truncated: (offset as usize).saturating_add(slice.len()) < size,
+        size,
         revision,
     })
 }
@@ -2629,6 +2659,43 @@ mod tests {
         assert!(!mixed.to_string_lossy().contains('/'));
     }
 
+    /// 手机看成果（视频动辄几十 MB）：按段读取，只读这一段，不把整个文件读进内存。
+    #[test]
+    fn read_file_returns_only_the_requested_range() {
+        let project = tempfile::tempdir().unwrap();
+        let bytes: Vec<u8> = (0..1000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(project.path().join("clip.mp4"), &bytes).unwrap();
+        let read = |offset: Option<u64>, max: usize| {
+            dev_read_file(DevReadFileInput {
+                root: project.path().to_string_lossy().to_string(),
+                relative_path: "clip.mp4".into(),
+                max_bytes: Some(max),
+                offset,
+            })
+            .unwrap()
+        };
+        let middle = read(Some(400), 300);
+        assert_eq!(
+            general_purpose::STANDARD.decode(&middle.base64).unwrap(),
+            bytes[400..700].to_vec()
+        );
+        assert_eq!(middle.size, 1000);
+        assert!(middle.truncated, "后面还有内容");
+        let tail = read(Some(900), 300);
+        assert_eq!(
+            general_purpose::STANDARD.decode(&tail.base64).unwrap(),
+            bytes[900..].to_vec()
+        );
+        assert!(!tail.truncated);
+        let past = read(Some(5000), 300);
+        assert!(past.base64.is_empty());
+        // 不带 offset 时行为不变：从头读。
+        assert_eq!(
+            general_purpose::STANDARD.decode(&read(None, 10).base64).unwrap(),
+            bytes[..10].to_vec()
+        );
+    }
+
     #[test]
     fn rename_refuses_to_overwrite_an_existing_target() {
         let project = tempfile::tempdir().unwrap();
@@ -2733,6 +2800,7 @@ mod tests {
             root: root.clone(),
             relative_path: "note.md".into(),
             max_bytes: None,
+            offset: None,
         })
         .unwrap();
         std::fs::write(temp.path().join("note.md"), "external change").unwrap();
@@ -2776,7 +2844,7 @@ mod tests {
         let mut failures = Vec::new();
         for _ in 0..500 {
             match dev_read_file(DevReadFileInput {
-                root: root.clone(), relative_path: "scene.jcscene".into(), max_bytes: None,
+                root: root.clone(), relative_path: "scene.jcscene".into(), max_bytes: None, offset: None,
             }) {
                 Ok(read) => {
                     if read.size != read.revision.size { failures.push("mixed file revision".to_string()); }

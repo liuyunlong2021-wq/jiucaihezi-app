@@ -53,6 +53,12 @@ async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequ
     return { projectId, sessions: await host.listSessions(projectId) }
   }
   if (request.type === 'session.create') return await host.createSession(requiredString(payload, 'projectId', 200))
+  if (request.type === 'file.list') {
+    const projectId = requiredString(payload, 'projectId', 200)
+    return { entries: await host.listFiles(projectId, String(payload.path ?? '')) }
+  }
+  if (request.type === 'file.read')
+    return await host.readFile(requiredString(payload, 'projectId', 200), requiredString(payload, 'path', 1024), Number(payload.offset ?? 0))
   if (request.type === 'session.mode.set')
     return await host.setMode(requiredString(payload, 'sessionId', 200), requiredString(payload, 'mode', 32))
   if (request.type === 'session.attach') {

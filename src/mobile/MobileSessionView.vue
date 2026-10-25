@@ -24,6 +24,7 @@ const emit = defineEmits<{
   approve: [approvalId: string, decision: MobileRemoteApprovalDecision]
   disconnect: []
   browse: []
+  files: []
   mode: [mode: MobileRemoteMode]
 }>()
 
@@ -68,6 +69,9 @@ function submit() {
         <strong>{{ view.context?.conversationTitle || '当前对话' }}</strong>
         <small>{{ view.context?.projectName || '当前项目' }}{{ view.following ? ' · 跟随电脑' : '' }}</small>
       </div>
+      <button type="button" title="看成果" aria-label="看成果" @click="$emit('files')">
+        <JcIcon name="folder_open" />
+      </button>
       <button type="button" title="选择对话" aria-label="选择对话" @click="$emit('browse')">
         <JcIcon name="forum" />
       </button>

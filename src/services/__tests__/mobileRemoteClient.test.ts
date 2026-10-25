@@ -876,3 +876,38 @@ test('标题：手机固定在某个对话时，读到或收到电脑的新标�
   assert.equal(client.view.context?.conversationTitle, '新对话', '重连后以电脑快照为准')
   client.disconnect()
 })
+
+// ---- 看成果 ----
+
+test('看成果：手机分段取完整文件并拼好，按总大小报告进度', async () => {
+  const file = Buffer.from('第一章 风起'.repeat(100))
+  const chunk = 256
+  const { client, calls } = connectedClient({
+    'file.list': payload => ({ entries: [{ path: `${payload.path}/a.md`, name: 'a.md', isDir: false, kind: 'text' }] }),
+    'file.read': payload => {
+      const offset = Number(payload.offset)
+      const slice = file.subarray(offset, offset + chunk)
+      return { path: payload.path, kind: 'text', mime: 'text/markdown', size: file.length, offset,
+        base64: slice.toString('base64'), done: offset + slice.length >= file.length }
+    },
+  })
+  await client.connect()
+  assert.equal((await client.listFiles('p-1', 'wiki'))[0]?.name, 'a.md')
+  const progress: number[] = []
+  const read = await client.readFile('p-1', 'wiki/a.md', received => progress.push(received))
+  assert.equal(Buffer.from(read.bytes).toString(), file.toString())
+  assert.equal(read.kind, 'text')
+  assert.equal(calls.filter(call => call.type === 'file.read').length, Math.ceil(file.length / chunk))
+  assert.equal(progress.at(-1), file.length)
+  client.disconnect()
+})
+
+test('看成果：超过手机能承受的大小时直接拒绝，不硬拉几百 MB', async () => {
+  const { client } = connectedClient({
+    'file.read': payload => ({ path: payload.path, kind: 'video', mime: 'video/mp4', size: 2 * 1024 * 1024 * 1024,
+      offset: 0, base64: '', done: false }),
+  })
+  await client.connect()
+  await assert.rejects(() => client.readFile('p-1', '.raw/jc-media/视频/huge.mp4'), /FILE_TOO_LARGE/)
+  client.disconnect()
+})

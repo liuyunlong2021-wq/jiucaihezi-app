@@ -41,6 +41,7 @@ import {
 import { DesktopRemoteHost, type DesktopRemoteSessionSummary } from './desktopRemoteHost'
 import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from './desktopRemoteEventSeq'
 import { publishDesktopRemoteEvent } from './desktopRemoteBridge'
+import { listRemoteFiles, readRemoteFile } from './desktopRemoteFiles'
 import { RemoteProtocolError } from './desktopRemoteProtocol'
 import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { buildWikiMemoryIndexContext } from '@/runtime/memory/memoryChat'
@@ -214,6 +215,11 @@ async function setDesktopRemoteMode(sessionId: string, mode: string) {
   return { mode }
 }
 
+async function invokeDesktop(command: string, args: Record<string, unknown>) {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return await invoke(command, args)
+}
+
 /** 项目的对外标识：不把电脑上的绝对路径发给手机。 */
 async function remoteProjectId(owner: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(owner))
@@ -354,6 +360,10 @@ export function createDesktopConversationHost(execute: RemoteExecution = execute
     listSessions: listDesktopRemoteSessions,
     createSession: createDesktopRemoteSession,
     setMode: setDesktopRemoteMode,
+    listFiles: async (projectId, path) =>
+      await listRemoteFiles((await remoteProjectOwner(projectId)).owner, path, invokeDesktop),
+    readFile: async (projectId, path, offset) =>
+      await readRemoteFile((await remoteProjectOwner(projectId)).owner, path, offset, invokeDesktop),
     readSession: readDesktopConversationSession,
     sendMessage: async (text, sessionId) => {
       const { beginDesktopUpdateTask } = await import('./desktopUpdater')

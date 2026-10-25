@@ -64,6 +64,9 @@ struct DevReadFileInput {
     root: String,
     relative_path: String,
     max_bytes: Option<usize>,
+    /// 从第几个字节开始读；缺省从头读。手机分段取视频时用。
+    #[serde(default)]
+    offset: Option<u64>,
 }
 
 #[derive(Deserialize)]
