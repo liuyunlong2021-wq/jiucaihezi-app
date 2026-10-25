@@ -36,7 +36,7 @@ function submitPasted() {
 
     <p class="state" :class="{ offline: !status?.connected }">
       <JcIcon :name="status?.connected ? 'check_circle' : 'link_off'" />
-      <span v-if="status?.connected && waitingForConversation">已连接电脑，等待电脑打开对话</span>
+      <span v-if="status?.connected && waitingForConversation">已连接电脑，等待电脑打开对话：请在电脑上打开一个对话</span>
       <span v-else-if="status?.connected">已连接到 {{ status.address }}</span>
       <span v-else-if="status?.paired">已配对该电脑，可直接重新连接</span>
       <span v-else>还没有和电脑配对</span>

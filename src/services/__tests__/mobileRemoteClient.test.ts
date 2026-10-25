@@ -678,8 +678,9 @@ test('电脑上没有打开对话时保持等待，等 context.changed 自动进
   })
   const client = new MobileRemoteClient(bridge.transport)
 
+  // 电脑上没开对话是正常的等待，不是失败：界面不能再弹红框（2026-10-25 真机）。
   const failure = await client.connect().then(() => null, error => error)
-  assert.match(String(failure), /^INVALID_CONTEXT/)
+  assert.equal(failure, null)
   // 关键：不能就此离线 —— 离线状态下连 context.changed 都会被忽略，手机永远进不去。
   assert.equal(client.view.state, 'connecting')
 
@@ -713,7 +714,8 @@ test('电脑上还没有对话时定时重试，电脑一开对话就自己进�
   const client = new MobileRemoteClient(bridge.transport, { contextRetryMs: 5 })
 
   const failure = await client.connect().then(() => null, error => error)
-  assert.match(String(failure), /^INVALID_CONTEXT/)
+  assert.equal(failure, null)
+  assert.equal(client.view.state, 'connecting')
   await new Promise(resolve => setTimeout(resolve, 80))
 
   assert.equal(client.view.state, 'connected')

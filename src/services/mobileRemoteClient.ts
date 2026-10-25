@@ -147,14 +147,15 @@ export class MobileRemoteClient {
       // 电脑上还没打开对话时不能就此离线：离线状态下 handle() 会忽略一切事件。
       // 也不能只等 context.changed（它只在“变化”时发，顺序不对就永远等不到），
       // 所以定时重试 context.get，电脑一有对话就进去（2026-09-27 真机）。
+      // 这是正常的等待而不是失败：不再抛给界面，否则会在「等待电脑打开对话」下面再弹红框。
       if (errorCode(error).startsWith('INVALID_CONTEXT')) {
         this.state = 'connecting'
         this.watchForContext()
         this.notify()
-      } else {
-        this.state = 'offline'
-        this.notify()
+        return
       }
+      this.state = 'offline'
+      this.notify()
       throw error
     }
   }

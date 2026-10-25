@@ -41,6 +41,8 @@ test('已连电脑但没有当前对话时，手机明确提示等待而非引�
   const pairing = source('src/mobile/MobilePairingView.vue')
   assert.match(controller, /:waiting-for-conversation="view\.state === 'connecting' && Boolean\(status\?\.connected\)"/)
   assert.match(pairing, /等待电脑打开对话/)
+  // 等待时要告诉用户该去电脑上做什么，而不是只说在等。
+  assert.match(pairing, /请在电脑上打开一个对话/)
   assert.match(pairing, /v-if="!status\?\.connected" class="primary"/)
 })
 
