@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import ChatScrollNav from '@/components/chat/ChatScrollNav.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
+import MobileManjuAutoPanel from './MobileManjuAutoPanel.vue'
 import {
   mobileRemotePendingTurn,
   mobileVisibleTurns,
+  type MobileManjuCommand,
   type MobileRemoteApprovalDecision,
   type MobileRemoteMode,
   type MobileRemoteTurn,
@@ -16,6 +18,8 @@ import {
 const props = defineProps<{
   view: MobileRemoteView
   busy: boolean
+  manju: (type: MobileManjuCommand, payload?: Record<string, unknown>) => Promise<unknown>
+  loadImage: (path: string) => Promise<{ bytes: Uint8Array<ArrayBuffer>; mime: string }>
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +43,11 @@ const messagesEl = ref<HTMLElement | null>(null)
 const draft = ref('')
 
 const isRunning = computed(() => props.view.run.state === 'running')
+// 全自动成片只在电脑当前对话里有；漫剧模式下或已有运行/确认卡/审图时显示。
+const showManjuAuto = computed(() => {
+  const auto = props.view.manjuAuto
+  return Boolean(auto && (props.view.mode === 'manju' || auto.run || auto.draft || auto.review))
+})
 const approval = computed(() => props.view.run.approval)
 const turns = computed(() => mobileVisibleTurns(props.view))
 const remotePendingTurn = computed(() => mobileRemotePendingTurn(props.view))
@@ -128,6 +137,14 @@ function submit() {
         @reject="$emit('approve', approval.id, 'reject')"
         @once="$emit('approve', approval.id, 'approve')"
         @always="$emit('approve', approval.id, 'always')"
+      />
+
+      <MobileManjuAutoPanel
+        v-if="showManjuAuto && view.manjuAuto"
+        :auto="view.manjuAuto"
+        :busy="busy || isRunning"
+        :manju="manju"
+        :load-image="loadImage"
       />
 
       <div class="modes" role="group" aria-label="创作模式">

@@ -42,6 +42,7 @@ import { DesktopRemoteHost, type DesktopRemoteSessionSummary } from './desktopRe
 import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from './desktopRemoteEventSeq'
 import { publishDesktopRemoteEvent } from './desktopRemoteBridge'
 import { listRemoteFiles, readRemoteFile } from './desktopRemoteFiles'
+import { manjuAutoProjection, runManjuCommand } from './desktopRemoteManju'
 import { RemoteProtocolError } from './desktopRemoteProtocol'
 import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { buildWikiMemoryIndexContext } from '@/runtime/memory/memoryChat'
@@ -290,6 +291,7 @@ export function startDesktopConversationPublisher() {
         turns: desktopRemoteTurns(selected.turns),
         mode: remoteMode(selected),
         title: selected.conversationTitle,
+        manjuAuto: manjuAutoProjection(selected.owner),
         ...desktopConversationLiveState(selected.owner, selected.resourcePath),
       }
     },
@@ -360,6 +362,13 @@ export function createDesktopConversationHost(execute: RemoteExecution = execute
     listSessions: listDesktopRemoteSessions,
     createSession: createDesktopRemoteSession,
     setMode: setDesktopRemoteMode,
+    manju: async (sessionId, type, payload) => {
+      // 全自动成片驱动的是电脑当前打开的对话（逐集往它发指令），后台对话不开放。
+      const current = selectedConversation.value
+      if (!current || deepSeekSessionId(current.conversationId, current.owner) !== sessionId)
+        throw new RemoteProtocolError('MANJU_NOT_CURRENT')
+      return await runManjuCommand(current.owner, type, payload)
+    },
     listFiles: async (projectId, path) =>
       await listRemoteFiles((await remoteProjectOwner(projectId)).owner, path, invokeDesktop),
     readFile: async (projectId, path, offset) =>
@@ -587,6 +596,7 @@ function desktopConversationProjection(
     reasoning: snapshot ? Object.fromEntries(deepSeekSessionReasoning(snapshot)) : {},
     mode: remoteMode(selected),
     title: selected.conversationTitle,
+    manjuAuto: selected === selectedConversation.value ? manjuAutoProjection(selected.owner) : null,
     ...desktopConversationLiveState(selected.owner, selected.resourcePath),
   }
 }

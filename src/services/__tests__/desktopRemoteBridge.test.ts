@@ -855,3 +855,42 @@ test('热更新：请求监听全窗口只注册一次，并总是交给最新�
   assert.doesNotMatch(bridge, /^let activeHost/m)
   assert.doesNotMatch(bridge, /^let listenerReady/m)
 })
+
+test('全自动：只对电脑当前对话开放，后台对话拒绝；推送带上全自动状态', async () => {
+  const { setDesktopManjuAuto } = await import('@/services/desktopRemoteManju')
+  const previousWindow = globalThis.window
+  const published: Array<{ sessionId?: string; event?: { payload?: Record<string, unknown> } }> = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: { invoke: async (command: string, args?: typeof published[number]) => {
+      if (command === 'remote_bridge_publish' && args) published.push(args)
+    } } },
+  })
+  const { ref, shallowRef } = await import('vue')
+  const stopped: string[] = []
+  const stop = startDesktopConversationPublisher()
+  try {
+    const { host, projects } = await m2Fixture()
+    setDesktopManjuAuto({
+      owner: () => m2Owner, run: ref({ version: 1, status: 'running', reviewed: false, config: {} as never, episodes: { 1: { phase: 'assets' } } }),
+      draft: ref(null), review: shallowRef(null), reviewBusy: ref({}), reviewErrors: ref({}), error: ref(''), preparing: ref(false),
+      prepare: async () => undefined, start: async () => undefined, stop: () => { stopped.push('stop') },
+      approveReview: () => undefined, regenerate: async () => undefined, loadPrompt: async () => '', cancelDraft: () => undefined,
+    })
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('manju.stop', { sessionId: 'jc-v1-m2-a' }))
+    assert.deepEqual(stopped, ['stop'])
+    await assert.rejects(() => __desktopRemoteBridgeForTests.dispatch(host, m2Request('manju.stop', { sessionId: 'jc-v1-m2-b' })), /MANJU_NOT_CURRENT/)
+    await until(() => published.some(item => item.sessionId === 'jc-v1-m2-a' && item.event?.payload?.manjuAuto))
+    const auto = published.find(item => item.sessionId === 'jc-v1-m2-a' && item.event?.payload?.manjuAuto)?.event?.payload?.manjuAuto as { run?: { status: string } }
+    assert.equal(auto.run?.status, 'running')
+    const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+    assert.match(workbench, /setDesktopManjuAuto\(\{ owner: \(\) => projectOwner\.value, \.\.\.manjuAuto \}\)/)
+    assert.match(workbench, /onBeforeUnmount\(\(\) => setDesktopManjuAuto\(null\)\)/)
+  } finally {
+    stop()
+    setDesktopManjuAuto(null)
+    m2Cleanup()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})

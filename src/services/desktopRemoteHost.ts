@@ -36,6 +36,8 @@ type DesktopRemoteHostDependencies = {
   /** 手机看成果：只读成果目录（见 desktopRemoteFiles）。 */
   listFiles?: (projectId: string, path: string) => Promise<unknown[]>
   readFile?: (projectId: string, path: string, offset: number) => Promise<unknown>
+  /** 漫剧全自动成片（只对电脑当前对话）：见 desktopRemoteManju。 */
+  manju?: (sessionId: string, type: string, payload: Record<string, unknown>) => Promise<unknown>
   readSession: (sessionId: string) => Promise<unknown>
   sendMessage: (text: string, sessionId: string) => Promise<{ runId: string } | void>
   stopRun: (sessionId: string) => Promise<string>
@@ -81,6 +83,12 @@ export class DesktopRemoteHost {
   async readFile(projectId: string, path: string, offset: number) {
     if (!this.dependencies.readFile) throw new RemoteProtocolError('PROJECT_NOT_FOUND')
     return await this.dependencies.readFile(projectId, path, offset)
+  }
+
+  async manju(sessionId: string, type: string, payload: Record<string, unknown>) {
+    this.assertKnownSession(sessionId)
+    if (!this.dependencies.manju) throw new RemoteProtocolError('MANJU_UNAVAILABLE')
+    return await this.dependencies.manju(sessionId, type, payload)
   }
 
   async setMode(sessionId: string, mode: string) {

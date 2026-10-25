@@ -911,3 +911,23 @@ test('看成果：超过手机能承受的大小时直接拒绝，不硬拉几�
   await assert.rejects(() => client.readFile('p-1', '.raw/jc-media/视频/huge.mp4'), /FILE_TOO_LARGE/)
   client.disconnect()
 })
+
+// ---- 全自动成片 ----
+
+test('全自动：手机读到并跟随电脑的全自动状态，操作带上当前对话', async () => {
+  const auto = { run: { status: 'running', episodes: { 1: { phase: 'review' } } }, review: [{ id: '角色-陈小满', path: '.raw/jc-media/图片/a.png', busy: false, error: '' }], draft: null, error: '', preparing: false }
+  const { client, calls, emit } = connectedClient({
+    'session.attach': payload => ({ sessionId: payload.sessionId, gatewayEpoch: 'epoch-1', seq: 0, snapshot: { ...snapshot, manjuAuto: auto } }),
+    'manju.regenerate': () => ({ ok: true }),
+  })
+  await client.connect()
+  assert.equal(client.view.manjuAuto?.run?.status, 'running')
+  await client.manju('manju.regenerate', { id: '角色-陈小满', prompt: '换个发型' })
+  assert.deepEqual(calls.find(call => call.type === 'manju.regenerate')?.payload, { sessionId: context.sessionId, id: '角色-陈小满', prompt: '换个发型' })
+  emit(sessionEvent(1, { manjuAuto: { ...auto, run: { status: 'done', episodes: {} }, review: [] } }))
+  assert.equal(client.view.manjuAuto?.run?.status, 'done')
+  emit(sessionEvent(2, { manjuAuto: null }))
+  assert.equal(client.view.manjuAuto, null, '电脑没有全自动时清空')
+  await assert.rejects(() => client.manju('manju.delete' as never, {}), /UNSUPPORTED_MESSAGE/)
+  client.disconnect()
+})

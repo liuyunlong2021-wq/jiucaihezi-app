@@ -23,6 +23,7 @@ const wave1FocusedTests = [
   'src/services/__tests__/desktopRemoteProtocol.test.ts',
   'src/services/__tests__/desktopRemoteHost.test.ts',
   'src/services/__tests__/desktopRemoteFiles.test.ts',
+  'src/services/__tests__/desktopRemoteManju.test.ts',
   'src/services/__tests__/desktopRemoteBridge.test.ts',
   'src/services/__tests__/desktopRemoteEventSeq.test.ts',
   'src/services/__tests__/mobileRemoteClient.test.ts',

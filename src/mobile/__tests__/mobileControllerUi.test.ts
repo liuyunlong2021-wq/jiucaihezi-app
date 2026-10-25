@@ -186,3 +186,15 @@ test('用户主动断开后不自动连回去，直到用户再点连接或重�
   assert.match(remote, /const reconnect = \(\) => run\(async \(\) => \{\n\s+userDisconnected = false/)
   assert.match(remote, /const pairWithOfferText = async \(text: string\) => \{\n\s+userDisconnected = false/)
 })
+
+test('全自动：手机能开始/续做、停止、看进度，审图时看图、重新生成、改提示词、确认', () => {
+  const session = source('src/mobile/MobileSessionView.vue')
+  const panel = source('src/mobile/MobileManjuAutoPanel.vue')
+  assert.match(session, /<MobileManjuAutoPanel/)
+  for (const action of ['manju.prepare', 'manju.start', 'manju.stop', 'manju.approve', 'manju.regenerate', 'manju.prompt', 'manju.cancel'])
+    assert.match(panel, new RegExp(`'${action.replace('.', '\\.')}'`), action)
+  for (const label of ['全自动成片', '开始全自动', '续做', '确认并继续', '重新生成', '改提示词', '停止'])
+    assert.match(panel, new RegExp(label), label)
+  assert.match(panel, /<img /)
+  assert.match(panel, /URL\.revokeObjectURL/)
+})

@@ -66,6 +66,34 @@ function decodeBase64(text: string) {
   return bytes
 }
 
+/** 电脑上漫剧全自动成片的状态（只在电脑当前对话里有）。 */
+export type MobileManjuModel = {
+  id: string; label: string; price?: number | string; resolutions?: string[]
+}
+export type MobileManjuAuto = {
+  preparing: boolean
+  error: string
+  run: { status: 'running' | 'blocked' | 'stopped' | 'done'; episodes: Record<string, { phase: string; reason?: string }> } | null
+  draft: {
+    episodes: number[]
+    ratio: string | null
+    imageModels: MobileManjuModel[]
+    videoModels: MobileManjuModel[]
+    saved: { route: 'Seedance' | 'H3'; episodes: Record<string, string> } | null
+  } | null
+  review: Array<{ id: string; path: string | null; busy: boolean; error: string }> | null
+}
+export type MobileManjuCommand =
+  | 'manju.prepare' | 'manju.start' | 'manju.stop' | 'manju.approve'
+  | 'manju.regenerate' | 'manju.prompt' | 'manju.cancel'
+const MANJU_COMMANDS: readonly MobileManjuCommand[] = [
+  'manju.prepare', 'manju.start', 'manju.stop', 'manju.approve', 'manju.regenerate', 'manju.prompt', 'manju.cancel',
+]
+
+function parseManjuAuto(value: unknown): MobileManjuAuto | null {
+  return value && typeof value === 'object' ? value as MobileManjuAuto : null
+}
+
 export type MobileRemoteProject = { projectId: string; name: string; current: boolean }
 export type MobileRemoteSessionSummary = {
   sessionId: string
@@ -97,6 +125,7 @@ export type MobileRemoteView = {
   following: boolean
   /** 这个对话的创作模式；旧电脑不报时为 null。 */
   mode: MobileRemoteMode | null
+  manjuAuto: MobileManjuAuto | null
 }
 
 export type MobileRemoteApprovalDecision = 'approve' | 'reject' | 'always'
@@ -136,6 +165,7 @@ export class MobileRemoteClient {
   /** 手机自己选定的对话；为 null 时跟随电脑当前对话。 */
   private pinned: MobileRemoteContext | null = null
   private mode: MobileRemoteMode | null = null
+  private manjuAuto: MobileManjuAuto | null = null
   private contextRetry: ReturnType<typeof setInterval> | undefined
   private refreshTimer: ReturnType<typeof setTimeout> | undefined
   private turns: MobileRemoteTurn[] = []
@@ -171,6 +201,7 @@ export class MobileRemoteClient {
       pendingMessages: this.pendingMessages,
       following: this.pinned === null,
       mode: this.mode,
+      manjuAuto: this.manjuAuto,
     }
   }
 
@@ -349,6 +380,12 @@ export class MobileRemoteClient {
     }
   }
 
+  /** 漫剧全自动成片的操作；状态变化经推送回来，这里只拿回执。 */
+  async manju(type: MobileManjuCommand, payload: Record<string, unknown> = {}) {
+    if (!MANJU_COMMANDS.includes(type)) throw new RemoteProtocolError('UNSUPPORTED_MESSAGE')
+    return await this.transport.request({ type, payload: { ...this.requireConnected(), ...payload } })
+  }
+
   /** 切换这个对话的创作模式；以电脑回执为准，运行中电脑会拒绝。 */
   async setMode(mode: MobileRemoteMode) {
     if (!MOBILE_REMOTE_MODES.includes(mode)) throw new RemoteProtocolError('MODE_INVALID')
@@ -495,6 +532,7 @@ export class MobileRemoteClient {
       this.pendingTurn = parsePendingTurn((snapshot as { pendingTurn?: unknown })?.pendingTurn)
       this.mode = parseMode((snapshot as { mode?: unknown })?.mode)
       this.adoptTitle((snapshot as { title?: unknown })?.title)
+      this.manjuAuto = parseManjuAuto((snapshot as { manjuAuto?: unknown })?.manjuAuto)
       const live = snapshot as Partial<{ streamingText: string; run: MobileRemoteRun }>
       this.streamingText = typeof live?.streamingText === 'string' ? live.streamingText : ''
       this.run = live?.run && typeof live.run === 'object' ? live.run : IDLE_RUN
@@ -526,6 +564,7 @@ export class MobileRemoteClient {
     this.run = IDLE_RUN
     this.lastSeq = 0
     this.mode = null
+    this.manjuAuto = null
     if (switched) this.gatewayEpoch = ''
     if (switched) this.pendingMessages = []
   }
@@ -563,6 +602,7 @@ export class MobileRemoteClient {
     if (Array.isArray(event.turns)) this.turns = event.turns
     this.mode = parseMode(event.mode) ?? this.mode
     this.adoptTitle((event as { title?: unknown }).title)
+    if ('manjuAuto' in event) this.manjuAuto = parseManjuAuto((event as { manjuAuto?: unknown }).manjuAuto)
     this.pendingTurn = parsePendingTurn(event.pendingTurn)
     this.streamingText = typeof event.streamingText === 'string' ? event.streamingText : ''
     this.run = event.run && typeof event.run === 'object' ? event.run : IDLE_RUN

@@ -11,6 +11,7 @@ const {
   view, status, error, busy,
   refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
   listProjects, listSessions, openSession, createSession, followDesktop, setMode, listFiles, readFile,
+  manju, loadImage,
 } = useMobileRemote()
 
 const browsing = ref(false)
@@ -48,6 +49,8 @@ onMounted(() => { void refreshStatus() })
     v-else-if="connected"
     :view="view"
     :busy="busy"
+    :manju="manju"
+    :load-image="loadImage"
     @send="send"
     @stop="stop"
     @approve="respondApproval"

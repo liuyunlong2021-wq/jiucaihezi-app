@@ -23,6 +23,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import ManjuAutoPanel from './ManjuAutoPanel.vue'
 import { AUTO_INTAKE_PREFIX, useManjuAuto } from '@/composables/useManjuAuto'
+import { setDesktopManjuAuto } from '@/services/desktopRemoteManju'
 import { findCustomProvider, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
@@ -1048,6 +1049,9 @@ const manjuAuto = useManjuAuto({
     await send(text)
   },
 })
+// 手机能操作同一个全自动运行（开始/停止/审图）：登记到远程模块，视图卸载时撤下。
+setDesktopManjuAuto({ owner: () => projectOwner.value, ...manjuAuto })
+onBeforeUnmount(() => setDesktopManjuAuto(null))
 watch(sending, busy => {
   if (busy || !pendingAutoIntake) return
   pendingAutoIntake = false

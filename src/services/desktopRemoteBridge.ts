@@ -59,6 +59,7 @@ async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequ
   }
   if (request.type === 'file.read')
     return await host.readFile(requiredString(payload, 'projectId', 200), requiredString(payload, 'path', 1024), Number(payload.offset ?? 0))
+  if (request.type.startsWith('manju.')) return await host.manju(requiredString(payload, 'sessionId', 200), request.type, payload)
   if (request.type === 'session.mode.set')
     return await host.setMode(requiredString(payload, 'sessionId', 200), requiredString(payload, 'mode', 32))
   if (request.type === 'session.attach') {
