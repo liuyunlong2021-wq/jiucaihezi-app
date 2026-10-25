@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createAutoRun, estimateUnitCost, handleCheckpointSaved, priceForResolution, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
+import { createAutoRun, episodeInstruction, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
 
@@ -223,4 +223,29 @@ test('resuming retries failed video segments of an episode before checking again
   const done = await runAuto(blocked, w.deps)
   assert.equal(w.videos.length - before, 1, '失败的那一段重新提交一次')
   assert.equal(done.episodes['1'].phase, 'done')
+})
+
+test('model limits come from the chosen video model: fixed tiers use the largest ≤30s, ranges cap at 30s', () => {
+  assert.deepEqual(modelLimits('H3', { duration: { min: 1, max: 28 }, maxImages: 6 }), { max_seconds: 28, max_refs: 6 })
+  assert.deepEqual(modelLimits('Seedance', { duration: { allowedValues: [15, 30] }, maxImages: 9 }), { max_seconds: 30, max_refs: 9, allowed_seconds: [15, 30] })
+  assert.deepEqual(modelLimits('Seedance', { duration: { min: 2, max: 60 } }), { max_seconds: 30 })
+  assert.deepEqual(modelLimits('H3', {}), { max_seconds: 15 }, '未知限制时按路线默认')
+})
+
+test('episode instruction names the route and the model limits the pipeline must write into plan', () => {
+  const text = episodeInstruction(3, 'wiki', { videoModel: 'H3', limits: { max_seconds: 28, max_refs: 6 } })
+  assert.match(text, /【全自动成片·第3集】/)
+  assert.match(text, /视频模型 H3/)
+  assert.match(text, /每段不超过 28 秒/)
+  assert.match(text, /最多 6 张参考图/)
+  assert.match(text, /"limits":\{"max_seconds":28,"max_refs":6\}/)
+  const tiers = episodeInstruction(1, 'wiki', { videoModel: 'Seedance', limits: { max_seconds: 30, allowed_seconds: [15, 30] } })
+  assert.match(tiers, /只支持 15\/30 秒/)
+})
+
+test('resuming keeps the original video route even if the card changed it', () => {
+  const saved = createAutoRun({ episodes: [1], videoModel: 'H3', imageModelId: 'a', videoModelId: 'b', ratio: '9:16', review: true })
+  const resumed = resumeAutoRun(saved, { ...saved.config, videoModel: 'Seedance', videoModelId: 'c' })
+  assert.equal(resumed.config.videoModel, 'H3')
+  assert.equal(resumed.config.videoModelId, 'c')
 })

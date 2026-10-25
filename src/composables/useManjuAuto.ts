@@ -6,12 +6,19 @@ import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
-import { createAutoRun, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
+import { createAutoRun, episodeInstruction, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import { emitEvent } from '@/utils/eventBus'
 
-export interface ManjuAutoModelOption { id: string; label: string; price?: number | string; resolutions?: string[] }
+export interface ManjuAutoModelOption {
+  id: string
+  label: string
+  price?: number | string
+  resolutions?: string[]
+  duration?: { min?: number; max?: number; allowedValues?: number[] }
+  maxImages?: number
+}
 
 export interface ManjuAutoDraft {
   wikiRoot: string
@@ -23,11 +30,6 @@ export interface ManjuAutoDraft {
 }
 
 export const AUTO_INTAKE_PREFIX = '【全自动成片·入稿】'
-const VIDEO_MODEL = 'Seedance'
-
-export function episodeInstruction(episode: number, wikiRoot: string) {
-  return `【全自动成片·第${episode}集】请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${VIDEO_MODEL}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求，从 plan 连续执行到 complete。`
-}
 
 /**
  * 确认卡的模型选项：与 @影音 面板同一份默认顺序（prioritizedCreationModelIds），
@@ -55,6 +57,8 @@ export function normalizeModels(models: Array<Record<string, unknown>>, kind: 'i
     label: String(model.label || model.display_name || model.id),
     price: typeof model.price === 'number' || typeof model.price === 'string' ? model.price : undefined,
     resolutions: getCreationModelSpec(String(model.id))?.capabilities.resolutions,
+    duration: getCreationModelSpec(String(model.id))?.capabilities.duration,
+    maxImages: getCreationModelSpec(String(model.id))?.files?.images?.max,
   })).sort((a, b) => rank(a) - rank(b))
 }
 
@@ -77,7 +81,7 @@ export function useManjuAuto(options: {
   let liveState: AutoRunState | undefined
 
   const files = (owner: string) => createSkillDraftFiles(createRuntimeProjectFileService(), owner)
-  const checkpointPath = (wikiRoot: string, episode: number) => `${wikiRoot}/制作流水线/${VIDEO_MODEL}/第${episode}集进度.json`
+  const checkpointPath = (wikiRoot: string, route: string, episode: number) => `${wikiRoot}/制作流水线/${route}/第${episode}集进度.json`
 
   async function readJson<T>(owner: string, path: string): Promise<T | undefined> {
     const list = await createRuntimeProjectFileService().list(owner)
@@ -148,8 +152,8 @@ export function useManjuAuto(options: {
       const projectFiles = files(owner)
       const deps: Parameters<typeof runAuto>[1] = {
         wikiRoot,
-        runEpisodeText: episode => options.sendText(episodeInstruction(episode, wikiRoot)),
-        readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, episode)),
+        runEpisodeText: episode => options.sendText(episodeInstruction(episode, wikiRoot, state.config)),
+        readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, state.config.videoModel, episode)),
         asset: createDesktopAssetDeps(owner, { imageModelId: state.config.imageModelId, ratio: state.config.ratio }, imageProfile),
         video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio, resolution: state.config.videoResolution }, videoProfile),
         async concat(videos, durations, outputPath) {

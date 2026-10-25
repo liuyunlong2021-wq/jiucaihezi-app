@@ -829,6 +829,11 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   if (input.status !== undefined && !['running', 'blocked', ...(input.stage === 'complete' ? ['completed'] : [])].includes(input.status)) throw new Error('流水线status无效')
   if (input.status === 'blocked' && !String(input.reason || '').trim()) throw new Error('暂停流水线必须说明原因')
   const state = stage === 0 ? {} : previous
+  // 模型限制：全自动按所选视频模型写入（每段最长秒数、最多参考图张数）；未写入时沿用默认 Seedance 30 / H3 15 秒。
+  const limits = stage === 0 ? input.limits : state.limits
+  if (limits !== undefined && (!limits || !Number.isFinite(limits.max_seconds) || limits.max_seconds <= 0 || limits.max_seconds > 30
+    || (limits.max_refs !== undefined && (!Number.isInteger(limits.max_refs) || limits.max_refs < 1)))) throw new Error('limits 需为 {max_seconds: 1–30, max_refs: 正整数}')
+  const maxSeconds = limits?.max_seconds ?? (args.video_model === 'H3' ? 15 : 30)
   const hashFile = async (path, output = true) => {
     if (typeof path !== 'string' || (output && !path.startsWith(`${wikiRoot}/`))) throw new Error('流水线产物必须位于当前Wiki')
     const file = await projectTarget(ctx, cwd, path, exec.signal, workspace)
@@ -881,18 +886,28 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
       const path = `${wikiRoot}/剧本/视频提示词/${args.video_model}/第${args.episode_number}集${String(index + 1).padStart(3, '0')}视频提示词.md`
       if (segment.path !== path || !Number.isFinite(segment.start_seconds) || !Number.isFinite(segment.end_seconds)
         || Math.abs(segment.start_seconds - end) > 0.01 || segment.end_seconds <= end
-        || segment.end_seconds - segment.start_seconds > (args.video_model === 'H3' ? 15 : 30)) throw new Error('片段命名、连续时间或30/15秒上限不符合流水线合同')
+        || segment.end_seconds - segment.start_seconds > maxSeconds + 0.01) throw new Error(`片段命名、连续时间或每段${maxSeconds}秒上限不符合流水线合同`)
       await hashFile(path)
       if (stage === 5 && !outputs[path]) throw new Error('片段必须包含在本阶段outputs中')
-      if (stage === 5 && args.video_model === 'Seedance' && Object.keys(assets).length) {
+      if (stage === 5 && Object.keys(assets).length) {
         const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
-        const lines = [...text.matchAll(/^@图\d+[：:]([^\n]*)$/gm)].map(match => match[1])
-        if (!Array.isArray(segment.refs)) throw new Error(`片段${index + 1}缺少refs：按@图1起的顺序列出资产ID，例如["角色/某人","场景/某地"]`)
-        if (segment.refs.length !== lines.length) throw new Error(`片段${index + 1}的refs数量(${segment.refs.length})与@图行数量(${lines.length})不一致`)
+        // Seedance：每个“@图N：”行；H3 Ref2VA：所有含 <Picture N> 的行（subject_definitions 等处写明对应资产）。
+        const h3 = args.video_model === 'H3'
+        const label = h3 ? 'Picture' : '@图'
+        const lines = h3
+          ? (() => {
+            const numbers = [...new Set([...text.matchAll(/<Picture (\d+)>/g)].map(match => Number(match[1])))].sort((a, b) => a - b)
+            if (numbers.some((number, i) => number !== i + 1)) throw new Error(`片段${index + 1}的<Picture N>须从1连续编号`)
+            return numbers.map(number => text.split('\n').filter(line => line.includes(`<Picture ${number}>`)).join('\n'))
+          })()
+          : [...text.matchAll(/^@图\d+[：:]([^\n]*)$/gm)].map(match => match[1])
+        if (!Array.isArray(segment.refs)) throw new Error(`片段${index + 1}缺少refs：按${h3 ? '<Picture 1>' : '@图1'}起的顺序列出资产ID，例如["角色/某人","场景/某地"]`)
+        if (limits?.max_refs !== undefined && segment.refs.length > limits.max_refs) throw new Error(`片段${index + 1}用了${segment.refs.length}张参考图，所选视频模型最多 ${limits.max_refs} 张：请拆镜或减少本段入画资产`)
+        if (segment.refs.length !== lines.length) throw new Error(`片段${index + 1}的refs数量(${segment.refs.length})与${label}数量(${lines.length})不一致`)
         for (const [i, ref] of segment.refs.entries()) {
           if (!assets[ref]) throw new Error(`片段${index + 1}的refs引用了未登记资产：${ref}`)
           const name = ref.split('/')[1]
-          if (!lines[i].includes(name)) throw new Error(`片段${index + 1}的@图${i + 1}行未写${name}，refs顺序须与@图顺序一致`)
+          if (!lines[i].includes(name)) throw new Error(h3 ? `片段${index + 1}含<Picture ${i + 1}>的行未写${name}，refs顺序须与<Picture N>编号一致` : `片段${index + 1}的@图${i + 1}行未写${name}，refs顺序须与@图顺序一致`)
         }
       }
       end = segment.end_seconds
@@ -902,7 +917,7 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   files[input.stage] = outputs
   return JSON.stringify({ stage: input.stage, status: input.stage === 'complete' ? 'completed' : input.status || 'running', reason: input.stage === 'complete' ? '' : input.reason || '',
     video_model: args.video_model, episode_number: args.episode_number, source_path: source, source_hash: sourceHash,
-    files, assets, duration_seconds: duration, segments }, null, 2) + '\n'
+    files, assets, ...(limits && { limits }), duration_seconds: duration, segments }, null, 2) + '\n'
 }
 
 const adaptationStates = new WeakMap()

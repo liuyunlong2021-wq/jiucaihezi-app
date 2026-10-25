@@ -136,10 +136,10 @@ test('pipeline checkpoints reject missing stages and overlong segments, then com
     const engineering = await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：山门\n镜头1')
     const limit = model === 'H3' ? 15 : 30
     await checkpoint({ stage: 'engineering', outputs: [engineering], duration_seconds: limit + 1 })
-    const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '# 第一段\n@图1：山门')
+    const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, model === 'H3' ? '# 第一段\n<Picture 1> is 山门.' : '# 第一段\n@图1：山门')
     await assert.rejects(checkpoint({ stage: 'prompts', outputs: [first], segments: [{ path: first, start_seconds: 0, end_seconds: limit + 1 }] }), /上限/)
-    const second = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '002' }, '# 第二段\n@图1：山门')
-    const refs = model === 'Seedance' ? { refs: ['场景/山门'] } : {}
+    const second = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '002' }, model === 'H3' ? '# 第二段\n<Picture 1> is 山门.' : '# 第二段\n@图1：山门')
+    const refs = { refs: ['场景/山门'] }
     await checkpoint({ stage: 'prompts', outputs: [first, second], segments: [
       { path: first, start_seconds: 0, end_seconds: limit, ...refs }, { path: second, start_seconds: limit, end_seconds: limit + 1, ...refs },
     ] })
@@ -186,6 +186,49 @@ test('Seedance pipeline registers image assets and binds each segment @图 order
   assert.deepEqual(saved.segments[0].refs, ['角色/莫甘娜', '场景/石道'])
   await checkpoint({ stage: 'complete', outputs: [] })
   assert.deepEqual(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).sort(), ['场景/石道', '角色/莫甘娜'])
+})
+
+test('H3 pipeline uses plan limits (28s, 6 images) and binds <Picture N> labels to registered refs', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-h3-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'H3', episode_number: 1, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  await assert.rejects(checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [], limits: { max_seconds: 31, max_refs: 6 } }), /limits/)
+  const progress = await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [], limits: { max_seconds: 28, max_refs: 6 } })
+  assert.deepEqual(JSON.parse(files.get(join(root, progress.path)).content).limits, { max_seconds: 28, max_refs: 6 })
+  await checkpoint({ stage: 'materials', outputs: [await save({ artifact_kind: 'story_summary' }, '# 故事梗概')] })
+  await checkpoint({ stage: 'style', outputs: [await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：9:16')] })
+  const sheet = await save({ artifact_kind: 'character_format', entity_name: '莫甘娜' }, '# 莫甘娜三视图')
+  const road = await save({ artifact_kind: 'scene_asset', entity_name: '石道' }, '# 石道')
+  await checkpoint({ stage: 'assets', outputs: [sheet, road] })
+  await checkpoint({ stage: 'engineering', outputs: [await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：莫甘娜、石道')], duration_seconds: 28 })
+  const body = 'subject_definitions\n<Subject 1> is 莫甘娜 from <Picture 1>, silver hair.\n<Picture 2> is the environment reference for 石道.\nsummary\n<Subject 1> walks along <Picture 2>.'
+  const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: 'H3', segment: '001' }, body)
+  const prompts = refs => checkpoint({ stage: 'prompts', outputs: [first], segments: [{ path: first, start_seconds: 0, end_seconds: 28, ...(refs && { refs }) }] })
+  await assert.rejects(prompts(), /refs/)
+  await assert.rejects(prompts(['场景/石道', '角色/莫甘娜']), /Picture 1/)
+  await assert.rejects(prompts(['角色/莫甘娜']), /数量/)
+  await prompts(['角色/莫甘娜', '场景/石道'])
+})
+
+test('plan max_refs caps the reference images of every segment', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-maxrefs-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'Seedance', episode_number: 1, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [], limits: { max_seconds: 30, max_refs: 1 } })
+  await checkpoint({ stage: 'materials', outputs: [await save({ artifact_kind: 'story_summary' }, '# 故事梗概')] })
+  await checkpoint({ stage: 'style', outputs: [await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：9:16')] })
+  const sheet = await save({ artifact_kind: 'character_format', entity_name: '莫甘娜' }, '# 莫甘娜')
+  const road = await save({ artifact_kind: 'scene_asset', entity_name: '石道' }, '# 石道')
+  await checkpoint({ stage: 'assets', outputs: [sheet, road] })
+  await checkpoint({ stage: 'engineering', outputs: [await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：莫甘娜、石道')], duration_seconds: 10 })
+  const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: 'Seedance', segment: '001' }, '基调。\n@图1：莫甘娜\n@图2：石道')
+  await assert.rejects(checkpoint({ stage: 'prompts', outputs: [first], segments: [{ path: first, start_seconds: 0, end_seconds: 10, refs: ['角色/莫甘娜', '场景/石道'] }] }), /最多 1 张/)
 })
 
 test('full-auto may write a character three-panel format prompt straight from the read bio, without a separate design prompt', async t => {

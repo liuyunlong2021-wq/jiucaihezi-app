@@ -13,9 +13,20 @@ export const AUTO_RUN_PATH = '制作流水线/全自动运行.json'
 const ASSET_GATE = { timeoutMs: 30 * 60_000, pollMs: 30_000 }
 const VIDEO_CHECK_MS = 30 * 60_000
 
+export type VideoRoute = 'Seedance' | 'H3'
+
+/** 所选视频模型的限制：写进每集指令，并由流水线写入 plan 进度供程序校验。 */
+export interface ModelLimits {
+  max_seconds: number
+  max_refs?: number
+  /** 只支持固定档位时（如 15/30 秒）。 */
+  allowed_seconds?: number[]
+}
+
 export interface AutoRunConfig {
   episodes: number[]
-  videoModel: 'Seedance'
+  videoModel: VideoRoute
+  limits?: ModelLimits
   imageModelId: string
   videoModelId: string
   ratio: string
@@ -73,9 +84,26 @@ export function createAutoRun(config: AutoRunConfig): AutoRunState {
   return { version: 1, config, status: 'running', reviewed: false, episodes: Object.fromEntries(config.episodes.map(n => [String(n), { phase: 'queued' as const }])) }
 }
 
-/** 续做：保留原集数与进度，模型、比例、预算等用确认卡上新的选择（例如生图线路故障后换模型）。 */
+/** 续做：保留原集数、视频路线与进度，模型、比例、预算等用确认卡上新的选择（例如生图线路故障后换模型）。 */
 export function resumeAutoRun(saved: AutoRunState, config: AutoRunConfig): AutoRunState {
-  return { ...saved, config: { ...config, episodes: saved.config.episodes } }
+  return { ...saved, config: { ...config, episodes: saved.config.episodes, videoModel: saved.config.videoModel } }
+}
+
+/** 由视频模型登记的时长与参考图上限得出限制；固定档位取 ≤30 秒的最大档，范围上限封顶 30 秒；未知时按路线默认。 */
+export function modelLimits(route: VideoRoute, model: { duration?: { min?: number; max?: number; allowedValues?: number[] }; maxImages?: number }): ModelLimits {
+  const allowed = model.duration?.allowedValues?.filter(value => value <= 30).sort((a, b) => a - b)
+  const max = allowed?.length ? allowed.at(-1)! : Math.min(model.duration?.max ?? (route === 'H3' ? 15 : 30), 30)
+  return { max_seconds: max, ...(model.maxImages !== undefined && { max_refs: model.maxImages }), ...(allowed?.length && { allowed_seconds: allowed }) }
+}
+
+export function episodeInstruction(episode: number, wikiRoot: string, config: Pick<AutoRunConfig, 'videoModel' | 'limits'>): string {
+  const limits = config.limits ?? modelLimits(config.videoModel, {})
+  const duration = limits.allowed_seconds?.length
+    ? `所选视频模型只支持 ${limits.allowed_seconds.join('/')} 秒：每段尽量写满一档（优先 ${limits.max_seconds} 秒），每段不超过 ${limits.max_seconds} 秒`
+    : `所选视频模型每段不超过 ${limits.max_seconds} 秒`
+  const refs = limits.max_refs ? `，每段最多 ${limits.max_refs} 张参考图（超出就拆镜或减少本段入画资产）` : ''
+  const plan = JSON.stringify({ max_seconds: limits.max_seconds, ...(limits.max_refs && { max_refs: limits.max_refs }) })
+  return `【全自动成片·第${episode}集】请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${config.videoModel}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求，从 plan 连续执行到 complete。${duration}${refs}；plan 进度写入 "limits":${plan}。`
 }
 
 /** 分档价格（如“480P ¥0.2/秒 · 720P ¥0.4/秒”）取所选分辨率那一档；不分档返回 undefined。 */

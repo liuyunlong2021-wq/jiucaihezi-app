@@ -167,7 +167,7 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // 切换模式时没有分集剧本不弹卡，避免挡住待发送的剧本（2026-10-25 用户反馈）。
   assert.match(workbench, /manjuAuto\.prepare\(\{ onlyIfReady: true \}\)/)
   assert.match(controller, /onlyIfReady && !episodes\.length/)
-  assert.match(controller, /遵守本对话入稿时用户提出的制作要求/)
+  assert.match(readFileSync('src/runtime/manjuAuto/autoRunner.ts', 'utf8'), /遵守本对话入稿时用户提出的制作要求/)
   // 模型选项：与 @影音 同一默认顺序、去掉已退出面板的型号、视频只列可收参考图的、Seedance 优先、读全部分页。
   assert.match(controller, /prioritizedCreationModelIds\(kind\)/)
   assert.match(controller, /spec\?\.hidden/)
@@ -193,6 +193,11 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(panel, /暂停原因：\{\{ episode\.reason \}\}/)
   // 视频分辨率可选、默认最低档，分档价格按所选档参与预算（2026-10-25 用户反馈 wan 无法选 480P）。
   assert.match(panel, /视频分辨率/)
+  // H3 路线：确认卡选路线，模型限制（秒数、参考图张数）写进配置与每集指令（2026-10-25）。
+  assert.match(panel, /<option value="H3">MiniMax H3 提示词<\/option>/)
+  assert.match(panel, /limits: limits\.value/)
+  assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config\)/)
+  assert.match(controller, /checkpointPath\(wikiRoot, state\.config\.videoModel, episode\)/)
   // 每次运行独立停止开关 + runId 落盘守卫：旧运行（含热更新遗留）发现记录属于新运行就退出（2026-10-25 实测两个运行互相覆盖）。
   assert.doesNotMatch(controller, /stopRequested/)
   assert.match(controller, /shouldStop: \(\) => mine\.stopped/)

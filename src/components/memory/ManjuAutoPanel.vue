@@ -19,7 +19,14 @@
       <label v-if="videoModel?.resolutions?.length" class="manju-auto-row"><span>视频分辨率</span>
         <select v-model="videoResolution"><option v-for="resolution in videoModel.resolutions" :key="resolution" :value="resolution">{{ resolution }}{{ priceForResolution(videoModel.price, resolution) ? ` · ¥${priceForResolution(videoModel.price, resolution)}` : '' }}</option></select>
       </label>
-      <div class="manju-auto-row"><span>比例</span><span>{{ draft.ratio }}（项目风格已确认）· Seedance</span></div>
+      <label class="manju-auto-row"><span>视频路线</span>
+        <select v-model="route" :disabled="Boolean(draft.saved)" :title="draft.saved ? '续做沿用原路线；换路线请点「开始全自动」重新开始' : ''">
+          <option value="Seedance">Seedance 提示词</option>
+          <option value="H3">MiniMax H3 提示词</option>
+        </select>
+      </label>
+      <div class="manju-auto-row"><span>比例</span><span>{{ draft.ratio }}（项目风格已确认）</span></div>
+      <div class="manju-auto-row"><span>模型限制</span><span>每段 ≤{{ limits.max_seconds }} 秒{{ limits.allowed_seconds ? `（只支持 ${limits.allowed_seconds.join('/')} 秒）` : '' }}{{ limits.max_refs ? `，最多 ${limits.max_refs} 张参考图` : '' }}；写提示词时按此分段</span></div>
       <label class="manju-auto-row"><span>单集预算</span><span><input v-model="budget" type="number" min="0" step="1" placeholder="不限"> 元</span></label>
       <label class="manju-auto-row manju-auto-check"><input v-model="reviewFirst" type="checkbox">第 1 集资产出齐后暂停审图</label>
       <p class="manju-auto-note">{{ priceNote }}</p>
@@ -58,7 +65,7 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 import type { ManjuAutoDraft } from '@/composables/useManjuAuto'
-import { estimateUnitCost, priceForResolution, type AutoRunConfig, type AutoRunState, type EpisodePhase } from '@/runtime/manjuAuto/autoRunner'
+import { estimateUnitCost, modelLimits, priceForResolution, type AutoRunConfig, type VideoRoute, type AutoRunState, type EpisodePhase } from '@/runtime/manjuAuto/autoRunner'
 
 const props = defineProps<{
   draft: ManjuAutoDraft | null
@@ -74,6 +81,7 @@ const videoModelId = ref('')
 const budget = ref<number | string>('')
 const reviewFirst = ref(true)
 const videoResolution = ref('')
+const route = ref<VideoRoute>('Seedance')
 const resolutionHeight = (value: string) => Number(value.replace(/\D/g, '')) || Infinity
 
 watch(() => props.draft, draft => {
@@ -81,6 +89,7 @@ watch(() => props.draft, draft => {
   episodes.value = draft.episodes.slice()
   imageModelId.value = draft.imageModels[0]?.id || ''
   videoModelId.value = draft.videoModels[0]?.id || ''
+  if (draft.saved) route.value = draft.saved.config.videoModel
 }, { immediate: true })
 
 const phaseLabels: Record<EpisodePhase, string> = {
@@ -98,6 +107,7 @@ const videoModel = computed(() => props.draft?.videoModels.find(model => model.i
 watch(videoModel, model => {
   videoResolution.value = model?.resolutions?.slice().sort((a, b) => resolutionHeight(a) - resolutionHeight(b))[0] || ''
 }, { immediate: true })
+const limits = computed(() => modelLimits(route.value, videoModel.value || {}))
 const videoPrice = computed(() => priceForResolution(videoModel.value?.price, videoResolution.value) ?? videoModel.value?.price)
 const priceNote = computed(() => {
   const known = estimateUnitCost(imageModel.value?.price) !== undefined && estimateUnitCost(videoPrice.value) !== undefined
@@ -113,7 +123,8 @@ function startNew(resume = false) {
   const cap = Number(budget.value)
   emit('start', {
     episodes: episodes.value.slice().sort((a, b) => a - b),
-    videoModel: 'Seedance',
+    videoModel: route.value,
+    limits: limits.value,
     imageModelId: imageModelId.value,
     videoModelId: videoModelId.value,
     ratio: draft.ratio,
