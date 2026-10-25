@@ -845,3 +845,13 @@ test('看成果：file.list / file.read 只认电脑当前项目，路径交给�
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
+test('热更新：请求监听全窗口只注册一次，并总是交给最新加载的桥代码处理', () => {
+  const bridge = readFileSync('src/services/desktopRemoteBridge.ts', 'utf8')
+  // 模块级变量会随热更新换一份新的，旧监听仍挂着、带着旧 dispatch 抢先回包（2026-10-26 UNSUPPORTED_MESSAGE）。
+  assert.match(bridge, /globalThis as \{ __jcDesktopRemoteGateway\?:/)
+  assert.match(bridge, /gateway\.dispatch = dispatch/)
+  assert.match(bridge, /void gateway\.dispatch\(gateway\.host, request\)/)
+  assert.doesNotMatch(bridge, /^let activeHost/m)
+  assert.doesNotMatch(bridge, /^let listenerReady/m)
+})

@@ -23,6 +23,7 @@
 - 2026-10-26 手机选创作模式：抽出共用 `restoreProductionSelection`，后台对话沿用电脑记住的漫剧/短剧/小说模式；新增 `session.mode.set`，手机聊天页三个模式按钮。先红后绿，focused 2281 passed；真机未测。
 - 同日 手机选模式真机验收（5G 经中继）通过；发现手机固定对话后标题不随电脑自动改名更新。
 - 同日 手机标题随电脑改名更新；手机看成果：只读浏览 `wiki/` 与 `.raw/jc-media/`，文字、图片、视频分段取回预览，`dev_read_file` 新增可选 `offset`。先红后绿，focused 2291、Rust 520 passed；真机未测。
+- 同日 看成果真机首测修两处根因：热更新导致新旧桥接监听并存（旧的抢答 UNSUPPORTED_MESSAGE），中继握手 6 秒即放弃（5G 下 WouldBlock）→ 总等 20 秒；中继未登记房间改回 DESKTOP_OFFLINE（未部署）。
 
 ## 2026-10-24 短剧改编按真实章切分与圣经升级
 

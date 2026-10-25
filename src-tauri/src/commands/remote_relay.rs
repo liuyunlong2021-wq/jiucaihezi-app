@@ -21,6 +21,10 @@ pub const DEFAULT_RELAY_URL: &str = "wss://api.jiucaihezi.studio/relay/v1";
 pub const RELAY_CANDIDATE: &str = "relay";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+/// TLS 与 WebSocket 升级的总等待：5G 下经 Cloudflare 唤醒房间，十秒上下并不少见。
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+/// 握手期间单次读的超时；到点只是“还没回”，接着等，直到总等待用完。
+const HANDSHAKE_POLL: Duration = Duration::from_secs(1);
 /// 隧道两头轮询的间隔：同步 WebSocket 不能一边阻塞读一边写，只能轮流短读。
 const POLL: Duration = Duration::from_millis(15);
 /// 控制连接心跳。中继侧由 Cloudflare 自动回 pong，不唤醒房间。
@@ -171,19 +175,28 @@ fn open(ticket: &RelayTicket, path: &str) -> Result<Socket, String> {
         .find_map(|address| TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).ok())
         .ok_or_else(|| "RELAY_UNREACHABLE".to_string())?;
     stream
-        .set_read_timeout(Some(CONNECT_TIMEOUT))
+        .set_read_timeout(Some(HANDSHAKE_POLL))
         .map_err(|error| error.to_string())?;
-    match tungstenite::client_tls_with_config(request, stream, None, None) {
-        Ok((socket, _)) => Ok(socket),
-        Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
-            Err(match response.status().as_u16() {
-                503 => "RELAY_DESKTOP_OFFLINE".to_string(),
-                401 | 403 => "RELAY_UNAUTHORIZED".to_string(),
-                429 => "RELAY_ROOM_FULL".to_string(),
-                status => format!("RELAY_HTTP_{status}"),
-            })
-        }
-        Err(error) => Err(format!("RELAY_UNREACHABLE: {error}")),
+    let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+    let mut attempt = tungstenite::client_tls_with_config(request, stream, None, None);
+    loop {
+        return match attempt {
+            Ok((socket, _)) => Ok(socket),
+            Err(HandshakeError::Interrupted(pending)) if Instant::now() < deadline => {
+                attempt = pending.handshake();
+                continue;
+            }
+            Err(HandshakeError::Interrupted(_)) => Err("RELAY_TIMEOUT".to_string()),
+            Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
+                Err(match response.status().as_u16() {
+                    503 => "RELAY_DESKTOP_OFFLINE".to_string(),
+                    401 | 403 => "RELAY_UNAUTHORIZED".to_string(),
+                    429 => "RELAY_ROOM_FULL".to_string(),
+                    status => format!("RELAY_HTTP_{status}"),
+                })
+            }
+            Err(error) => Err(format!("RELAY_UNREACHABLE: {error}")),
+        };
     }
 }
 
@@ -490,6 +503,21 @@ mod tests {
         };
         assert_eq!(connect_mobile(&wrong).unwrap_err(), "RELAY_UNAUTHORIZED");
         alive.store(false, Ordering::Release);
+    }
+
+    /// 5G 下连中继，握手回应常常晚于单次读超时：要接着等，不能当成连不上（2026-10-26 真机
+    /// 「RELAY_UNREACHABLE: Interrupted handshake (WouldBlock)」）。
+    #[test]
+    fn a_slow_relay_handshake_is_waited_for_instead_of_failing() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}/relay/v1", listener.local_addr().unwrap());
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            thread::sleep(HANDSHAKE_POLL * 2 + std::time::Duration::from_millis(300));
+            let _socket = tungstenite::accept(stream).unwrap();
+            thread::sleep(std::time::Duration::from_secs(1));
+        });
+        assert!(open(&ticket(&url, SECRET), "mobile").is_ok(), "慢回应也要等到");
     }
 
     #[test]

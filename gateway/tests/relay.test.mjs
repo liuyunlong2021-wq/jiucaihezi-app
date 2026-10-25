@@ -158,3 +158,10 @@ test('网关：中继路径校验房间号与升级头，合法请求交给该�
   assert.equal(await ok.text(), 'ok');
   assert.deepEqual(routed, [[`id:${ROOM}`, `/relay/v1/rooms/${ROOM}/mobile`]]);
 });
+
+test('中继：房间里还没有电脑登记过时，手机得到 DESKTOP_OFFLINE 而不是密钥错误', async () => {
+  const { room } = fakeRoom();
+  const response = await room.fetch(upgrade('mobile'));
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, 'DESKTOP_OFFLINE');
+});

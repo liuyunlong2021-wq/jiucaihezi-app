@@ -109,8 +109,18 @@ async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequ
   throw new Error('UNSUPPORTED_MESSAGE')
 }
 
-let activeHost: DesktopRemoteHost | undefined
-let listenerReady: Promise<void> | undefined
+/**
+ * 监听与当前 Host 挂在窗口全局上，而不是模块变量：开发期热更新会把本模块整份换新，
+ * 模块变量随之清空，新旧两份各注册一个监听，旧的带着旧 dispatch 抢先回包——
+ * 手机就收到旧代码不认识的 `UNSUPPORTED_MESSAGE`（2026-10-26 真机「看成果」）。
+ * 监听只注册一次，每次加载都把 dispatch 换成最新的。
+ */
+const gateway = ((globalThis as { __jcDesktopRemoteGateway?: {
+  dispatch: typeof dispatch
+  host?: DesktopRemoteHost
+  listenerReady?: Promise<void>
+} }).__jcDesktopRemoteGateway ??= { dispatch })
+gateway.dispatch = dispatch
 const commandLedger = new Map<string, { digest: string; result: Promise<{ accepted: boolean; runId: string }> }>()
 
 /**
@@ -123,9 +133,9 @@ const commandLedger = new Map<string, { digest: string; result: Promise<{ accept
  */
 export async function startDesktopRemoteGateway(): Promise<void> {
   if (!isTauriRuntime()) return
-  listenerReady ??= listen<RemoteRequest>('desktop-remote:request', event => {
+  gateway.listenerReady ??= listen<RemoteRequest>('desktop-remote:request', event => {
     const request = event.payload
-    void dispatch(activeHost, request).then(
+    void gateway.dispatch(gateway.host, request).then(
       result => invoke('remote_bridge_complete', { requestId: request.requestId, result }),
       error => invoke('remote_bridge_complete', {
         requestId: request.requestId,
@@ -133,16 +143,16 @@ export async function startDesktopRemoteGateway(): Promise<void> {
       }),
     )
   }).then(() => undefined).catch(error => {
-    listenerReady = undefined
+    gateway.listenerReady = undefined
     throw error
   })
-  await listenerReady
+  await gateway.listenerReady
 }
 
 /** The runtime binding outlives a workbench view; a remount replaces it with the latest view. */
 export async function bindDesktopRemoteRuntime(host: DesktopRemoteHost): Promise<void> {
   if (!isTauriRuntime()) return
-  activeHost = host
+  gateway.host = host
   await startDesktopRemoteGateway()
 }
 

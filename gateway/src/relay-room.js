@@ -64,6 +64,8 @@ export class RelayRoom {
     const hash = await sha256Hex(secret);
     const stored = await this.ctx.storage.get('secretHash');
     if (!stored && role === 'desktop') await this.ctx.storage.put('secretHash', hash);
+    // 房间里还没有电脑登记过：对手机来说就是电脑不在线，不是密钥错。
+    else if (!stored) return relayError(503, 'DESKTOP_OFFLINE');
     else if (stored !== hash) return relayError(403, 'RELAY_FORBIDDEN');
 
     if (role === 'desktop') {
