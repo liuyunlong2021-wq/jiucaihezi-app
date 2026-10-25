@@ -78,9 +78,10 @@ async function submit(wikiRoot: string, registry: Registry, id: string, entry: A
   await saveRegistry(wikiRoot, registry, deps)
 }
 
+/** 未登记、提示词改了、或上次运行最终失败的资产需要提交；失败项每次新运行重新给一轮重试。 */
 function needsSubmit(registry: Registry, id: string, hash: string) {
   const current = registry.assets[id]
-  return !current || (current.status !== 'locked' && current.prompt_hash !== hash)
+  return !current || (current.status !== 'locked' && (current.prompt_hash !== hash || current.status === 'failed'))
 }
 
 /** 本集需要新生成的资产（预算估算用），与 submitEpisodeAssets 的判断一致。 */

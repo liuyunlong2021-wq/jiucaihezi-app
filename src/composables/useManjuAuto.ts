@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
-import { createAutoRun, handleCheckpointSaved, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
+import { createAutoRun, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import { emitEvent } from '@/utils/eventBus'
@@ -123,11 +123,11 @@ export function useManjuAuto(options: {
     }
   }
 
-  async function start(config: AutoRunConfig | 'resume') {
+  async function start(config: AutoRunConfig, resume = false) {
     const owner = options.owner()
     const current = draft.value
     if (!owner || !current || run.value?.status === 'running') return
-    const state = config === 'resume' ? current.saved! : createAutoRun(config)
+    const state = resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)
     const { wikiRoot } = current
     draft.value = null
     error.value = ''

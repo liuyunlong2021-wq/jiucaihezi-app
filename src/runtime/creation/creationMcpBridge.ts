@@ -26,6 +26,8 @@ const submissions = new Map<string, string>()
 const submissionBodies = new Map<string, string>()
 const pendingSubmissions = new Map<string, { fingerprint: string; promise: Promise<unknown> }>()
 let sceneRecorder: ((document: Scene3DDocument) => Promise<Blob>) | undefined
+/** 按查询参数缓存上一次成功的目录（dynamic 或 legacy），网络抖动时沿用（分页/搜索各自一份）。 */
+const lastDynamicCatalogs = new Map<string, Record<string, unknown>>()
 
 export function setHarnessSceneRecorder(recorder?: (document: Scene3DDocument) => Promise<Blob>) {
   sceneRecorder = recorder
@@ -153,19 +155,28 @@ function capabilities(params: Record<string, unknown>): string[] {
 }
 
 async function creationModels(params: Record<string, unknown>) {
+  const catalogKey = canonicalCreationJson({ cursor: params.cursor, query: params.query, limit: params.limit, input_modality: params.input_modality, output_modality: params.output_modality })
   if (capabilities(params).length && !capabilities(params).includes('av')) throw new Error('当前入口未授权影音能力')
   try {
     const directory = await listDynamicCreationCapabilities(params)
-    return { source: 'dynamic', models: directory.items.map(item => ({ ...item, id: item.capability_id })), ...directory,
+    const result = { source: 'dynamic', models: directory.items.map(item => ({ ...item, id: item.capability_id })), ...directory,
       localModels: listCreationModels({ source: 'local-comfy', includeDisabled: true }) }
+    lastDynamicCatalogs.set(catalogKey, result)
+    return result
   } catch (error) {
     // Only a missing protocol allows the old adapters. Permission/network errors never broaden access.
     if (error instanceof CreationProtocolError && error.code === 'missing_key') return { source: 'local', models: listCreationModels({ source: 'local-comfy', includeDisabled: true }), next_cursor: null }
+    // 网络抖动（非 HTTP 错误）沿用本次运行里上一次成功的目录：全自动成片连续提交几十个任务，
+    // 一次超时不应把云端模型降级成“只允许本机 ComfyUI”。权限类 HTTP 错误仍按原规则收窄。
+    const cached = lastDynamicCatalogs.get(catalogKey)
+    if (!(error instanceof CreationProtocolError) && cached) return { ...cached, warning: '远程目录暂时不可达，沿用上次目录' }
     if (!(error instanceof CreationProtocolError) || ![404, 405].includes(error.status)) return { source: 'local', models: listCreationModels({ source: 'local-comfy', includeDisabled: true }), warning: error instanceof Error ? error.message : '远程目录暂不可用', next_cursor: null }
     const models = listCreationModels({ includeDisabled: true }).filter(model => model.contractStatus !== 'broken')
     const offset = Math.max(0, Number(params.cursor) || 0), limit = Math.min(100, Math.max(1, Number(params.limit) || 20))
     const filtered = models.filter(model => !params.query || `${model.id} ${model.label}`.toLowerCase().includes(String(params.query).toLowerCase()))
-    return { source: 'legacy', warning: '服务端尚未发布动态合同，仅现有适配可执行', models: filtered.slice(offset, offset + limit), next_cursor: offset + limit < filtered.length ? String(offset + limit) : null }
+    const legacy = { source: 'legacy', warning: '服务端尚未发布动态合同，仅现有适配可执行', models: filtered.slice(offset, offset + limit), next_cursor: offset + limit < filtered.length ? String(offset + limit) : null }
+    lastDynamicCatalogs.set(catalogKey, legacy)
+    return legacy
   }
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createAutoRun, estimateUnitCost, handleCheckpointSaved, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
+import { createAutoRun, estimateUnitCost, handleCheckpointSaved, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
 
@@ -153,6 +153,25 @@ test('unit cost parsing covers per-item, per-second and unknown prices', () => {
   assert.equal(estimateUnitCost('1.2/条'), 1.2)
   assert.equal(estimateUnitCost('0.2/秒', 15), 3)
   assert.equal(estimateUnitCost('8/张'), 8)
+  assert.equal(estimateUnitCost('6元/次'), 6, '模型目录常写“元”')
+  assert.equal(estimateUnitCost('0.2元/秒', 10), 2)
   assert.equal(estimateUnitCost(undefined), undefined)
   assert.equal(estimateUnitCost('按量计费'), undefined)
+})
+
+test('resuming after an asset failure retries failed assets and can use a new image model config', async () => {
+  const w = world({ imageOk: false })
+  const blocked = await runAuto(w.run, w.deps)
+  assert.equal(blocked.status, 'blocked')
+  const before = w.images.length
+  const resumed = resumeAutoRun(blocked, { ...blocked.config, imageModelId: 'img2', episodes: [9] })
+  assert.equal(resumed.config.imageModelId, 'img2')
+  assert.deepEqual(resumed.config.episodes, [1, 2], '续做保留原集数')
+  // 换模型后线路恢复：新提交的都成功
+  ;(w.deps.asset as { submitImage: unknown }).submitImage = async (input: { requestId: string }) => { w.images.push(input.requestId); return `ok${w.images.length}` }
+  ;(w.deps.asset as { getTask: unknown }).getTask = async (id: string) => id.startsWith('ok') ? { status: 'success', localPath: `/out/${id}.png` } : { status: 'failed', error: 'HTTP 502' }
+  ;(w.deps.video as { getTask: unknown }).getTask = async (id: string) => id.startsWith('ok') ? { status: 'success', localPath: `/out/${id}.png` } : { status: 'success', localPath: `/out/${id}.mp4` }
+  const done = await runAuto(resumed, w.deps)
+  assert.equal(w.images.length - before, 2, '两个失败资产各重提一次')
+  assert.equal(done.episodes['1'].phase, 'done')
 })
