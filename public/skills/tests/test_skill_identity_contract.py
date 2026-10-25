@@ -29,8 +29,8 @@ class SkillIdentityContractTests(unittest.TestCase):
             self.assertRegex(name, r"^[a-z0-9-]{1,64}$")
             self.assertEqual(frontmatter_name.group(1).strip(), name)
             self.assertEqual(entries[name]["name"], name)
-            self.assertTrue(description.group(1).startswith("Use when"), name)
-            self.assertTrue(entries[name]["description"].startswith("Use when"), name)
+            self.assertTrue(description.group(1).strip(), name)
+            self.assertEqual(entries[name]["description"], description.group(1).strip(), name)
             for relative in entries[name]["files"]:
                 self.assertTrue((directory / relative).is_file(), f"{name}/{relative}")
 
