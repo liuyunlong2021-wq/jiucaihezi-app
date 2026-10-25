@@ -181,7 +181,7 @@ test('production scopes deny foreign Skill resources and cross-route artifacts b
   assert.doesNotMatch(f.results()[0], /小说世界模型/)
   assert.match(f.results()[1], /Error:/)
   const schema = f.requests[0].tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters
-  assert.equal(schema.properties.artifact_kind.enum.length, 25)
+  assert.equal(schema.properties.artifact_kind.enum.length, 27)
   assert.equal(schema.properties.chapter_number, undefined)
   assert.equal(schema.properties.user_confirmed, undefined)
 })
@@ -308,7 +308,7 @@ test('ordinary single business Skill selection retains general capabilities and 
   assert.match(f.results()[0], /合法改编输入/)
   await f.run('none', { mode: 'skills:jc-novel', sessionId: 'personal-skill' })
   assert.ok(f.tools().includes('bash'))
-  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 43)
+  assert.equal(f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum.length, 45)
 })
 
 test('old capability handshake fails before a prompt is sent', async () => {

@@ -240,6 +240,24 @@
         "manju"
       ]
     },
+    "costume_asset": {
+      "path": "资产/角色/{entity}/服装生图提示词.md",
+      "index": "资产/角色/{entity}/index.md",
+      "label": "{entity}服装生图提示词",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
+    "character_look": {
+      "path": "资产/角色/{entity}/角色造型融合提示词.md",
+      "index": "资产/角色/{entity}/index.md",
+      "label": "{entity}角色造型融合提示词",
+      "entity": true,
+      "production_routes": [
+        "manju"
+      ]
+    },
     "novel_idea": {
       "path": "创作/灵感方案.md",
       "index": "创作/index.md",
@@ -517,6 +535,14 @@
       "crowd_asset": {
         "path": "资产/人群/{entity}/群像生图提示词.md",
         "index": "资产/人群/{entity}/index.md"
+      },
+      "costume_asset": {
+        "path": "资产/角色/{entity}/服装生图提示词.md",
+        "index": "资产/角色/{entity}/index.md"
+      },
+      "character_look": {
+        "path": "资产/角色/{entity}/角色造型融合提示词.md",
+        "index": "资产/角色/{entity}/index.md"
       },
       "scene_research": {
         "path": "项目资料/场景说明/{entity}.md",

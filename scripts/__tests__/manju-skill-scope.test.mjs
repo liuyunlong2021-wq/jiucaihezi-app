@@ -6,7 +6,7 @@ import { resolve, dirname } from 'node:path'
 const groups = JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8'))
 test('production scopes are plain business allowlists with no executable router', () => {
   assert.deepEqual(Object.keys(groups), ['manju', 'short-drama', 'novel'])
-  assert.equal(groups.manju.length, 15)
+  assert.equal(groups.manju.length, 16)
   assert.equal(groups['short-drama'].length, 5)
   assert.deepEqual(groups.novel, ['jc-novel'])
   for (const list of Object.values(groups)) {
@@ -53,4 +53,16 @@ test('the identity close-up of the character sheet is a 30–35° three-quarter 
     assert.match(text, /不正对镜头/, file)
     assert.doesNotMatch(text, /双眼直视镜头/, file)
   }
+})
+
+test('costume looks: same face, new outfit, fused from identity sheet + costume sheet', () => {
+  const read = name => readFileSync(`public/skills/${name}/SKILL.md`, 'utf8')
+  assert.ok(groups.manju.includes('jc-fuzhuang-prompt'))
+  const costume = read('jc-fuzhuang-prompt')
+  assert.match(costume, /costume_asset[\s\S]*资产\/角色\/<角色名·造型名>\/服装生图提示词\.md/)
+  assert.match(costume, /character_look[\s\S]*以参考图1为人物身份[\s\S]*参考图2的整套服装/)
+  assert.match(read('jc-xiangmuziliao'), /造型表（换装）/)
+  assert.match(read('jc-manju-pipeline'), /同阶段保存 costume_asset 与 character_look/)
+  assert.match(read('jc-gongchengjuben'), /同一段内换装须在换装处切段/)
+  assert.match(read('jc-seedance'), /顾云舟·帝王，龙袍冕旒/)
 })

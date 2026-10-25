@@ -187,6 +187,37 @@
     }
   },
   {
+    "id": "jc-fuzhuang-prompt",
+    "name": "jc-fuzhuang-prompt",
+    "displayName": "jc-fuzhuang-prompt",
+    "description": "Use when 用户需要根据文字描述、服装参考图或角色设定，为漫剧角色换装生成可直接用于生图的服装设计图提示词；输出独立服装、头饰、鞋履与配件的成套资产图，不生成角色脸部或完整人物设定图。",
+    "triggers": [
+      "服装设计图",
+      "角色换装提示词",
+      "服装生图提示词",
+      "角色衣服设计",
+      "角色服装资产",
+      "服饰设定图",
+      "衣服参考图提示词",
+      "给角色换衣服",
+      "头饰鞋履配件设计"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
     "id": "jc-gongchengjuben",
     "name": "jc-gongchengjuben",
     "displayName": "jc-gongchengjuben",

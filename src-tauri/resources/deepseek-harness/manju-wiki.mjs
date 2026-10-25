@@ -753,7 +753,7 @@ async function requirePipelineReads(ctx, args, exec, agent) {
   const kind = args.artifact_kind
   const rules = {
     film_style: ['summary'], character_asset: ['style', 'bio'], character_voice: ['style', 'bio'],
-    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'], crowd_asset: ['style'],
+    character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'], crowd_asset: ['style'], costume_asset: ['style'], character_look: ['style'],
     engineering_script: ['style', 'source', 'cast'], sound_direction: ['engineering', 'cast'],
     storyboard_prompt: ['engineering'], video_prompt: ['engineeringOrStoryboard'],
   }
@@ -863,9 +863,20 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
     assets = {}
     const kinds = { 角色: 'character', 场景: 'scene', 道具: 'prop', 人群: 'crowd' }
     for (const path of input.outputs) {
-      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具|人群)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词|群像生图提示词)\.md)$/)
+      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具|人群)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词|群像生图提示词|服装生图提示词|角色造型融合提示词)\.md)$/)
       if (!match) continue
+      // 换装造型：实体名“角色·造型”；服装图单独登记为“服装/…”，融合造型登记为“角色/…”并记下身份图与服装。
+      if (match[3] === '服装生图提示词') {
+        assets[`服装/${match[2]}`] = { kind: 'costume', prompt_path: path, prompt_hash: outputs[path] }
+        continue
+      }
       const id = `${match[1]}/${match[2]}`
+      if (match[3] === '角色造型融合提示词') {
+        const costumePath = `${wikiRoot}/资产/角色/${match[2]}/服装生图提示词.md`
+        if (!outputs[costumePath]) throw new Error(`造型 ${match[2]} 缺少服装生图提示词：请同阶段保存 costume_asset`)
+        assets[id] = { kind: 'look', prompt_path: path, prompt_hash: outputs[path], base: `角色/${match[2].split('·')[0]}`, costume: `服装/${match[2]}` }
+        continue
+      }
       if (assets[id]?.prompt_path.endsWith('/角色生图格式提示词.md')) continue
       assets[id] = { kind: kinds[match[1]], prompt_path: path, prompt_hash: outputs[path] }
     }

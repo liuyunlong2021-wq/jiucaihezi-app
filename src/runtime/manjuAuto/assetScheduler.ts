@@ -18,18 +18,21 @@ export const RATE_LIMIT = /请求过于频繁|too many requests|rate.?limit|\b42
 export const MAX_TRANSIENT = 5
 const RATE_LIMIT_BACKOFF_MS = 60_000
 
-export type AssetKind = 'character' | 'scene' | 'prop' | 'crowd'
+export type AssetKind = 'character' | 'scene' | 'prop' | 'crowd' | 'costume' | 'look'
 
 export interface EpisodeCheckpoint {
   episode_number: number
-  assets?: Record<string, { kind: AssetKind; prompt_path: string; prompt_hash: string }>
+  /** look（换装造型）记下身份图 base 与服装 costume 的资产 ID，二者出图后再融合。 */
+  assets?: Record<string, { kind: AssetKind; prompt_path: string; prompt_hash: string; base?: string; costume?: string }>
 }
 
 export interface AssetRegistryEntry {
   kind: AssetKind
   prompt_path: string
   prompt_hash: string
-  status: 'pending' | 'ready' | 'failed' | 'locked'
+  status: 'pending' | 'ready' | 'failed' | 'locked' | 'waiting'
+  base?: string
+  costume?: string
   attempts: number
   /** 累计提交次数，用于生成唯一 requestId（重试、限流重提、跨运行重提都不重复）。 */
   submits?: number
@@ -53,7 +56,8 @@ export interface WikiTaskDeps {
 }
 
 export interface AssetSchedulerDeps extends WikiTaskDeps {
-  submitImage(input: { requestId: string; prompt: string; kind: AssetKind }): Promise<string>
+  /** images：换装融合时依次传 [身份图, 服装图]。 */
+  submitImage(input: { requestId: string; prompt: string; kind: AssetKind; images?: string[] }): Promise<string>
   sleep(ms: number): Promise<void>
   now?(): number
 }
@@ -85,7 +89,8 @@ export function promptBody(text: string): string {
 async function submit(wikiRoot: string, registry: Registry, id: string, entry: AssetRegistryEntry, deps: AssetSchedulerDeps) {
   entry.submits = (entry.submits ?? entry.attempts - 1) + 1
   const requestId = `manju:${id}:${entry.prompt_hash.slice(0, 16)}:${entry.submits}`
-  entry.task_id = await deps.submitImage({ requestId, prompt: promptBody(await deps.readText(entry.prompt_path)), kind: entry.kind })
+  const images = entry.kind === 'look' ? [entry.base!, entry.costume!].map(dep => registry.assets[dep]?.image_path!) : undefined
+  entry.task_id = await deps.submitImage({ requestId, prompt: promptBody(await deps.readText(entry.prompt_path)), kind: entry.kind, ...(images && { images }) })
   entry.request_id = requestId
   entry.status = 'pending'
   delete entry.error
@@ -114,6 +119,12 @@ export async function submitEpisodeAssets(wikiRoot: string, checkpoint: EpisodeC
     const entry: AssetRegistryEntry = { ...asset, status: 'pending', attempts: 1, episode: checkpoint.episode_number,
       ...(previous && { submits: previous.submits ?? previous.attempts }) }
     registry.assets[id] = entry
+    // 换装造型等身份图与服装图都出图后，在闸门里再融合提交。
+    if (entry.kind === 'look') {
+      entry.status = 'waiting'
+      await saveRegistry(wikiRoot, registry, deps)
+      continue
+    }
     await submit(wikiRoot, registry, id, entry, deps)
   }
 }
@@ -139,6 +150,20 @@ export async function awaitEpisodeAssets(
       const entry = registry.assets[id]
       if (entry.status === 'locked' || entry.status === 'ready') continue
       if (entry.status === 'failed') { failed.push(id); continue }
+      if (entry.status === 'waiting') {
+        const parts = [entry.base!, entry.costume!].map(dep => registry.assets[dep])
+        if (parts.some(part => !part || part.status === 'failed')) {
+          Object.assign(entry, { status: 'failed', error: `身份图或服装图未能生成：${[entry.base, entry.costume].join('、')}` })
+          failed.push(id)
+        } else {
+          if (parts.every(part => part!.image_path && (part!.status === 'ready' || part!.status === 'locked'))) {
+            entry.status = 'pending'
+            await submit(wikiRoot, registry, id, entry, deps)
+          }
+          pending.push(id)
+        }
+        continue
+      }
       const task = entry.task_id ? await deps.getTask(entry.task_id) : undefined
       if (task?.status === 'success' && task.localPath) {
         entry.status = 'ready'
@@ -199,14 +224,30 @@ export async function regenerateAsset(wikiRoot: string, id: string, deps: AssetS
   delete entry.image_path
   delete entry.error
   delete entry.retry_at
-  await submit(wikiRoot, registry, id, entry, deps)
+  // 身份图或服装图重做后，由它融合出的造型也要重做（已锁定的不动）。
+  const dependents = Object.entries(registry.assets)
+    .filter(([, other]) => other.kind === 'look' && (other.base === id || other.costume === id) && other.status !== 'locked')
+    .map(([dependent, other]) => {
+      Object.assign(other, { status: 'waiting', attempts: 1, transient: 0 })
+      delete other.image_path
+      delete other.task_id
+      delete other.error
+      return dependent
+    })
+  if (entry.kind === 'look') {
+    entry.status = 'waiting'
+    await saveRegistry(wikiRoot, registry, deps)
+  } else {
+    await submit(wikiRoot, registry, id, entry, deps)
+  }
+  return dependents
 }
 
 /** 等单张资产出图（重新生成后用），返回本地图片路径；失败或超时抛错。 */
 export async function awaitAsset(wikiRoot: string, id: string, deps: AssetSchedulerDeps, options: { timeoutMs: number; pollMs: number }): Promise<string> {
   const entry = (await loadRegistry(wikiRoot, deps)).assets[id]
   if (!entry) throw new Error(`未登记资产：${id}`)
-  const result = await awaitEpisodeAssets(wikiRoot, { episode_number: entry.episode, assets: { [id]: { kind: entry.kind, prompt_path: entry.prompt_path, prompt_hash: entry.prompt_hash } } }, deps, options)
+  const result = await awaitEpisodeAssets(wikiRoot, { episode_number: entry.episode, assets: { [id]: { kind: entry.kind, prompt_path: entry.prompt_path, prompt_hash: entry.prompt_hash, base: entry.base, costume: entry.costume } } }, deps, options)
   if (result.status !== 'ready') throw new Error(result.status === 'timeout' ? `${id} 生成超时` : `${id} 生成失败：${(await loadRegistry(wikiRoot, deps)).assets[id]?.error || ''}`)
   return result.images[id]
 }

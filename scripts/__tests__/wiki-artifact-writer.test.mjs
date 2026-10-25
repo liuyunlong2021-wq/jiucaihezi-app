@@ -191,6 +191,30 @@ test('Seedance pipeline registers image assets and binds each segment @图 order
   assert.deepEqual(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).sort(), ['人群/太虚宗弟子', '场景/石道', '角色/莫甘娜'])
 })
 
+test('costume looks register as their own character id, linked to the base identity and the costume', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-look-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'Seedance', episode_number: 12, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  const progress = await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+  await checkpoint({ stage: 'materials', outputs: [await save({ artifact_kind: 'story_summary' }, '# 故事梗概')] })
+  await checkpoint({ stage: 'style', outputs: [await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：9:16')] })
+  const base = await save({ artifact_kind: 'character_format', entity_name: '顾云舟' }, '# 顾云舟三格')
+  const costume = await save({ artifact_kind: 'costume_asset', entity_name: '顾云舟·帝王' }, '# 帝王服装')
+  assert.equal(costume, 'wiki/资产/角色/顾云舟·帝王/服装生图提示词.md')
+  const look = await save({ artifact_kind: 'character_look', entity_name: '顾云舟·帝王' }, '# 融合\n以参考图1为人物身份，换上参考图2的服装。')
+  assert.equal(look, 'wiki/资产/角色/顾云舟·帝王/角色造型融合提示词.md')
+  await assert.rejects(checkpoint({ stage: 'assets', outputs: [base, look] }), /服装/)
+  await checkpoint({ stage: 'assets', outputs: [base, costume, look] })
+  const assets = JSON.parse(files.get(join(root, progress.path)).content).assets
+  assert.deepEqual(Object.keys(assets).sort(), ['服装/顾云舟·帝王', '角色/顾云舟', '角色/顾云舟·帝王'])
+  assert.equal(assets['服装/顾云舟·帝王'].kind, 'costume')
+  assert.deepEqual({ kind: assets['角色/顾云舟·帝王'].kind, base: assets['角色/顾云舟·帝王'].base, costume: assets['角色/顾云舟·帝王'].costume },
+    { kind: 'look', base: '角色/顾云舟', costume: '服装/顾云舟·帝王' })
+})
+
 test('H3 pipeline uses plan limits (28s, 6 images) and binds <Picture N> labels to registered refs', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-h3-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -508,11 +532,11 @@ test('long pasted source is sliced verbatim from the current turn, never from mo
 })
 
 
-test('all 43 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
+test('all 45 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-route-artifacts-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
-  assert.equal(Object.keys(contract.types).length, 43)
+  assert.equal(Object.keys(contract.types).length, 45)
   const counts = { manju: 0, 'short-drama': 0, novel: 0 }
   for (const [kind, template] of Object.entries(contract.types)) {
     assert.ok(Array.isArray(template.production_routes) && template.production_routes.length)
@@ -561,7 +585,7 @@ test('all 43 artifact contracts have explicit routes and every allowed kind save
       assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
     }
   }
-  assert.deepEqual(counts, { manju: 25, 'short-drama': 16, novel: 16 })
+  assert.deepEqual(counts, { manju: 27, 'short-drama': 16, novel: 16 })
 })
 
 test('source links use document-relative targets and summaries contain only readable labels', async t => {

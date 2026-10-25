@@ -237,6 +237,7 @@ export function useManjuAuto(options: {
     if (!owner || !deps || !review.value || reviewBusy.value[id]) return
     reviewBusy.value = { ...reviewBusy.value, [id]: true }
     reviewErrors.value = { ...reviewErrors.value, [id]: '' }
+    let touched = [id]
     try {
       let hash: string | undefined
       if (newPrompt !== undefined) {
@@ -248,13 +249,19 @@ export function useManjuAuto(options: {
         const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
         hash = [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
       }
-      await regenerateAsset(deps.wikiRoot, id, deps.asset, hash)
-      const image = await awaitAsset(deps.wikiRoot, id, deps.asset, { timeoutMs: 30 * 60_000, pollMs: 5000 })
-      if (review.value) review.value = { ...review.value, images: { ...review.value.images, [id]: image } }
+      // 身份图或服装图重做后，由它融合出的造型也跟着重做，一并在面板里更新。
+      const dependents = await regenerateAsset(deps.wikiRoot, id, deps.asset, hash)
+      touched = [id, ...dependents]
+      reviewBusy.value = { ...reviewBusy.value, ...Object.fromEntries(dependents.map(dependent => [dependent, true])) }
+      for (const target of [id, ...dependents]) {
+        const image = await awaitAsset(deps.wikiRoot, target, deps.asset, { timeoutMs: 30 * 60_000, pollMs: 5000 })
+        if (review.value) review.value = { ...review.value, images: { ...review.value.images, [target]: image } }
+        if (target !== id) reviewBusy.value = { ...reviewBusy.value, [target]: false }
+      }
     } catch (cause) {
       reviewErrors.value = { ...reviewErrors.value, [id]: cause instanceof Error ? cause.message : String(cause) }
     } finally {
-      reviewBusy.value = { ...reviewBusy.value, [id]: false }
+      reviewBusy.value = { ...reviewBusy.value, ...Object.fromEntries(touched.map(target => [target, false])) }
     }
   }
 

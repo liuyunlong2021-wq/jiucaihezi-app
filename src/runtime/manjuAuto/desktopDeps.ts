@@ -53,7 +53,8 @@ export async function loadMediaParamProfile(modelId: string): Promise<MediaParam
 export function createDesktopAssetDeps(owner: string, config: { imageModelId: string; ratio: string }, profile: MediaParamProfile): AssetSchedulerDeps {
   return {
     ...wikiTaskDeps(owner),
-    submitImage: ({ requestId, prompt }) => submit(owner, config.imageModelId, requestId, buildMediaParams(profile, { prompt, ratio: config.ratio })),
+    // 换装融合时 images = [身份图, 服装图]，按模型的参考图字段名传入。
+    submitImage: ({ requestId, prompt, images }) => submit(owner, config.imageModelId, requestId, buildMediaParams(profile, { prompt, ratio: config.ratio, images })),
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   }
 }
