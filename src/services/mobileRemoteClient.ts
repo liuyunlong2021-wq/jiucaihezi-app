@@ -443,6 +443,7 @@ export class MobileRemoteClient {
         : []
       this.pendingTurn = parsePendingTurn((snapshot as { pendingTurn?: unknown })?.pendingTurn)
       this.mode = parseMode((snapshot as { mode?: unknown })?.mode)
+      this.adoptTitle((snapshot as { title?: unknown })?.title)
       const live = snapshot as Partial<{ streamingText: string; run: MobileRemoteRun }>
       this.streamingText = typeof live?.streamingText === 'string' ? live.streamingText : ''
       this.run = live?.run && typeof live.run === 'object' ? live.run : IDLE_RUN
@@ -455,6 +456,13 @@ export class MobileRemoteClient {
         for (const event of events) this.handle(event)
       }
     }
+  }
+
+  /** 电脑给对话改了名（如首句自动命名）：顶部标题跟着变，固定的对话也记住新名字。 */
+  private adoptTitle(title: unknown) {
+    if (typeof title !== 'string' || !title.trim() || !this.context || title === this.context.conversationTitle) return
+    this.context = { ...this.context, conversationTitle: title }
+    if (this.pinned?.sessionId === this.context.sessionId) this.pinned = { ...this.pinned, conversationTitle: title }
   }
 
   private adoptContext(context: MobileRemoteContext) {
@@ -503,6 +511,7 @@ export class MobileRemoteClient {
     this.lastSeq = event.seq
     if (Array.isArray(event.turns)) this.turns = event.turns
     this.mode = parseMode(event.mode) ?? this.mode
+    this.adoptTitle((event as { title?: unknown }).title)
     this.pendingTurn = parsePendingTurn(event.pendingTurn)
     this.streamingText = typeof event.streamingText === 'string' ? event.streamingText : ''
     this.run = event.run && typeof event.run === 'object' ? event.run : IDLE_RUN

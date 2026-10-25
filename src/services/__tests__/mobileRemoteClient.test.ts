@@ -859,3 +859,20 @@ test('模式：电脑推送的运行事件带模式时同步，旧电脑不带�
   assert.equal(client.view.mode, 'short-drama')
   client.disconnect()
 })
+
+test('标题：手机固定在某个对话时，读到或收到电脑的新标题就更新顶部标题', async () => {
+  const { client, emit } = connectedClient({
+    'session.attach': payload => ({ sessionId: payload.sessionId, gatewayEpoch: 'epoch-1', seq: 0,
+      snapshot: { ...snapshot, title: '新对话' } }),
+  })
+  await client.connect()
+  await client.openSession({ ...context, conversationTitle: '新对话' })
+  emit(sessionEvent(1, { title: '给我生成一个公交车的场景图' }))
+  assert.equal(client.view.context?.conversationTitle, '给我生成一个公交车的场景图')
+  emit(sessionEvent(2, { title: '' }))
+  assert.equal(client.view.context?.conversationTitle, '给我生成一个公交车的场景图', '空标题不覆盖')
+  client.handleTransportClosed()
+  await client.connect()
+  assert.equal(client.view.context?.conversationTitle, '新对话', '重连后以电脑快照为准')
+  client.disconnect()
+})

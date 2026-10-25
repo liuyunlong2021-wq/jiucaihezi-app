@@ -788,3 +788,31 @@ test('模式-5：电脑打开对话与手机后台发送用同一条模式恢复
   assert.match(workbench, /restoreProductionSelection\(/)
   assert.match(runtime, /restoreProductionSelection\(/)
 })
+
+test('标题：会话投影与后台进度都带电脑上的最新标题（对话被自动改名后手机跟着变）', async () => {
+  const previousWindow = globalThis.window
+  const published: Array<{ sessionId?: string; event?: { payload?: Record<string, unknown> } }> = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { __TAURI_INTERNALS__: { invoke: async (command: string, args?: typeof published[number]) => {
+      if (command === 'remote_bridge_publish' && args) published.push(args)
+    } } },
+  })
+  const stop = startDesktopConversationPublisher()
+  try {
+    const { projects } = await m2Fixture()
+    const host = createDesktopConversationHost(async () => await new Promise<string>(() => undefined))
+    await __desktopRemoteBridgeForTests.dispatch(host, m2Request('session.list', { projectId: projects.projects[0]!.projectId }))
+    // 电脑在列表之后把 B 自动改了名：以对话目录的实时标题为准，不用手机列表时的旧标题。
+    upsertHarnessConversationCatalogEntry({ ...m2Entry('m2-b', '给我生成一个公交车的场景图', '2026-10-25T05:00:00.000Z') })
+    await host.sendMessage('jc-v1-m2-b', '后台推进')
+    await until(() => published.some(item => item.sessionId === 'jc-v1-m2-b'))
+    assert.equal(published.find(item => item.sessionId === 'jc-v1-m2-b')?.event?.payload?.title, '给我生成一个公交车的场景图')
+    assert.ok(published.some(item => item.sessionId === 'jc-v1-m2-a' && item.event?.payload?.title === '对话 A'),
+      '电脑当前对话的推送也带标题')
+  } finally {
+    stop()
+    m2Cleanup()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})

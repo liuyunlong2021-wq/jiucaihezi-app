@@ -171,7 +171,10 @@ function desktopRemoteSelection(sessionId: string): DesktopConversationSelection
   if (!target || target.owner !== current.owner) return null
   // 模型、权限档、MCP 沿用电脑当前设置；A 的 Skill 与媒体开关不带给 B，
   // B 的创作模式按电脑记住的偏好恢复，与电脑打开 B 时同一条规则。
-  return { ...current, conversationTitle: target.conversationTitle, conversationId: target.conversationId,
+  // 标题以对话目录的实时值为准：B 在列出之后可能已被自动改名。
+  const title = listHarnessConversationCatalog(current.owner)
+    .find(item => item.conversationId === target.conversationId)?.title || target.conversationTitle
+  return { ...current, conversationTitle: title, conversationId: target.conversationId,
     resourcePath: target.resourcePath, skillNames: rememberedProductionSkills(current.owner, target.conversationId, target.turns),
     mediaSelected: false, avSelected: false, scene3dSelected: false, turns: target.turns }
 }
@@ -280,6 +283,7 @@ export function startDesktopConversationPublisher() {
         sessionId: deepSeekSessionId(selected.conversationId, selected.owner),
         turns: desktopRemoteTurns(selected.turns),
         mode: remoteMode(selected),
+        title: selected.conversationTitle,
         ...desktopConversationLiveState(selected.owner, selected.resourcePath),
       }
     },
@@ -301,7 +305,7 @@ export function startDesktopConversationPublisher() {
       if (!remoteSessionTargets.has(sessionId) || sessionId === desktopConversationContext().sessionId) return []
       const selected = desktopRemoteSelection(sessionId)
       return [{ sessionId, ...desktopConversationLiveState(run.owner, run.resourcePath),
-        ...selected ? { mode: remoteMode(selected) } : {} }]
+        ...selected ? { mode: remoteMode(selected), title: selected.conversationTitle } : {} }]
     })),
     value => {
       for (const projection of JSON.parse(value) as Array<{ sessionId: string }>) {
@@ -572,6 +576,7 @@ function desktopConversationProjection(
     ])) : {},
     reasoning: snapshot ? Object.fromEntries(deepSeekSessionReasoning(snapshot)) : {},
     mode: remoteMode(selected),
+    title: selected.conversationTitle,
     ...desktopConversationLiveState(selected.owner, selected.resourcePath),
   }
 }
