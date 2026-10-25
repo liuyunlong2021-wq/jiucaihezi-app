@@ -197,4 +197,6 @@ test('全自动：手机能开始/续做、停止、看进度，审图时看图�
     assert.match(panel, new RegExp(label), label)
   assert.match(panel, /<img /)
   assert.match(panel, /URL\.revokeObjectURL/)
+  // 与电脑确认卡一致：有未完成运行时路线也不锁，续做由电脑强制沿用原路线。
+  assert.doesNotMatch(panel, /v-model="route" :disabled/)
 })

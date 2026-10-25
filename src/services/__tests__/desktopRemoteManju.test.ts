@@ -65,10 +65,10 @@ test('全自动·参数：手机只给选择，电脑按确认卡同一规则拼
   assert.equal(h3.review, false)
   assert.equal(h3.budgetPerEpisode, undefined)
   assert.equal(h3.videoPrice, '0.5/秒')
-  // 续做沿用原路线，手机选的路线不生效。
+  // 与电脑确认卡一致（2026-10-26）：有未完成运行时也可换路线重新开始；续做由 resumeAutoRun 强制沿用原路线。
   const saved = { ...draft, saved: { version: 1, status: 'stopped', reviewed: false, episodes: {},
     config: { videoModel: 'H3' } } } as unknown as ManjuAutoDraft
-  assert.equal(buildRemoteAutoRunConfig(saved, { episodes: [1], imageModelId: 'img-a', videoModelId: 'vid-a', reviewMode: 'new', route: 'Seedance' }).videoModel, 'H3')
+  assert.equal(buildRemoteAutoRunConfig(saved, { episodes: [1], imageModelId: 'img-a', videoModelId: 'vid-a', reviewMode: 'new', route: 'Seedance' }).videoModel, 'Seedance')
 })
 
 test('全自动·参数：不在确认卡里的集数或模型、没确认比例，一律拒绝', () => {

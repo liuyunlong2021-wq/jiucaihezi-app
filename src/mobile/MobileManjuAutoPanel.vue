@@ -186,7 +186,7 @@ onBeforeUnmount(() => { for (const url of Object.values(images.value)) URL.revok
           <select v-model="videoResolution"><option v-for="resolution in videoModel.resolutions" :key="resolution" :value="resolution">{{ resolution }}</option></select>
         </label>
         <label class="field"><span>视频路线</span>
-          <select v-model="route" :disabled="Boolean(draft.saved)">
+          <select v-model="route">
             <option value="Seedance">Seedance 提示词</option>
             <option value="H3">MiniMax H3 提示词</option>
           </select>

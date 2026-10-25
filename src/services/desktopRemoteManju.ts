@@ -53,14 +53,15 @@ function invalid(): never {
 
 const resolutionHeight = (value: string) => Number(value.replace(/\D/g, '')) || Infinity
 
-/** 与 ManjuAutoPanel 的 startNew 同一规则：默认最低分辨率并按该档计价，续做沿用原路线。 */
+/** 与 ManjuAutoPanel 的 startNew 同一规则：默认最低分辨率并按该档计价。 */
 export function buildRemoteAutoRunConfig(draft: ManjuAutoDraft, choice: RemoteManjuChoice): AutoRunConfig {
   const episodes = [...new Set(Array.isArray(choice?.episodes) ? choice.episodes : [])].sort((a, b) => a - b)
   const imageModel = draft.imageModels.find(model => model.id === choice?.imageModelId)
   const videoModel = draft.videoModels.find(model => model.id === choice?.videoModelId)
   if (!draft.ratio || !episodes.length || episodes.some(episode => !draft.episodes.includes(episode))
     || !imageModel || !videoModel || !['new', 'first', 'off'].includes(choice.reviewMode)) invalid()
-  const route: VideoRoute = draft.saved?.config.videoModel ?? (choice.route === 'H3' ? 'H3' : 'Seedance')
+  // 有未完成运行时也可换路线重新开始；续做由 resumeAutoRun 强制沿用原路线（与确认卡一致）。
+  const route: VideoRoute = choice.route === 'H3' ? 'H3' : 'Seedance'
   const resolutions = videoModel.resolutions || []
   if (choice.videoResolution && !resolutions.includes(choice.videoResolution)) invalid()
   const videoResolution = choice.videoResolution
