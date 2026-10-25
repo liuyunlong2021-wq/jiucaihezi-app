@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createAutoRun, estimateUnitCost, handleCheckpointSaved, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
+import { createAutoRun, estimateUnitCost, handleCheckpointSaved, priceForResolution, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
 
@@ -173,5 +173,54 @@ test('resuming after an asset failure retries failed assets and can use a new im
   ;(w.deps.video as { getTask: unknown }).getTask = async (id: string) => id.startsWith('ok') ? { status: 'success', localPath: `/out/${id}.png` } : { status: 'success', localPath: `/out/${id}.mp4` }
   const done = await runAuto(resumed, w.deps)
   assert.equal(w.images.length - before, 2, '两个失败资产各重提一次')
+  assert.equal(done.episodes['1'].phase, 'done')
+})
+
+test('tiered prices resolve to the chosen resolution, and ¥ prefixes parse', () => {
+  const wan = '480P ¥0.2/秒 · 720P ¥0.4/秒 · 1080P ¥0.5/秒'
+  assert.equal(priceForResolution(wan, '480P'), '0.2/秒')
+  assert.equal(priceForResolution(wan, '720p'), '0.4/秒')
+  assert.equal(priceForResolution('480P ¥11/次 · 720P ¥15/次', '720P'), '15/次')
+  assert.equal(priceForResolution('¥0.05/秒', '768P'), undefined, '不分档的价格原样使用')
+  assert.equal(estimateUnitCost('¥0.05/秒', 10), 0.5)
+  assert.equal(estimateUnitCost(priceForResolution(wan, '480P'), 27), 5.4)
+})
+
+test('resuming an episode already in the video phase checks videos immediately, before any 30-minute wait', async () => {
+  const w = world()
+  w.setApprove('stopped')
+  await runAuto(w.run, w.deps) // 停在第 1 集审图
+  w.setApprove('approved')
+  w.setStop(false)
+  const order: string[] = []
+  const originalSleep = w.deps.sleep
+  w.deps.sleep = async ms => { order.push('sleep'); await originalSleep(ms) }
+  const check = w.deps.video.getTask
+  w.deps.video.getTask = async id => { order.push('check'); return check(id) }
+  w.run.config.episodes = [1]
+  delete w.run.episodes['2']
+  await runAuto(w.run, w.deps) // 审图通过、视频提交，进入出片中
+  // 模拟 App 重启后续做：第 1 集处于 videos 阶段
+  order.length = 0
+  w.run.status = 'stopped'
+  w.run.episodes['1'].phase = 'videos'
+  const registryPath = 'wiki/制作流水线/Seedance/第1集视频任务.json'
+  const registry = JSON.parse(w.fs.get(registryPath)!)
+  for (const segment of registry.segments) segment.status = 'pending'
+  w.fs.set(registryPath, JSON.stringify(registry))
+  await runAuto(w.run, w.deps)
+  assert.equal(order[0], 'check', `续做应先检查视频，实际顺序：${order.join(',')}`)
+})
+
+test('resuming retries failed video segments of an episode before checking again', async () => {
+  const w = world({ videoOk: false })
+  w.run.config.episodes = [1]
+  delete w.run.episodes['2']
+  const blocked = await runAuto(w.run, w.deps)
+  assert.equal(blocked.episodes['1'].phase, 'blocked')
+  const before = w.videos.length
+  ;(w.deps.video as { getTask: unknown }).getTask = async () => ({ status: 'success', localPath: '/out/v.mp4' })
+  const done = await runAuto(blocked, w.deps)
+  assert.equal(w.videos.length - before, 1, '失败的那一段重新提交一次')
   assert.equal(done.episodes['1'].phase, 'done')
 })

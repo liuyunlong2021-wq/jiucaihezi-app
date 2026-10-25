@@ -32,11 +32,12 @@ export function profileFromCapability(capability: Pick<CreationCapability, 'para
 
 export function buildMediaParams(
   profile: MediaParamProfile | undefined,
-  input: { prompt: string; ratio: string; images?: string[]; durationSeconds?: number },
+  input: { prompt: string; ratio: string; images?: string[]; durationSeconds?: number; resolution?: string },
 ): Record<string, unknown> {
   const keys = new Set(profile?.keys || [])
   const ratioKey = ['ratio', 'aspect_ratio', 'aspectRatio'].find(key => keys.has(key)) || 'aspect_ratio'
   const params: Record<string, unknown> = { prompt: input.prompt, [ratioKey]: input.ratio }
+  if (input.resolution && keys.has('resolution')) params.resolution = input.resolution
   if (input.images?.length) {
     const max = profile?.maxImages
     if (max !== undefined && input.images.length > max) throw new Error(`参考图 ${input.images.length} 张超过该模型上限 ${max} 张`)

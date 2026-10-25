@@ -10,8 +10,12 @@ export const ASSET_REGISTRY_PATH = '制作流水线/资产注册表.json'
 /** 首次提交 + 2 次重试（2026-10-25 用户确认）。 */
 const MAX_ATTEMPTS = 3
 export const MODERATION = /审核|敏感|违规|moderation|content.?policy|sensitive|safety/i
-/** 限流：等一会儿再提，不计入失败次数（2026-10-25 实测一次提交 18 张被限流）。 */
-export const RATE_LIMIT = /请求过于频繁|too many requests|rate.?limit|\b429\b/i
+/**
+ * 暂时性失败：限流（2026-10-25 实测一次提交 18 张被限流）与网络抖动（同日实测上传参考图 ETIMEDOUT / error sending request）。
+ * 等一会儿再提，不计入失败次数；连续暂时性失败超过上限才按普通失败处理，避免网络长期断开时无限重提。
+ */
+export const RATE_LIMIT = /请求过于频繁|too many requests|rate.?limit|\b429\b|error sending request|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|网络|超时|timed out/i
+export const MAX_TRANSIENT = 5
 const RATE_LIMIT_BACKOFF_MS = 60_000
 
 export type AssetKind = 'character' | 'scene' | 'prop'
@@ -31,6 +35,8 @@ export interface AssetRegistryEntry {
   submits?: number
   /** 限流后最早可重提的时间戳。 */
   retry_at?: number
+  /** 连续暂时性失败次数。 */
+  transient?: number
   task_id?: string
   request_id?: string
   image_path?: string
@@ -42,6 +48,7 @@ export interface WikiTaskDeps {
   readText(path: string): Promise<string>
   writeText(path: string, content: string): Promise<void>
   exists(path: string): Promise<boolean>
+  /** status 'interrupted'：任务还挂着但 App 里已无人跟进且无法恢复（例如重启前未拿到上游任务号）。 */
   getTask(taskId: string): Promise<{ status: string; localPath?: string; error?: string } | undefined>
 }
 
@@ -136,12 +143,17 @@ export async function awaitEpisodeAssets(
       if (task?.status === 'success' && task.localPath) {
         entry.status = 'ready'
         entry.image_path = task.localPath
-      } else if (!task || task.status === 'failed' || task.status === 'cancelled') {
+      } else if (!task || task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
         const error = task?.error || '任务记录丢失'
-        if (task && RATE_LIMIT.test(error)) {
+        if (task?.status === 'interrupted') {
+          // App 重启时尚未拿到上游任务、无人跟进：立即重提，不计入失败次数。
+          await submit(wikiRoot, registry, id, entry, deps)
+          pending.push(id)
+        } else if (task && RATE_LIMIT.test(error) && (entry.transient ?? 0) < MAX_TRANSIENT) {
           if (entry.retry_at === undefined) entry.retry_at = now() + RATE_LIMIT_BACKOFF_MS
           else if (now() >= entry.retry_at) {
             delete entry.retry_at
+            entry.transient = (entry.transient ?? 0) + 1
             await submit(wikiRoot, registry, id, entry, deps)
           }
           pending.push(id)

@@ -182,10 +182,26 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(bridge, /params\[name\] \?\? null/)
   assert.match(bridge, /lastDynamicCatalogs\.set\(catalogKey, legacy\)/)
   assert.match(bridge, /!\(error instanceof CreationProtocolError\) && cached/)
+  // 回归（2026-10-25 实测重启后“该能力当前不可执行”）：已确认 legacy 的服务端，网络抖动不降级为只允许本机 ComfyUI。
+  assert.match(bridge, /const networkOnLegacy = !\(error instanceof CreationProtocolError\) && serverIsLegacy/)
+  // 视频依次提交：桥暴露 submitted，桌面适配等上一段交给模型再交下一段。
+  assert.match(bridge, /submitted: Boolean\(task\.upstreamTaskId\)/)
+  assert.match(readFileSync('src/runtime/manjuAuto/desktopDeps.ts', 'utf8'), /async waitSubmitted\(taskId\)/)
   // 续做按确认卡上新的模型继续（生图线路故障后换模型）。
   assert.match(panel, /@click="startNew\(true\)"/)
   // 暂停原因直接显示，不只藏在悬停提示里（2026-10-25 用户反馈“看到暂停有点懵”）。
   assert.match(panel, /暂停原因：\{\{ episode\.reason \}\}/)
+  // 视频分辨率可选、默认最低档，分档价格按所选档参与预算（2026-10-25 用户反馈 wan 无法选 480P）。
+  assert.match(panel, /视频分辨率/)
+  // 每次运行独立停止开关 + runId 落盘守卫：旧运行（含热更新遗留）发现记录属于新运行就退出（2026-10-25 实测两个运行互相覆盖）。
+  assert.doesNotMatch(controller, /stopRequested/)
+  assert.match(controller, /shouldStop: \(\) => mine\.stopped/)
+  assert.match(controller, /onDisk\.runId !== next\.runId/)
+  // 回归（2026-10-25 实测新运行把自己判成旧运行）：第一次保存先认领，不检查旧 runId。
+  assert.match(controller, /const onDisk = claimed \? await readJson/)
+  assert.match(controller, /runId: crypto\.randomUUID\(\)/)
+  assert.match(panel, /videoResolution: videoResolution\.value/)
+  assert.match(controller, /resolution: state\.config\.videoResolution/)
   // 设计系统没有 --danger，警示色必须用 --jc-error。
   assert.doesNotMatch(panel, /var\(--danger\)/)
   assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)

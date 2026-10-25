@@ -11,7 +11,7 @@ import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile }
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import { emitEvent } from '@/utils/eventBus'
 
-export interface ManjuAutoModelOption { id: string; label: string; price?: number | string }
+export interface ManjuAutoModelOption { id: string; label: string; price?: number | string; resolutions?: string[] }
 
 export interface ManjuAutoDraft {
   wikiRoot: string
@@ -54,6 +54,7 @@ export function normalizeModels(models: Array<Record<string, unknown>>, kind: 'i
     id: String(model.id),
     label: String(model.label || model.display_name || model.id),
     price: typeof model.price === 'number' || typeof model.price === 'string' ? model.price : undefined,
+    resolutions: getCreationModelSpec(String(model.id))?.capabilities.resolutions,
   })).sort((a, b) => rank(a) - rank(b))
 }
 
@@ -67,8 +68,9 @@ export function useManjuAuto(options: {
   const review = shallowRef<{ ids: string[]; images: Record<string, string> } | null>(null)
   const error = ref('')
   const preparing = ref(false)
-  let stopRequested = false
-  let wakeSleep: (() => void) | undefined
+  /** 每次运行独立的停止开关：新运行不会把旧运行的“停止”重置掉。 */
+  let session: { stopped: boolean; wake?: () => void } | undefined
+  let runFinished: Promise<void> | undefined
   let reviewResolve: ((value: 'approved' | 'stopped') => void) | undefined
   let liveDeps: Parameters<typeof runAuto>[1] | undefined
   // runAuto 原地修改这份状态；事件处理必须改同一个对象，run.value 只是界面快照。
@@ -127,12 +129,20 @@ export function useManjuAuto(options: {
     const owner = options.owner()
     const current = draft.value
     if (!owner || !current || run.value?.status === 'running') return
-    const state = resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)
+    if (runFinished) {
+      error.value = '上一轮全自动还在收尾，请稍等几秒再续做'
+      return
+    }
+    const state = { ...(resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)), runId: crypto.randomUUID() }
     const { wikiRoot } = current
+    const mine = { stopped: false } as { stopped: boolean; wake?: () => void }
+    let claimed = false
+    session = mine
     draft.value = null
     error.value = ''
-    stopRequested = false
     run.value = state
+    let finish: () => void = () => {}
+    runFinished = new Promise(resolve => { finish = resolve })
     try {
       const [imageProfile, videoProfile] = await Promise.all([loadMediaParamProfile(state.config.imageModelId), loadMediaParamProfile(state.config.videoModelId)])
       const projectFiles = files(owner)
@@ -141,7 +151,7 @@ export function useManjuAuto(options: {
         runEpisodeText: episode => options.sendText(episodeInstruction(episode, wikiRoot)),
         readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, episode)),
         asset: createDesktopAssetDeps(owner, { imageModelId: state.config.imageModelId, ratio: state.config.ratio }, imageProfile),
-        video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio }, videoProfile),
+        video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio, resolution: state.config.videoResolution }, videoProfile),
         async concat(videos, durations, outputPath) {
           await invoke('media_concat_videos', { input: { inputs: videos, durations, outputPath: `${owner.replace(/[\\/]+$/, '')}/${outputPath}` } })
           emitEvent('project-filetree:locate', { path: outputPath, owner, refresh: true, quiet: true })
@@ -151,25 +161,38 @@ export function useManjuAuto(options: {
           return new Promise(resolve => { reviewResolve = resolve })
         },
         async save(next) {
-          run.value = { ...next, episodes: { ...next.episodes } }
+          // 第一次保存是“认领”：直接写入本轮 runId；之后每次保存才检查是否已被更新的运行接管。
+          const onDisk = claimed ? await readJson<AutoRunState>(owner, `${wikiRoot}/${AUTO_RUN_PATH}`) : undefined
+          claimed = true
+          if (onDisk?.runId && onDisk.runId !== next.runId) {
+            mine.stopped = true
+            throw new Error('已有更新的全自动运行，本轮退出')
+          }
+          if (session === mine) run.value = { ...next, episodes: { ...next.episodes } }
           await projectFiles.writeText(`${wikiRoot}/${AUTO_RUN_PATH}`, JSON.stringify(next, null, 2) + '\n')
         },
-        shouldStop: () => stopRequested,
+        shouldStop: () => mine.stopped,
         sleep: ms => new Promise(resolve => {
           const timer = setTimeout(resolve, ms)
-          wakeSleep = () => { clearTimeout(timer); resolve() }
+          mine.wake = () => { clearTimeout(timer); resolve() }
         }),
       }
       liveDeps = deps
       liveState = state
       await runAuto(state, deps)
     } catch (cause) {
-      error.value = `全自动成片已暂停：${cause instanceof Error ? cause.message : String(cause)}`
-      if (run.value) run.value = { ...run.value, status: 'stopped' }
+      if (session === mine) {
+        error.value = `全自动成片已暂停：${cause instanceof Error ? cause.message : String(cause)}`
+        if (run.value) run.value = { ...run.value, status: 'stopped' }
+      }
     } finally {
-      liveDeps = undefined
-      liveState = undefined
-      review.value = null
+      if (session === mine) {
+        liveDeps = undefined
+        liveState = undefined
+        review.value = null
+      }
+      runFinished = undefined
+      finish()
     }
   }
 
@@ -190,8 +213,8 @@ export function useManjuAuto(options: {
   }
 
   function stop() {
-    stopRequested = true
-    wakeSleep?.()
+    if (session) session.stopped = true
+    session?.wake?.()
     if (review.value) {
       review.value = null
       reviewResolve?.('stopped')

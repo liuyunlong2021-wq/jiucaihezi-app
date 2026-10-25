@@ -35,3 +35,8 @@ test('remote capability profile uses its schema keys, image slot name, duration 
     { prompt: 'p', ratio: '9:16', reference_images: ['/a.png'], duration: 10 })
   assert.throws(() => buildMediaParams(profile, { prompt: 'p', ratio: '9:16', images: ['1', '2', '3', '4', '5'] }), /上限 4/)
 })
+
+test('sends the chosen resolution only to models that declare a resolution field', () => {
+  assert.equal(buildMediaParams(spec(['ratio', 'resolution']), { prompt: 'p', ratio: '9:16', resolution: '480P' }).resolution, '480P')
+  assert.equal(buildMediaParams(spec(['ratio']), { prompt: 'p', ratio: '9:16', resolution: '480P' }).resolution, undefined)
+})

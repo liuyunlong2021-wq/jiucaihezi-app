@@ -16,6 +16,9 @@
       <label class="manju-auto-row"><span>视频模型</span>
         <select v-model="videoModelId"><option v-for="model in draft.videoModels" :key="model.id" :value="model.id">{{ model.label }}{{ model.price !== undefined ? ` · ${model.price}` : '' }}</option></select>
       </label>
+      <label v-if="videoModel?.resolutions?.length" class="manju-auto-row"><span>视频分辨率</span>
+        <select v-model="videoResolution"><option v-for="resolution in videoModel.resolutions" :key="resolution" :value="resolution">{{ resolution }}{{ priceForResolution(videoModel.price, resolution) ? ` · ¥${priceForResolution(videoModel.price, resolution)}` : '' }}</option></select>
+      </label>
       <div class="manju-auto-row"><span>比例</span><span>{{ draft.ratio }}（项目风格已确认）· Seedance</span></div>
       <label class="manju-auto-row"><span>单集预算</span><span><input v-model="budget" type="number" min="0" step="1" placeholder="不限"> 元</span></label>
       <label class="manju-auto-row manju-auto-check"><input v-model="reviewFirst" type="checkbox">第 1 集资产出齐后暂停审图</label>
@@ -55,7 +58,7 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 import type { ManjuAutoDraft } from '@/composables/useManjuAuto'
-import { estimateUnitCost, type AutoRunConfig, type AutoRunState, type EpisodePhase } from '@/runtime/manjuAuto/autoRunner'
+import { estimateUnitCost, priceForResolution, type AutoRunConfig, type AutoRunState, type EpisodePhase } from '@/runtime/manjuAuto/autoRunner'
 
 const props = defineProps<{
   draft: ManjuAutoDraft | null
@@ -70,6 +73,8 @@ const imageModelId = ref('')
 const videoModelId = ref('')
 const budget = ref<number | string>('')
 const reviewFirst = ref(true)
+const videoResolution = ref('')
+const resolutionHeight = (value: string) => Number(value.replace(/\D/g, '')) || Infinity
 
 watch(() => props.draft, draft => {
   if (!draft) return
@@ -89,10 +94,15 @@ const resumeEpisode = computed(() => {
 })
 const imageModel = computed(() => props.draft?.imageModels.find(model => model.id === imageModelId.value))
 const videoModel = computed(() => props.draft?.videoModels.find(model => model.id === videoModelId.value))
+// 换模型时默认最低分辨率（测试最省钱）；分档价格按所选分辨率参与预算。
+watch(videoModel, model => {
+  videoResolution.value = model?.resolutions?.slice().sort((a, b) => resolutionHeight(a) - resolutionHeight(b))[0] || ''
+}, { immediate: true })
+const videoPrice = computed(() => priceForResolution(videoModel.value?.price, videoResolution.value) ?? videoModel.value?.price)
 const priceNote = computed(() => {
-  const known = estimateUnitCost(imageModel.value?.price) !== undefined && estimateUnitCost(videoModel.value?.price) !== undefined
+  const known = estimateUnitCost(imageModel.value?.price) !== undefined && estimateUnitCost(videoPrice.value) !== undefined
   return known
-    ? `生图 ${imageModel.value!.price}，视频 ${videoModel.value!.price}。每集按新增资产与片段时长实时估算，超过单集预算即暂停。`
+    ? `生图 ${imageModel.value!.price}，视频 ${videoPrice.value}。每集按新增资产与片段时长实时估算，超过单集预算即暂停。`
     : '所选模型价格无法自动估算，单集预算不会拦截，请留意用量。'
 })
 const canStart = computed(() => Boolean(props.draft?.ratio && episodes.value.length && imageModelId.value && videoModelId.value))
@@ -110,7 +120,8 @@ function startNew(resume = false) {
     review: reviewFirst.value,
     budgetPerEpisode: budget.value !== '' && Number.isFinite(cap) && cap > 0 ? cap : undefined,
     imagePrice: imageModel.value?.price,
-    videoPrice: videoModel.value?.price,
+    videoResolution: videoResolution.value || undefined,
+    videoPrice: videoPrice.value,
   }, resume)
 }
 

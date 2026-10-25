@@ -194,3 +194,15 @@ test('retrying a finally-failed asset on a later run never reuses an earlier req
   const ids = submits.map(item => item.requestId)
   assert.equal(new Set(ids).size, ids.length)
 })
+
+test('interrupted tasks (nobody tracking them after an app restart) resubmit immediately without using attempts', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'interrupted' })
+  tasks.set('t2', { status: 'success', localPath: '/p/b.png' })
+  deps.sleep = async () => { tasks.set('t3', { status: 'success', localPath: '/p/a.png' }) }
+  const result = await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 1000, pollMs: 1 })
+  assert.equal(result.status, 'ready')
+  assert.equal(submits.length, 3)
+  assert.equal(registry(fs)['角色/莫甘娜'].attempts, 1)
+})

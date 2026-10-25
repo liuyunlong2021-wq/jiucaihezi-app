@@ -7,7 +7,7 @@
  * 运行状态落盘在 Wiki，停止后可从原集续做；花钱的参数只来自启动确认卡写入的 config。
  */
 import { assetsToSubmit, awaitEpisodeAssets, lockAssets, submitEpisodeAssets, type AssetSchedulerDeps, type EpisodeCheckpoint } from './assetScheduler'
-import { checkEpisodeVideos, submitEpisodeVideos, type VideoCheckpoint, type VideoSchedulerDeps } from './videoScheduler'
+import { checkEpisodeVideos, retryFailedVideos, submitEpisodeVideos, type VideoCheckpoint, type VideoSchedulerDeps } from './videoScheduler'
 
 export const AUTO_RUN_PATH = '制作流水线/全自动运行.json'
 const ASSET_GATE = { timeoutMs: 30 * 60_000, pollMs: 30_000 }
@@ -19,6 +19,8 @@ export interface AutoRunConfig {
   imageModelId: string
   videoModelId: string
   ratio: string
+  /** 视频分辨率（如 480P）；影响计费，确认卡默认最低档。 */
+  videoResolution?: string
   /** 第 1 集资产出齐后暂停审图（2026-10-25 用户确认默认开启）。 */
   review: boolean
   /** 单集预算上限（元）；价格无法估算时不拦截，由确认卡提示。 */
@@ -39,6 +41,8 @@ export interface EpisodeRunState {
 
 export interface AutoRunState {
   version: 1
+  /** 每次开始/续做生成新的 ID；落盘时发现记录已属于更新的运行就退出，避免两个运行互相覆盖。 */
+  runId?: string
   config: AutoRunConfig
   status: 'running' | 'blocked' | 'stopped' | 'done'
   reviewed: boolean
@@ -74,10 +78,18 @@ export function resumeAutoRun(saved: AutoRunState, config: AutoRunConfig): AutoR
   return { ...saved, config: { ...config, episodes: saved.config.episodes } }
 }
 
+/** 分档价格（如“480P ¥0.2/秒 · 720P ¥0.4/秒”）取所选分辨率那一档；不分档返回 undefined。 */
+export function priceForResolution(price: number | string | undefined, resolution: string | undefined): string | undefined {
+  if (typeof price !== 'string' || !resolution) return undefined
+  const height = resolution.replace(/p$/i, '')
+  const match = price.match(new RegExp(`(?:^|\\s|·)${height}\\s*[pP]\\s*[¥￥]?\\s*(\\d+(?:\\.\\d+)?)\\s*元?\\s*\\/\\s*(秒|条|张|次|个)`))
+  return match ? `${match[1]}/${match[2]}` : undefined
+}
+
 /** 价格换算：数字或“x/条|张|次”按件，“x/秒”乘以秒数；其他写法无法估算。 */
 export function estimateUnitCost(price: number | string | undefined, seconds = 1): number | undefined {
   if (typeof price === 'number') return price
-  const match = String(price ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*元?\s*(?:\/\s*(秒|s|条|张|次|个))?$/)
+  const match = String(price ?? '').trim().match(/^[¥￥]?\s*(\d+(?:\.\d+)?)\s*元?\s*(?:\/\s*(秒|s|条|张|次|个))?$/)
   if (!match) return undefined
   return Number(match[1]) * (match[2] === '秒' || match[2] === 's' ? seconds : 1)
 }
@@ -200,6 +212,13 @@ export async function runAuto(state: AutoRunState, deps: AutoRunnerDeps): Promis
     await checkVideos(state, deps)
   }
 
+  // 续做时已在出片中的集：上次最终失败的片段重新给一轮机会，然后先检查一次再等（中断任务马上重提）。
+  for (const [key, episode] of Object.entries(state.episodes)) {
+    if (episode.phase !== 'videos') continue
+    const checkpoint = await deps.readCheckpoint(Number(key))
+    if (checkpoint) await retryFailedVideos(deps.wikiRoot, checkpoint, deps.video)
+  }
+  await checkVideos(state, deps)
   while (Object.values(state.episodes).some(episode => episode.phase === 'videos')) {
     if (deps.shouldStop()) { state.status = 'stopped'; await deps.save(state); return state }
     await deps.sleep(VIDEO_CHECK_MS)

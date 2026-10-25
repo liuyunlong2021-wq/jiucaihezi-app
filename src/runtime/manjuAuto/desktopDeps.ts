@@ -1,4 +1,5 @@
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
+import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import type { AssetSchedulerDeps, WikiTaskDeps } from './assetScheduler'
 import { buildMediaParams, profileFromCapability, profileFromSpec, type MediaParamProfile } from './mediaParams'
@@ -14,7 +15,18 @@ function wikiTaskDeps(owner: string): WikiTaskDeps {
     async exists(path) { return (await service.list(owner)).some(resource => !resource.isDirectory && String(resource.path) === path) },
     async getTask(taskId) {
       try {
-        return await runCreationOperation('get_creation_task', { taskId }) as { status: string; localPath?: string; error?: string }
+        const task = await runCreationOperation('get_creation_task', { taskId }) as { status: string; localPath?: string; error?: string }
+        if (task.status !== 'pending' && task.status !== 'running') return task
+        // App 重启后：有上游任务号的继续查结果（不重提、不多花钱）；拿不到上游任务号的判为中断，由调度器重提。
+        const store = useMediaTaskStore()
+        if (store.isTaskActive(taskId)) return task
+        const raw = store.getTask(taskId)
+        if (raw?.planSnapshot?.protocol) return task // 统一合同任务由 get_creation_task 自己恢复
+        if (raw && store.canRefreshTaskResult(raw)) {
+          void store.refreshTaskResult(taskId).catch(() => {})
+          return task
+        }
+        return { status: 'interrupted', error: '任务中断：App 重启时尚未拿到上游任务号，需要重新提交' }
       } catch (error) {
         if (error instanceof Error && error.message === '未找到创作任务') return undefined
         throw error
@@ -46,11 +58,20 @@ export function createDesktopAssetDeps(owner: string, config: { imageModelId: st
   }
 }
 
-export function createDesktopVideoDeps(owner: string, config: { videoModelId: string; ratio: string }, profile: MediaParamProfile): VideoSchedulerDeps {
-  const params = (input: { prompt: string; images: string[]; durationSeconds: number }) => buildMediaParams(profile, { ...input, ratio: config.ratio })
+export function createDesktopVideoDeps(owner: string, config: { videoModelId: string; ratio: string; resolution?: string }, profile: MediaParamProfile): VideoSchedulerDeps {
+  const params = (input: { prompt: string; images: string[]; durationSeconds: number }) => buildMediaParams(profile, { ...input, ratio: config.ratio, resolution: config.resolution })
   return {
     ...wikiTaskDeps(owner),
     checkVideo: input => { params(input) },
+    // 依次提交：等上一段参考图上传完、拿到上游任务号（或已结束）再交下一段，最多等 10 分钟。
+    async waitSubmitted(taskId) {
+      const deadline = Date.now() + 10 * 60_000
+      while (Date.now() < deadline) {
+        const task = await runCreationOperation('get_creation_task', { taskId }).catch(() => undefined) as { status?: string; submitted?: boolean } | undefined
+        if (!task || task.submitted || !['pending', 'running'].includes(String(task.status))) return
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      }
+    },
     submitVideo: ({ requestId, ...input }) => submit(owner, config.videoModelId, requestId, params(input)),
   }
 }

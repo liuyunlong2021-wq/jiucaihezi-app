@@ -28,6 +28,8 @@ const pendingSubmissions = new Map<string, { fingerprint: string; promise: Promi
 let sceneRecorder: ((document: Scene3DDocument) => Promise<Blob>) | undefined
 /** 按查询参数缓存上一次成功的目录（dynamic 或 legacy），网络抖动时沿用（分页/搜索各自一份）。 */
 const lastDynamicCatalogs = new Map<string, Record<string, unknown>>()
+/** 本次运行中服务端已明确答复“尚无动态合同”（404/405）：之后网络抖动按 legacy 放行，而不是降级为只允许本机 ComfyUI。 */
+let serverIsLegacy = false
 
 export function setHarnessSceneRecorder(recorder?: (document: Scene3DDocument) => Promise<Blob>) {
   sceneRecorder = recorder
@@ -75,6 +77,8 @@ function publicTask(task: MediaTask) {
     downloadTotal: task.downloadTotal,
     error: task.errorMsg || task.error?.message,
     requestId: task.planSnapshot?.protocol?.requestId,
+    /** 已拿到上游任务号（参考图已上传、任务已交给模型）。 */
+    submitted: Boolean(task.upstreamTaskId),
     capabilityId: task.planSnapshot?.protocol?.capabilityId,
     revision: task.planSnapshot?.protocol?.revision,
     canvasWriteStatus: task.canvasWriteStatus,
@@ -171,10 +175,12 @@ async function creationModels(params: Record<string, unknown>) {
     // 一次超时不应把云端模型降级成“只允许本机 ComfyUI”。权限类 HTTP 错误仍按原规则收窄。
     const cached = lastDynamicCatalogs.get(catalogKey)
     if (!(error instanceof CreationProtocolError) && cached) return { ...cached, warning: '远程目录暂时不可达，沿用上次目录' }
-    if (!(error instanceof CreationProtocolError) || ![404, 405].includes(error.status)) return { source: 'local', models: listCreationModels({ source: 'local-comfy', includeDisabled: true }), warning: error instanceof Error ? error.message : '远程目录暂不可用', next_cursor: null }
+    const networkOnLegacy = !(error instanceof CreationProtocolError) && serverIsLegacy
+    if (!networkOnLegacy && (!(error instanceof CreationProtocolError) || ![404, 405].includes(error.status))) return { source: 'local', models: listCreationModels({ source: 'local-comfy', includeDisabled: true }), warning: error instanceof Error ? error.message : '远程目录暂不可用', next_cursor: null }
     const models = listCreationModels({ includeDisabled: true }).filter(model => model.contractStatus !== 'broken')
     const offset = Math.max(0, Number(params.cursor) || 0), limit = Math.min(100, Math.max(1, Number(params.limit) || 20))
     const filtered = models.filter(model => !params.query || `${model.id} ${model.label}`.toLowerCase().includes(String(params.query).toLowerCase()))
+    serverIsLegacy = true
     const legacy = { source: 'legacy', warning: '服务端尚未发布动态合同，仅现有适配可执行', models: filtered.slice(offset, offset + limit), next_cursor: offset + limit < filtered.length ? String(offset + limit) : null }
     lastDynamicCatalogs.set(catalogKey, legacy)
     return legacy
