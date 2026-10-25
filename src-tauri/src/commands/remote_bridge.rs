@@ -469,7 +469,7 @@ fn start_bridge(app: &AppHandle, state: &RemoteBridgeState) -> Result<RemoteBrid
     // 地址会原样进一次性 offer，手机端拿它直接 TcpStream::connect，
     // 所以必须是裸 host:port：带任何 scheme 都会让 getaddrinfo 报
     // "nodename nor servname provided"。
-    let addresses = listener_addresses(&local_ip()?, bonjour_host().as_deref(), port);
+    let addresses = listener_addresses(&listen_ips()?, bonjour_host().as_deref(), port);
     save_bridge_settings(
         &settings_path,
         &RemoteBridgeSettings {
@@ -532,8 +532,8 @@ fn bind_listener(port: Option<u16>) -> Result<TcpListener, String> {
     TcpListener::bind("0.0.0.0:0").map_err(|error| error.to_string())
 }
 
-fn listener_addresses(ip: &str, bonjour: Option<&str>, port: u16) -> Vec<String> {
-    let mut addresses = vec![format!("{ip}:{port}")];
+fn listener_addresses(ips: &[String], bonjour: Option<&str>, port: u16) -> Vec<String> {
+    let mut addresses: Vec<String> = ips.iter().map(|ip| format!("{ip}:{port}")).collect();
     if let Some(name) = bonjour {
         addresses.push(format!("{name}.local:{port}"));
     }
@@ -1250,6 +1250,69 @@ fn bridge_log(message: &str) {
 #[cfg(not(debug_assertions))]
 fn bridge_log(_message: &str) {}
 
+/// 手机能到达的本机地址。默认出口不可信：Clash/Surge 的 TUN、公司 VPN 都会把它改成
+/// 虚拟网卡，手机连那个地址只会超时。只在物理网卡上都找不到局域网地址时才退回默认出口。
+fn listen_ips() -> Result<Vec<String>, String> {
+    let default_ip = local_ip().ok().and_then(|ip| ip.parse().ok());
+    let interfaces = local_ip_address::list_afinet_netifas().unwrap_or_default();
+    let ips = lan_ipv4s(&interfaces, default_ip);
+    if !ips.is_empty() {
+        return Ok(ips);
+    }
+    local_ip().map(|ip| vec![ip])
+}
+
+/// 物理网卡上的私网 IPv4；默认出口若正好是其中之一则排在最前。
+fn lan_ipv4s(
+    interfaces: &[(String, std::net::IpAddr)],
+    default_ip: Option<std::net::IpAddr>,
+) -> Vec<String> {
+    const VIRTUAL: &[&str] = &[
+        "utun",
+        "tun",
+        "tap",
+        "ipsec",
+        "ppp",
+        "wg",
+        "bridge",
+        "vmnet",
+        "vboxnet",
+        "docker",
+        "veth",
+        "awdl",
+        "llw",
+        "mihomo",
+        "meta",
+        "clash",
+        "vethernet",
+        "tailscale",
+        "wireguard",
+        "zerotier",
+        "virtualbox",
+        "vmware",
+        "hyper-v",
+    ];
+    let mut ips: Vec<std::net::Ipv4Addr> = Vec::new();
+    for (name, ip) in interfaces {
+        let std::net::IpAddr::V4(ip) = ip else {
+            continue;
+        };
+        let name = name.to_ascii_lowercase();
+        if !ip.is_private() || VIRTUAL.iter().any(|prefix| name.starts_with(prefix)) {
+            continue;
+        }
+        if !ips.contains(ip) {
+            ips.push(*ip);
+        }
+    }
+    if let Some(std::net::IpAddr::V4(default)) = default_ip
+        && let Some(index) = ips.iter().position(|ip| *ip == default)
+    {
+        ips[..=index].rotate_right(1);
+    }
+    ips.into_iter().map(|ip| ip.to_string()).collect()
+}
+
 fn local_ip() -> Result<String, String> {
     let socket = UdpSocket::bind("0.0.0.0:0").map_err(|error| error.to_string())?;
     socket
@@ -1811,12 +1874,60 @@ mod tests {
     #[test]
     fn listener_addresses_put_the_ip_first_then_the_bonjour_name() {
         assert_eq!(
-            listener_addresses("192.168.1.2", Some("Mac"), 9527),
+            listener_addresses(&["192.168.1.2".into()], Some("Mac"), 9527),
             vec!["192.168.1.2:9527".to_string(), "Mac.local:9527".to_string()]
         );
         assert_eq!(
-            listener_addresses("192.168.1.2", None, 9527),
+            listener_addresses(&["192.168.1.2".into()], None, 9527),
             vec!["192.168.1.2:9527".to_string()]
+        );
+    }
+
+    fn interface(name: &str, ip: &str) -> (String, std::net::IpAddr) {
+        (name.to_string(), ip.parse().unwrap())
+    }
+
+    /// 真机 2026-10-25：Clash Verge TUN 把默认出口改成 utun10（10.150.83.36），
+    /// 配对码写了这个地址，手机只能等到超时。Wi-Fi 上的 192.168.0.26 才是手机能到的地方。
+    #[test]
+    fn a_vpn_tunnel_default_route_does_not_hide_the_wifi_address() {
+        let interfaces = [
+            interface("lo0", "127.0.0.1"),
+            interface("en0", "192.168.0.26"),
+            interface("utun10", "10.150.83.36"),
+            interface("bridge100", "192.168.64.1"),
+            interface("en0", "fe80::1"),
+        ];
+        assert_eq!(
+            lan_ipv4s(&interfaces, "10.150.83.36".parse().ok()),
+            vec!["192.168.0.26".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_default_route_lan_address_comes_first() {
+        let interfaces = [
+            interface("en0", "192.168.0.26"),
+            interface("en7", "10.0.0.5"),
+            interface("en8", "8.8.8.8"),
+        ];
+        assert_eq!(
+            lan_ipv4s(&interfaces, "10.0.0.5".parse().ok()),
+            vec!["10.0.0.5".to_string(), "192.168.0.26".to_string()]
+        );
+    }
+
+    #[test]
+    fn windows_tunnel_adapters_are_skipped_by_name() {
+        let interfaces = [
+            interface("Mihomo", "198.18.0.1"),
+            interface("Meta", "10.150.0.1"),
+            interface("vEthernet (WSL)", "172.20.0.1"),
+            interface("WLAN", "192.168.1.8"),
+        ];
+        assert_eq!(
+            lan_ipv4s(&interfaces, None),
+            vec!["192.168.1.8".to_string()]
         );
     }
 }

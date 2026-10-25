@@ -43,6 +43,7 @@ snow = "0.10"
 dirs-next = "2.0"
 notify = "8.2"
 tauri-plugin-opener = "2.5.4"
+local-ip-address = "0.6"
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 # 单实例：没有它，双击图标会起第二个完整进程（各自一份 runner 与 Rust 全局状态）。
