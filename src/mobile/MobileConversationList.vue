@@ -58,7 +58,7 @@ onMounted(() => { void load() })
 
     <div class="body">
       <button type="button" class="follow" :class="{ active: following }" @click="$emit('follow')">
-        <JcIcon name="desktop_windows" />
+        <JcIcon name="computer" />
         <span>跟随电脑当前对话</span>
       </button>
 
