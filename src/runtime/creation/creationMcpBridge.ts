@@ -313,7 +313,8 @@ async function handleBridgeRequestUnchecked(operation: string, params: Record<st
     }
     if (context.contextVersion !== currentContext().contextVersion) throw new Error('项目或画布已切换，请重新获取创作上下文')
     const type = plan.protocol?.outputModality || mediaTypeFor(modelId)
-    const canvasTarget = context.canvas && context.project.owner && (!directory || directory === context.project.owner)
+    // 漫剧全自动成片批量出图时传 canvas:false，不把几十张资产图塞进用户画布。
+    const canvasTarget = params.canvas !== false && context.canvas && context.project.owner && (!directory || directory === context.project.owner)
       && (plan.protocol ? plan.protocol.declaredOutputModalities.some(modality => ['image', 'video', 'audio'].includes(modality)) : type !== 'model3d' && type !== 'text' && type !== 'file')
       ? { canvasId: context.canvas.id, canvasPath: context.canvas.path, owner: context.project.owner,
           operation: 'append' as const, referenceNodeIds: [],
@@ -366,5 +367,8 @@ export async function registerCreationMcpBridge(): Promise<() => void> {
     )
   })
 }
+
+/** 宿主内部调用（漫剧全自动成片调度器），与 MCP 请求走同一校验与去重。 */
+export const runCreationOperation = handleBridgeRequest
 
 export const __creationMcpBridgeForTests = { currentContext, handleBridgeRequest, submissions, resolveReferenceImages, harnessToolCatalog }

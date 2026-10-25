@@ -3056,3 +3056,5 @@
 - P0 已实施（只改文字流水线，不调用付费接口）：`pipeline_checkpoint` 的 assets 阶段自动登记角色/场景/道具资产（角色优先三视图格式提示词，记录路径与 hash）；Seedance 的 prompts 阶段每段必须提供 `refs`，程序校验数量等于 @图 行数、均为已登记资产、第 N 个实体名出现在 @图N 行。`jc-manju-pipeline` Skill 同步要求。
 - 代码阅读确认：`submit_creation_task` 的 requestId 去重表只在内存里，App 重启后只对动态能力（带 protocol）生效，静态模型可能被重复提交。留待 P1 由调度器按持久化登记去重。未做运行时复现。
 - 验证：`wiki-artifact-writer`、`production-capabilities` 等 node 测试全部通过。H3 的 refs 尚未纳入；真实模型、安装包未验收。
+
+- 同日 P1 调度内核：新增 `src/runtime/manjuAuto/assetScheduler.ts` 与桌面适配，持久化资产注册表去重、重试 2 次、审核不重试、审图锁定；桥导出 `runCreationOperation` 并支持 `canvas:false`。尚未接入触发，等全自动入口 UI；未做真实生图验证。
