@@ -449,7 +449,7 @@ test('actual SDK resumes a stopped pipeline until verified completion for both m
     const path = `wiki/剧本/视频提示词/${model}/第1集001视频提示词.md`
     if (model === 'Seedance') save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '# 第一段\n没有参考图，省略图号')
     save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, '古装宗门云海中的电影片段。\n@图1：山门，青灰石门与云海。\n山门位于画面中央，@图1石台通向门内。\n【全局设定】\n日间，9:16二维动画，左上日光。\n【时间戳剧本分镜】\n镜头1【0—10秒】：【建立】 ｜ 全景，固定 ｜ @图1山门空镜。\n【全局补充】\n保持光向一致，无字幕和BGM。')
-    checkpoint({ stage: 'prompts', outputs: [path], segments: [{ path, start_seconds: 0, end_seconds: 10 }] })
+    checkpoint({ stage: 'prompts', outputs: [path], segments: [{ path, start_seconds: 0, end_seconds: 10, ...(model === 'Seedance' && { refs: ['场景/山门'] }) }] })
     checkpoint({ stage: 'complete', outputs: [] })
     f.plan(calls)
     await f.run('manju', { sessionId: 'pipeline-both-models' })

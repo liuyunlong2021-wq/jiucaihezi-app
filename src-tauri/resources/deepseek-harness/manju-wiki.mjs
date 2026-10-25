@@ -851,6 +851,19 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
     if (/状态：待填写/.test(text) || !/\d+(?:\.\d+)?\s*:\s*\d+/.test(text)) throw new Error('影片比例与风格尚未填写')
   }
   if (input.stage === 'assets' && input.outputs.some(path => !path.startsWith(`${wikiRoot}/资产/`))) throw new Error('资产阶段只能登记资产文档')
+  // 资产登记：全自动成片据此生图、按 @图 顺序取参考图。角色优先三视图格式提示词。
+  let assets = state.assets || {}
+  if (input.stage === 'assets') {
+    assets = {}
+    const kinds = { 角色: 'character', 场景: 'scene', 道具: 'prop' }
+    for (const path of input.outputs) {
+      const match = path.slice(wikiRoot.length + 1).match(/^资产\/(角色|场景|道具)\/([^/]+?)(?:\.md|\/(角色生图格式提示词|角色生图提示词|场景生图提示词|道具生图提示词)\.md)$/)
+      if (!match) continue
+      const id = `${match[1]}/${match[2]}`
+      if (assets[id]?.prompt_path.endsWith('/角色生图格式提示词.md')) continue
+      assets[id] = { kind: kinds[match[1]], prompt_path: path, prompt_hash: outputs[path] }
+    }
+  }
   const duration = input.duration_seconds ?? state.duration_seconds
   if (stage >= 4 && (!Number.isFinite(duration) || duration <= 0)) throw new Error('工程阶段必须提供有效总时长预算duration_seconds')
   if (input.stage === 'engineering') {
@@ -870,6 +883,17 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
         || segment.end_seconds - segment.start_seconds > (args.video_model === 'H3' ? 15 : 30)) throw new Error('片段命名、连续时间或30/15秒上限不符合流水线合同')
       await hashFile(path)
       if (stage === 5 && !outputs[path]) throw new Error('片段必须包含在本阶段outputs中')
+      if (stage === 5 && args.video_model === 'Seedance' && Object.keys(assets).length) {
+        const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
+        const lines = [...text.matchAll(/^@图\d+[：:]([^\n]*)$/gm)].map(match => match[1])
+        if (!Array.isArray(segment.refs)) throw new Error(`片段${index + 1}缺少refs：按@图1起的顺序列出资产ID，例如["角色/某人","场景/某地"]`)
+        if (segment.refs.length !== lines.length) throw new Error(`片段${index + 1}的refs数量(${segment.refs.length})与@图行数量(${lines.length})不一致`)
+        for (const [i, ref] of segment.refs.entries()) {
+          if (!assets[ref]) throw new Error(`片段${index + 1}的refs引用了未登记资产：${ref}`)
+          const name = ref.split('/')[1]
+          if (!lines[i].includes(name)) throw new Error(`片段${index + 1}的@图${i + 1}行未写${name}，refs顺序须与@图顺序一致`)
+        }
+      }
       end = segment.end_seconds
     }
     if (Math.abs(end - duration) > 0.01) throw new Error('片段没有覆盖整集工程时长')
@@ -877,7 +901,7 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   files[input.stage] = outputs
   return JSON.stringify({ stage: input.stage, status: input.stage === 'complete' ? 'completed' : input.status || 'running', reason: input.stage === 'complete' ? '' : input.reason || '',
     video_model: args.video_model, episode_number: args.episode_number, source_path: source, source_hash: sourceHash,
-    files, duration_seconds: duration, segments }, null, 2) + '\n'
+    files, assets, duration_seconds: duration, segments }, null, 2) + '\n'
 }
 
 const adaptationStates = new WeakMap()
@@ -1093,7 +1117,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
         enum: kinds,
         description: '产物类型，决定唯一保存目录。',
       },
-      content: { type: 'string', description: '完成的正文；adaptation_cut/checkpoint按短剧流水线Skill传JSON；pipeline_checkpoint传JSON：stage、outputs路径数组、plan的source_path、engineering的duration_seconds、prompts的segments[{path,start_seconds,end_seconds}]。' },
+      content: { type: 'string', description: '完成的正文；adaptation_cut/checkpoint按短剧流水线Skill传JSON；pipeline_checkpoint传JSON：stage、outputs路径数组、plan的source_path、engineering的duration_seconds、prompts的segments[{path,start_seconds,end_seconds,refs}]，Seedance的refs按@图顺序列资产ID如"角色/某人"。' },
       source_block: { type: 'integer', description: 'source_material 必填，当前用户消息文本块序号，从0开始。' },
       source_start: { type: 'string', description: '来源开始处至少12字符的唯一原文，包含在保存内容中。' },
       source_end: { type: 'string', description: '来源结束处至少12字符的唯一原文，包含在保存内容中。' },

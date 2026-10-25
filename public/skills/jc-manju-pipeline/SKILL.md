@@ -32,7 +32,7 @@ description: 将用户提供的分集剧本与已确认的影片比例和风格�
 - plan：`{"stage":"plan","source_path":"项目内真实剧本路径","outputs":[]}`。
 - 中间阶段：`{"stage":"materials","outputs":["wiki/项目资料/故事梗概.md", "其他真实路径"]}`；每阶段只登记已成功写入的实际文件，不传示例占位。
 - engineering另传 `duration_seconds`（整集时间预算）。
-- prompts另传 `segments:[{"path":"wiki/剧本/视频提示词/Seedance/第1集001视频提示词.md","start_seconds":0,"end_seconds":28}, ...]`，使用整集连续时间、实际模型/集数/序号，末段终点等于工程总时长；outputs包括每段视频提示词。
+- prompts另传 `segments:[{"path":"wiki/剧本/视频提示词/Seedance/第1集001视频提示词.md","start_seconds":0,"end_seconds":28,"refs":["角色/顾云舟","场景/石道"]}, ...]`，使用整集连续时间、实际模型/集数/序号，末段终点等于工程总时长；outputs包括每段视频提示词。Seedance每段必传refs：按@图1起的顺序列出资产ID（`角色|场景|道具/实体名`，即assets阶段登记的资产），数量等于本段@图行数，第N个ID的实体名须出现在@图N行；refs只记在进度里，不写进提示词正文。
 - complete：`{"stage":"complete","outputs":[]}`，其他事实由程序继承校验，不手造files或source_hash；程序将最终status写为completed，不能同时blocked。
 
 程序拒绝跳阶段、缺文件、上游已变化、时长超限与片段漏覆盖；被拒绝后修复具体问题再试，不能以普通write篡改进度绕过校验。若缺资料不能继续，以当前已完成阶段的outputs记录 `status:"blocked", reason:"具体缺项"`，然后说明暂停原因。用户取消立即停止，重新明确继续后才恢复。
