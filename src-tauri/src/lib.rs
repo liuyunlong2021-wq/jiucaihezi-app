@@ -1153,7 +1153,6 @@ mod tests {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// 每个工作台窗口都要装的初始化脚本。
 ///
 /// 单独抽出来是因为主窗口与「在新窗口打开工作区」必须装同一份 —— NewAPI 登录回调的
@@ -1486,6 +1485,7 @@ fn focus_existing_window(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "ios")]
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -1559,19 +1559,22 @@ pub fn run() {
     // 只能在移动目标注册。手机控制器靠它扫配对二维码。
     #[cfg(any(target_os = "ios", target_os = "android"))]
     let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
-    let app = builder
+    let builder = builder
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() != "jc:new-window" {
-                return;
-            }
-            // 菜单是应用级的（`app.set_menu`），它需要一个前端来调 Rust 建窗。
-            // 转给**聚焦窗口**：用户点菜单时的那个窗口最可能是他正在看的那个。
-            if let Some(window) = focused_window(app) {
-                let _ = window.emit("jc:new-window", ());
-            }
-        })
+        .plugin(tauri_plugin_sql::Builder::default().build());
+    // 应用菜单只在桌面存在；移动目标的 Builder 没有 on_menu_event。
+    #[cfg(desktop)]
+    let builder = builder.on_menu_event(|app, event| {
+        if event.id().as_ref() != "jc:new-window" {
+            return;
+        }
+        // 菜单是应用级的（`app.set_menu`），它需要一个前端来调 Rust 建窗。
+        // 转给**聚焦窗口**：用户点菜单时的那个窗口最可能是他正在看的那个。
+        if let Some(window) = focused_window(app) {
+            let _ = window.emit("jc:new-window", ());
+        }
+    });
+    let app = builder
         .setup(|app| {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             commands::desktop_update::setup(app.handle());

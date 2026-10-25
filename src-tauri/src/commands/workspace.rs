@@ -44,6 +44,8 @@ fn owner_of_workspace(app: &tauri::AppHandle, cwd: &str) -> Option<String> {
 /// 把焦点还给某个窗口 —— 「已经开过」时唯一正确的动作（对齐 VS Code）。
 fn focus_window(app: &tauri::AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
+        // 移动端没有最小化的窗口，也没有这个 API。
+        #[cfg(desktop)]
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
