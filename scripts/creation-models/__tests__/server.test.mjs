@@ -275,3 +275,56 @@ test('calibrated yihong, yuanliu and FK official routes match exact public chann
     assert.equal(buildCreationModelAvailability([]).find(item => item.id === id)?.status, 'disabled')
   }
 })
+
+test('插件面板目录：只按标记截取 JSON，不执行插件代码', async () => {
+  const { extractPluginCatalog } = await import('../server.mjs')
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../../../newapi-plugins/fk.plugin.js', import.meta.url), 'utf8')
+  const { catalog } = await import('../../../newapi-plugins/fk.plugin.js')
+  assert.deepEqual(extractPluginCatalog(source), catalog)
+  const body = /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)[1]
+  assert.deepEqual(extractPluginCatalog(body), catalog, 'SQL 已截取正文时同样可解析')
+  assert.equal(extractPluginCatalog('export const meta = {}'), null)
+  assert.equal(extractPluginCatalog('/*jc-catalog*/{"schema":"other","models":[]}/*end-jc-catalog*/'), null)
+  assert.equal(extractPluginCatalog('/*jc-catalog*/globalThis.x = 1/*end-jc-catalog*/'), null)
+})
+
+test('NewAPI 计费表达式换算为面板价格，复杂表达式返回空', async () => {
+  const { priceFromExpression } = await import('../server.mjs')
+  assert.equal(priceFromExpression('tier("base", u("calls") * 5)'), '¥5/次')
+  assert.equal(priceFromExpression('tier("base", u("seconds") * 0.2)'), '¥0.2/秒')
+  assert.equal(priceFromExpression('tier("base", u("seconds_480p") * 0.5 + u("seconds_720p") * 0.5)'), '¥0.5/秒')
+  assert.equal(priceFromExpression('tier("base", u("seconds_480p") * 0.08 + u("seconds_768p") * 0.08 + u("seconds_1080p") * 0.25)'), '480p/768p ¥0.08/秒 · 1080p ¥0.25/秒')
+  assert.equal(priceFromExpression('tier("base", u("image_count") * 0.08)'), '¥0.08/张')
+  assert.equal(priceFromExpression('u("seconds") > 0 ? tier("base", u("seconds") * 1) : tier("video_reference", u("upstream_cost_yuan"))'), '')
+  assert.equal(priceFromExpression(''), '')
+})
+
+test('目录型号随可用性下发规格，价格以 NewAPI 实际表达式为准，同名静态路由不重复', async () => {
+  const { buildCatalogModels } = await import('../server.mjs')
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../../../newapi-plugins/fk.plugin.js', import.meta.url), 'utf8')
+  const real = '特价渠道 Seedance 2.5 满血 720p（可过真人）'
+  const official = '官方渠道-Seedance 2.5 满血 720p'
+  const catalogModels = buildCatalogModels(
+    [{ key: 'fk', version: '0.5.0', catalog: /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)[1] }, { key: 'other', version: '1', catalog: null }],
+    {
+      'billing_setting.plugin_billing_expr': JSON.stringify({ [`fk::${real}`]: 'tier("base", u("calls") * 6)' }),
+      'billing_setting.billing_expr': JSON.stringify({ 'Wan 3.0 720-1080p': 'tier("base", u("seconds_720p") * 0.3 + u("seconds_1080p") * 0.4)' }),
+    },
+  )
+  assert.equal(catalogModels.length, 7)
+  const channels = [{ id: 1, name: 'fk', status: 1, baseUrl: '', models: [real, 'Wan 3.0 720-1080p'] }]
+  const models = buildCreationModelAvailability(channels, new Date('2026-10-25T00:00:00Z'), catalogModels)
+  const byId = new Map(models.map(model => [model.id, model]))
+  assert.equal(models.filter(model => model.id === 'Wan 3.0 720-1080p').length, 1)
+  assert.equal(byId.get(real).status, 'enabled')
+  assert.equal(byId.get(real).spec.channel, 'fk')
+  assert.equal(byId.get(real).spec.price, '¥6/次')
+  assert.deepEqual(byId.get(real).spec.duration, { values: [15, 30], default: 15 })
+  assert.equal(byId.get('Wan 3.0 720-1080p').spec.price, '720p ¥0.3/秒 · 1080p ¥0.4/秒')
+  assert.equal(byId.get(official).status, 'disabled')
+  assert.equal(byId.get(official).spec.price, '¥1/秒 · 视频参考 ¥31.5/百万Token')
+  assert.ok(byId.get('newapi/yihong/yh-minimax H3'), '非目录渠道保持原静态路由')
+  assert.deepEqual(buildCreationModelAvailability(channels).map(model => model.id), CREATION_MODEL_ROUTES.map(route => route.id))
+})

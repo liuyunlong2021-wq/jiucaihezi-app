@@ -72,6 +72,17 @@
 
 前端发出的 `model` 必须与 NewAPI 渠道公开模型名严格一致；若渠道模型映射将其转换为上游 ID，记录映射两端。面板标签、模型 ID、上游 ID 不得混为一谈。
 
+### 3.5 插件面板目录：只改 NewAPI 即更新面板（2026-10-25，目前仅 FK 视频）
+
+已接入目录的渠道，型号、参数和价格只在 NewAPI 侧维护，创作面板自动跟随：
+
+1. 改插件的 `export const catalog = /*jc-catalog*/{...}/*end-jc-catalog*/`。标记之间必须是纯 JSON（`schema: "jc-catalog-v1"`），每个型号写公开名 `name`、上游 ID `upstream`、`group`、`ratios`、`resolutions`、`duration`（`min/max/default` 或 `values/default`）、`refs`（images/videos/audios）、可选 `promptMax`、`billing`（second/request/token-with-video）和兜底 `price`。插件自身的校验与公开名映射都由它推导。
+2. 上传激活插件；在渠道里登记公开名、映射与计费表达式。
+3. 可用性服务 `/api/creation/models` 读取 `task_plugins` 中激活插件的目录正文和 `options` 中的 `billing_setting.plugin_billing_expr` / `billing_expr`，随可用状态下发 `spec`。线性表达式 `tier("base", u(...) * 系数 + ...)` 自动换算为面板价格；其他形状显示目录 `price`。
+4. App 启动先装上次缓存的目录，拉到新目录后替换该渠道的目录条目（注册表与执行能力表一并替换），新分组排在已知分组之后。App 只解析 JSON，不执行插件代码；只接受 `pluginCatalog.ts` 中 `CATALOG_CHANNELS` 列出的渠道，名称被非目录模型占用的型号会被忽略。
+
+仍需改 App 的情况：新增目录渠道、新的上游协议或渠道特有提交差异。打包时的内置目录直接来自 `newapi-plugins/fk.plugin.js`，服务不可用时作兜底。
+
 ### 3.4 双向核对价格
 
 至少列清三项：上游成本、用户实付价格、NewAPI 实际扣费。面板 `price` / 价格文案只是展示与客户端计划依据，不会替代服务端计费配置。单位必须一致（元/次、元/张、元/秒、token 等），并确认按实际输出量还是请求参数计费。

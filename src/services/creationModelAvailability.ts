@@ -9,6 +9,8 @@ export interface CreationModelAvailability {
   reason?: string
   lastSuccessAt?: string
   estimatedWaitSeconds?: number
+  /** 插件面板目录规格，由 remoteCreationCatalog 校验后使用。 */
+  spec?: unknown
 }
 
 interface RawAvailabilityItem {
@@ -24,6 +26,7 @@ interface RawAvailabilityItem {
   lastSuccessAt?: unknown
   estimated_wait_seconds?: unknown
   estimatedWaitSeconds?: unknown
+  spec?: unknown
 }
 
 export function normalizeCreationModelAvailability(payload: unknown): CreationModelAvailability[] {
@@ -42,6 +45,7 @@ export function normalizeCreationModelAvailability(payload: unknown): CreationMo
       reason: firstString(raw.reason, raw.message) || (String(raw.status).toLowerCase() === 'replenishing' ? '补量中' : undefined),
       lastSuccessAt: firstString(raw.lastSuccessAt, raw.last_success_at),
       estimatedWaitSeconds: firstFiniteNumber(raw.estimatedWaitSeconds, raw.estimated_wait_seconds),
+      ...(raw.spec !== undefined ? { spec: raw.spec } : {}),
     })
   }
 

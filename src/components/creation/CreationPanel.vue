@@ -4152,7 +4152,7 @@ const modelList = computed(() =>
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof modelList.value>()
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
-  // 分组顺序：不在表里的组会落到最前面（indexOf 返回 -1），新增分组必须同时补进来。
+  // 分组顺序：不在表里的组排在最后。
   // 菠萝 = 图片两项排最前；FK 图片组排在灵动前面；jc 本机整组排最后（用户 2026-10-23 决定）。
   const order = cpState.task === 'image'
     ? [
@@ -4175,7 +4175,9 @@ const modelGroups = computed(() => {
           'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
           'jc 本机',
         ]
-  return [...groups].sort(([left], [right]) => order.indexOf(left) - order.indexOf(right))
+  // 插件目录新增的分组不在表里，排到已知分组之后。
+  const rank = (family: string) => order.includes(family) ? order.indexOf(family) : order.length
+  return [...groups].sort(([left], [right]) => rank(left) - rank(right))
 })
 
 function resizePromptInput(el = promptInput.value) {

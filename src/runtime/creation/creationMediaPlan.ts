@@ -1,4 +1,5 @@
 import { getCreationModelSpec, getYihongGptImageSize } from './creationModelRegistry'
+import { isCatalogVideoModelName } from './pluginCatalog'
 import { sizeFromRatioResolution } from '@/utils/imageContracts'
 import type {
   CreationApiStyle,
@@ -34,6 +35,7 @@ export function usesNewApiContentEndpoint(
   const model = String(target.model || '').trim().toLowerCase()
   // 四个Task Plugin的成片由宿主鉴权content交付，恢复下载沿用同一判据。
   if (model.startsWith('yh-') || model.startsWith('yl_seedance-') || model.startsWith('灵动-sd') || model === 'ld-2.5特价-1-720' || model.startsWith('ft-video-v1-')) return true
+  if (isCatalogVideoModelName(model)) return true
   if ([
     'wan 3.0 720-1080p', 'fk-minimaxh3', '特价渠道 minimax h3 480p-1080p', '特价渠道 seedance 2.0 满血 480p (933)',
     '特价渠道 seedance 2.5 满血 720p', '特价渠道 seedance 2.5 满血 720p（可过真人）',

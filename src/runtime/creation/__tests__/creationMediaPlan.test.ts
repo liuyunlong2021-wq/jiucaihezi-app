@@ -1386,7 +1386,7 @@ test('FK当前Seedance型号规格与执行目录一致', () => {
     assert.deepEqual(executable.fields.find(field => field.key === 'duration')?.options, spec.fields.find(field => field.key === 'duration')?.options)
     assert.equal(spec.price, price)
     assert.doesNotMatch(displayModelPrice(spec), /上游参考/)
-    assert.ok(plugin.includes(`'${id}':`))
+    assert.ok(plugin.includes(`"upstream": "${id}"`))
     assert.ok(availability.includes(spec.label))
   }
 })

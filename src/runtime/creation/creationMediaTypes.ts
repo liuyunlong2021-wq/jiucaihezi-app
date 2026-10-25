@@ -99,6 +99,8 @@ export interface CreationModelSpec {
   mode: CreationMode
   contractStatus: CreationContractStatus
   hidden?: boolean
+  /** 插件目录型号的面板分组；有值即表示该条目由目录生成。 */
+  group?: string
   price?: number | string
   endpoint: string
   poll?: {

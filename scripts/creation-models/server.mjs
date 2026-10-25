@@ -114,39 +114,111 @@ export function parseChannelRows(text) {
     .filter(channel => Number.isFinite(channel.id))
 }
 
-export function buildCreationModelAvailability(channels, now = new Date()) {
-  return CREATION_MODEL_ROUTES.map(route => {
-    const matches = channels.filter(channel =>
-      channel.models.some(model => route.aliases.includes(model))
-    )
+const CATALOG_PATTERN = /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//
 
-    if (!matches.length) {
-      return {
-        id: route.id,
-        status: 'disabled',
-        reason: 'NewAPI 未配置该模型渠道',
-      }
-    }
+// 插件面板目录是标记包裹的纯 JSON；这里只解析数据，不执行插件代码。
+export function extractPluginCatalog(text) {
+  const raw = String(text || '')
+  const body = CATALOG_PATTERN.exec(raw)?.[1] ?? raw
+  try {
+    const catalog = JSON.parse(body)
+    return catalog?.schema === 'jc-catalog-v1' && Array.isArray(catalog.models) ? catalog : null
+  } catch {
+    return null
+  }
+}
 
-    const enabled = matches.find(channel => channel.status === 1)
-    if (enabled) {
-      return {
-        id: route.id,
-        status: 'enabled',
-        lastSuccessAt: now.toISOString(),
-      }
-    }
+const PRICE_UNITS = { calls: '次', seconds: '秒', image_count: '张' }
 
-    const autoDisabled = matches.find(channel => channel.status === 3)
-    return {
-      id: route.id,
-      status: 'disabled',
-      reason: autoDisabled ? 'NewAPI 渠道已自动禁用' : 'NewAPI 渠道未启用',
-    }
+// 只换算 tier("base", u(key) * 系数 + ...) 的线性表达式；其他形状返回空，由目录 price 兜底。
+export function priceFromExpression(expression) {
+  const body = /^\s*tier\(\s*"base"\s*,\s*(.+)\)\s*$/.exec(String(expression || ''))?.[1]
+  if (!body) return ''
+  const terms = body.split('+').map(term => /^\s*u\("([a-z0-9_]+)"\)\s*\*\s*(\d+(?:\.\d+)?)\s*$/.exec(term))
+  if (terms.some(term => !term)) return ''
+  if (terms.length === 1 && PRICE_UNITS[terms[0][1]]) return `¥${Number(terms[0][2])}/${PRICE_UNITS[terms[0][1]]}`
+  const tiers = terms.map(term => ({ resolution: /^seconds_(\w+)$/.exec(term[1])?.[1], price: Number(term[2]) }))
+  if (tiers.some(tier => !tier.resolution)) return ''
+  const groups = []
+  for (const tier of tiers) {
+    const group = groups.find(item => item.price === tier.price)
+    if (group) group.resolutions.push(tier.resolution)
+    else groups.push({ price: tier.price, resolutions: [tier.resolution] })
+  }
+  if (groups.length === 1) return `¥${groups[0].price}/秒`
+  return groups.map(group => `${group.resolutions.join('/')} ¥${group.price}/秒`).join(' · ')
+}
+
+function expressionMap(value) {
+  try {
+    const parsed = JSON.parse(String(value || '{}'))
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+// plugins: 激活插件 {key, catalog}；billing: options 表中的计费表达式 JSON。
+export function buildCatalogModels(plugins, billing = {}) {
+  const pluginExpr = expressionMap(billing['billing_setting.plugin_billing_expr'])
+  const modelExpr = expressionMap(billing['billing_setting.billing_expr'])
+  return plugins.flatMap(plugin => {
+    const catalog = extractPluginCatalog(plugin.catalog)
+    if (!catalog) return []
+    return catalog.models
+      .filter(model => typeof model?.name === 'string' && typeof model.upstream === 'string')
+      .map(model => ({
+        ...model,
+        channel: plugin.key,
+        price: priceFromExpression(pluginExpr[`${plugin.key}::${model.name}`] || modelExpr[model.name]) || model.price || '',
+      }))
   })
 }
 
-function queryChannels() {
+export function buildCreationModelAvailability(channels, now = new Date(), catalogModels = []) {
+  const catalogIds = new Set(catalogModels.map(model => model.name))
+  const routes = [
+    ...catalogModels.map(spec => ({ id: spec.name, aliases: [spec.name, spec.upstream], spec })),
+    ...CREATION_MODEL_ROUTES.filter(route => !catalogIds.has(route.id)),
+  ]
+  return routes.map(route => withSpec(route, availabilityFor(route, channels, now)))
+}
+
+function withSpec(route, availability) {
+  return route.spec ? { ...availability, spec: route.spec } : availability
+}
+
+function availabilityFor(route, channels, now) {
+  const matches = channels.filter(channel =>
+    channel.models.some(model => route.aliases.includes(model))
+  )
+
+  if (!matches.length) {
+    return {
+      id: route.id,
+      status: 'disabled',
+      reason: 'NewAPI 未配置该模型渠道',
+    }
+  }
+
+  const enabled = matches.find(channel => channel.status === 1)
+  if (enabled) {
+    return {
+      id: route.id,
+      status: 'enabled',
+      lastSuccessAt: now.toISOString(),
+    }
+  }
+
+  const autoDisabled = matches.find(channel => channel.status === 3)
+  return {
+    id: route.id,
+    status: 'disabled',
+    reason: autoDisabled ? 'NewAPI 渠道已自动禁用' : 'NewAPI 渠道未启用',
+  }
+}
+
+function psql(sql) {
   if (!PSQL_PASSWORD) {
     throw new Error('NEWAPI_PSQL_PASSWORD is not configured')
   }
@@ -157,8 +229,7 @@ function queryChannels() {
 
   if (!postgresContainer) throw new Error('Postgres container not found')
 
-  const sql = 'SELECT id,name,status,base_url,models FROM channels ORDER BY id;'
-  const output = execFileSync('docker', [
+  return execFileSync('docker', [
     'exec',
     postgresContainer,
     'psql',
@@ -182,8 +253,27 @@ function queryChannels() {
     timeout: 10000,
     maxBuffer: 1024 * 1024,
   })
+}
 
-  return parseChannelRows(output)
+function queryChannels() {
+  return parseChannelRows(psql('SELECT id,name,status,base_url,models FROM channels ORDER BY id;'))
+}
+
+// 只取激活插件里的目录正文和计费表达式，不读取插件源码其余部分。
+const CATALOG_SQL = `SELECT json_build_object(
+  'plugins', (SELECT coalesce(json_agg(json_build_object('key', key, 'version', version, 'catalog', substring(source from '/\\*jc-catalog\\*/(.*)/\\*end-jc-catalog\\*/'))), '[]'::json) FROM task_plugins WHERE active AND enabled),
+  'billing', (SELECT coalesce(json_object_agg(key, value), '{}'::json) FROM options WHERE key IN ('billing_setting.billing_expr', 'billing_setting.plugin_billing_expr'))
+);`
+
+function queryCatalogModels() {
+  try {
+    const result = JSON.parse(psql(CATALOG_SQL))
+    return buildCatalogModels(Array.isArray(result.plugins) ? result.plugins : [], result.billing || {})
+  } catch (error) {
+    // 目录读取失败时退回静态路由，不影响原有可用性判断。
+    console.error('[creation-models] catalog query failed:', sanitizeErrorForLog(error))
+    return []
+  }
 }
 
 function json(res, status, body) {
@@ -234,7 +324,7 @@ export function createServer() {
       return json(res, 200, {
         success: true,
         data: {
-          models: buildCreationModelAvailability(channels),
+          models: buildCreationModelAvailability(channels, new Date(), queryCatalogModels()),
         },
       })
     } catch (e) {
