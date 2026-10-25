@@ -164,4 +164,17 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.doesNotMatch(prepare, /submit|runAuto/)
   assert.match(panel, /emit\('start'/)
   assert.match(panel, /第 1 集资产出齐后暂停审图/)
+  // 切换模式时没有分集剧本不弹卡，避免挡住待发送的剧本（2026-10-25 用户反馈）。
+  assert.match(workbench, /manjuAuto\.prepare\(\{ onlyIfReady: true \}\)/)
+  assert.match(controller, /onlyIfReady && !episodes\.length/)
+  assert.match(controller, /遵守本对话入稿时用户提出的制作要求/)
+  // 模型选项：与 @影音 同一默认顺序、去掉已退出面板的型号、视频只列可收参考图的、Seedance 优先、读全部分页。
+  assert.match(controller, /prioritizedCreationModelIds\(kind\)/)
+  assert.match(controller, /spec\?\.hidden/)
+  assert.match(controller, /inputs\.includes\('image'\) \|\| Boolean\(spec\?\.files\?\.images\?\.max\)/)
+  assert.match(controller, /\/seedance\/i/)
+  assert.match(controller, /next_cursor/)
+  // 设计系统没有 --danger，警示色必须用 --jc-error。
+  assert.doesNotMatch(panel, /var\(--danger\)/)
+  assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)
 })

@@ -1101,7 +1101,8 @@ function chooseManjuMode(mode: 'prompt' | 'auto' | 'off') {
     return
   }
   contextNotice.value = '已切换到全自动成片：发送剧本后先按集拆分，再弹出启动确认卡；确认前不会产生费用。'
-  void manjuAuto.prepare()
+  // 只有项目里已有分集剧本或未完成的运行时才立即弹卡；否则等用户发送剧本、入稿回合结束后再弹。
+  void manjuAuto.prepare({ onlyIfReady: true })
 }
 const composerHasPayload = computed(() => Boolean(
   input.value.trim() || persistentAttachments.value.length || attachments.value.length
@@ -5771,7 +5772,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-strip > .memory-manju-button.active, .memory-command-strip > .memory-short-drama-button.active, .memory-command-strip > .memory-novel-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
 /* 全自动成片会花钱：用与完全权限同一套警示色，一眼区分提示词模式。 */
-.memory-command-strip > .memory-manju-button.auto { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+.memory-command-strip > .memory-manju-button.auto { border-color: var(--jc-error); background: color-mix(in srgb, var(--jc-error) 10%, transparent); color: var(--jc-error); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 /* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
    写在 hover 之后，压住 hover 的 olive，红着不动。 */

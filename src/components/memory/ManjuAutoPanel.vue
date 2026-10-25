@@ -119,7 +119,7 @@ function displaySrc(path?: string) {
 <style scoped>
 .manju-auto-card { display: grid; gap: 10px; margin: 0 14px 8px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 12%); color: var(--ink1); font-size: 12px; }
 .manju-auto-card p { margin: 0; color: var(--ink2); line-height: 1.6; }
-.manju-auto-warn { color: var(--danger) !important; }
+.manju-auto-warn { color: var(--jc-error) !important; }
 .manju-auto-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; }
 .manju-auto-row > span:first-child { color: var(--ink3); }
 .manju-auto-row select, .manju-auto-row input[type="number"] { min-width: 0; max-width: 100%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; }
@@ -136,14 +136,14 @@ function displaySrc(path?: string) {
 .manju-auto-images figure { margin: 0; }
 .manju-auto-images img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
 .manju-auto-images figcaption { overflow: hidden; color: var(--ink3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.manju-auto-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 14px 6px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--danger) 5%, var(--paper)); color: var(--ink2); font-size: 12px; }
+.manju-auto-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 14px 6px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--jc-error) 30%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--jc-error) 5%, var(--paper)); color: var(--ink2); font-size: 12px; }
 .manju-auto-progress.done { border-color: color-mix(in srgb, var(--olive) 35%, var(--line)); background: color-mix(in srgb, var(--olive) 6%, var(--paper)); }
-.manju-auto-progress > svg { width: 15px; height: 15px; color: var(--danger); }
+.manju-auto-progress > svg { width: 15px; height: 15px; color: var(--jc-error); }
 .manju-auto-status { margin-right: 4px; color: var(--ink1); font-weight: 600; }
 .manju-auto-chip { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 12%, transparent); font-size: 11px; }
 .manju-auto-chip.done { background: color-mix(in srgb, var(--olive) 16%, transparent); color: var(--olive); }
-.manju-auto-chip.blocked { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.manju-auto-chip.blocked { background: color-mix(in srgb, var(--jc-error) 14%, transparent); color: var(--jc-error); }
 .manju-auto-chip.review { background: color-mix(in srgb, #d08a00 18%, transparent); color: #a86d00; }
 .manju-auto-progress button { margin-left: auto; padding: 3px 10px; }
-.manju-auto-error { margin: 0 14px 6px; color: var(--danger); font-size: 12px; }
+.manju-auto-error { margin: 0 14px 6px; color: var(--jc-error); font-size: 12px; }
 </style>

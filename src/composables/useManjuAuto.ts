@@ -5,6 +5,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
+import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
 import { createAutoRun, handleCheckpointSaved, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
@@ -25,20 +26,35 @@ export const AUTO_INTAKE_PREFIX = '【全自动成片·入稿】'
 const VIDEO_MODEL = 'Seedance'
 
 export function episodeInstruction(episode: number, wikiRoot: string) {
-  return `【全自动成片·第${episode}集】请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${VIDEO_MODEL}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，从 plan 连续执行到 complete。`
+  return `【全自动成片·第${episode}集】请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${VIDEO_MODEL}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求，从 plan 连续执行到 complete。`
 }
 
-function normalizeModels(models: Array<Record<string, unknown>>, kind: 'image' | 'video'): ManjuAutoModelOption[] {
+/**
+ * 确认卡的模型选项：与 @影音 面板同一份默认顺序（prioritizedCreationModelIds），
+ * 去掉已退出面板的型号；视频只列能接收参考图的模型（全自动按 @图 传资产图）。
+ */
+export function normalizeModels(models: Array<Record<string, unknown>>, kind: 'image' | 'video'): ManjuAutoModelOption[] {
+  const order = prioritizedCreationModelIds(kind)
+  // 提示词按 Seedance 格式写，视频默认优先 Seedance 型号。
+  const rank = (option: ManjuAutoModelOption) => {
+    const index = order.indexOf(option.id)
+    const base = index < 0 ? order.length : index
+    return kind === 'video' && /seedance/i.test(`${option.id} ${option.label}`) ? base - 10_000 : base
+  }
   return models.filter(model => {
+    const spec = getCreationModelSpec(String(model.id))
     if (model.availability && model.availability !== 'available') return false
-    if (model.contractStatus === 'broken' || model.hidden) return false
+    if (model.contractStatus === 'broken' || spec?.hidden) return false
     const outputs = Array.isArray(model.output_modalities) ? model.output_modalities : []
-    return model.task === kind || outputs.includes(kind)
+    if (model.task !== kind && !outputs.includes(kind)) return false
+    if (kind !== 'video') return true
+    const inputs = Array.isArray(model.input_modalities) ? model.input_modalities : []
+    return inputs.includes('image') || Boolean(spec?.files?.images?.max)
   }).map(model => ({
     id: String(model.id),
     label: String(model.label || model.display_name || model.id),
     price: typeof model.price === 'number' || typeof model.price === 'string' ? model.price : undefined,
-  }))
+  })).sort((a, b) => rank(a) - rank(b))
 }
 
 export function useManjuAuto(options: {
@@ -67,8 +83,11 @@ export function useManjuAuto(options: {
     return JSON.parse(await files(owner).readText(path)) as T
   }
 
-  /** 入稿回合结束后：扫描分集剧本、读取已确认比例、列出可用模型，弹出确认卡。 */
-  async function prepare() {
+  /**
+   * 入稿回合结束后：扫描分集剧本、读取已确认比例、列出可用模型，弹出确认卡。
+   * onlyIfReady：切换模式时用，没有分集剧本也没有可续做的运行就不弹卡，避免挡住待发送的剧本。
+   */
+  async function prepare(prepareOptions: { onlyIfReady?: boolean } = {}) {
     const owner = options.owner()
     if (!owner) return
     preparing.value = true
@@ -81,9 +100,16 @@ export function useManjuAuto(options: {
       const stylePath = `${wikiRoot}/项目风格/影片比例与风格.md`
       const style = paths.includes(stylePath) ? await files(owner).readText(stylePath) : ''
       const ratio = style.match(/(\d+)\s*[:：]\s*(\d+)/)?.slice(1, 3).join(':')
-      const catalog = await runCreationOperation('list_creation_models', { limit: 100 }) as { models?: Array<Record<string, unknown>> }
-      const models = catalog.models || []
       const saved = await readJson<AutoRunState>(owner, `${wikiRoot}/${AUTO_RUN_PATH}`)
+      if (prepareOptions.onlyIfReady && !episodes.length && (!saved || saved.status === 'done')) return
+      const models: Array<Record<string, unknown>> = []
+      let cursor: string | null | undefined
+      for (let page = 0; page < 10; page += 1) {
+        const catalog = await runCreationOperation('list_creation_models', { limit: 100, ...(cursor ? { cursor } : {}) }) as { models?: Array<Record<string, unknown>>; next_cursor?: string | null }
+        models.push(...(catalog.models || []))
+        cursor = catalog.next_cursor
+        if (!cursor) break
+      }
       draft.value = {
         wikiRoot, episodes, ratio,
         imageModels: normalizeModels(models, 'image'),
