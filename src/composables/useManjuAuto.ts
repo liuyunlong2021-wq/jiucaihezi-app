@@ -8,6 +8,7 @@ import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
 import { createAutoRun, episodeInstruction, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
+import { ASSET_REGISTRY_PATH, awaitAsset, promptBody, regenerateAsset, type AssetRegistryEntry } from '@/runtime/manjuAuto/assetScheduler'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import { emitEvent } from '@/utils/eventBus'
 
@@ -70,6 +71,9 @@ export function useManjuAuto(options: {
   const run = ref<AutoRunState | null>(null)
   const draft = ref<ManjuAutoDraft | null>(null)
   const review = shallowRef<{ ids: string[]; images: Record<string, string> } | null>(null)
+  /** 审图时正在单独重新生成的图，以及每张图最近一次重新生成的错误。 */
+  const reviewBusy = ref<Record<string, boolean>>({})
+  const reviewErrors = ref<Record<string, string>>({})
   const error = ref('')
   const preparing = ref(false)
   /** 每次运行独立的停止开关：新运行不会把旧运行的“停止”重置掉。 */
@@ -161,6 +165,8 @@ export function useManjuAuto(options: {
           emitEvent('project-filetree:locate', { path: outputPath, owner, refresh: true, quiet: true })
         },
         waitForReview(ids, images) {
+          reviewBusy.value = {}
+          reviewErrors.value = {}
           review.value = { ids, images }
           return new Promise(resolve => { reviewResolve = resolve })
         },
@@ -211,7 +217,49 @@ export function useManjuAuto(options: {
     })
   }
 
+  async function registryEntry(id: string): Promise<AssetRegistryEntry> {
+    const owner = options.owner()
+    const entry = owner && liveDeps ? (await readJson<{ assets: Record<string, AssetRegistryEntry> }>(owner, `${liveDeps.wikiRoot}/${ASSET_REGISTRY_PATH}`))?.assets[id] : undefined
+    if (!entry) throw new Error(`找不到资产：${id}`)
+    return entry
+  }
+
+  /** 审图面板读取一张图的提示词正文（不含标题）。 */
+  async function loadPrompt(id: string): Promise<string> {
+    const owner = options.owner()!
+    return promptBody(await files(owner).readText((await registryEntry(id)).prompt_path))
+  }
+
+  /** 审图时单独重新生成一张：可先把改过的提示词写回 Wiki（保留原标题），只动这一张。 */
+  async function regenerate(id: string, newPrompt?: string) {
+    const owner = options.owner()
+    const deps = liveDeps
+    if (!owner || !deps || !review.value || reviewBusy.value[id]) return
+    reviewBusy.value = { ...reviewBusy.value, [id]: true }
+    reviewErrors.value = { ...reviewErrors.value, [id]: '' }
+    try {
+      let hash: string | undefined
+      if (newPrompt !== undefined) {
+        const entry = await registryEntry(id)
+        const original = await files(owner).readText(entry.prompt_path)
+        const heading = original.match(/^(?:\s*#[^\n]*\n)+/)?.[0] || ''
+        const text = `${heading}${newPrompt.trim()}\n`
+        await files(owner).writeText(entry.prompt_path, text)
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+        hash = [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+      }
+      await regenerateAsset(deps.wikiRoot, id, deps.asset, hash)
+      const image = await awaitAsset(deps.wikiRoot, id, deps.asset, { timeoutMs: 30 * 60_000, pollMs: 5000 })
+      if (review.value) review.value = { ...review.value, images: { ...review.value.images, [id]: image } }
+    } catch (cause) {
+      reviewErrors.value = { ...reviewErrors.value, [id]: cause instanceof Error ? cause.message : String(cause) }
+    } finally {
+      reviewBusy.value = { ...reviewBusy.value, [id]: false }
+    }
+  }
+
   function approveReview() {
+    if (Object.values(reviewBusy.value).some(Boolean)) return
     review.value = null
     reviewResolve?.('approved')
   }
@@ -225,5 +273,5 @@ export function useManjuAuto(options: {
     }
   }
 
-  return { run, draft, review, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
+  return { run, draft, review, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
 }

@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   ASSET_REGISTRY_PATH,
+  awaitAsset,
   awaitEpisodeAssets,
   lockAssets,
+  regenerateAsset,
   submitEpisodeAssets,
   type AssetSchedulerDeps,
   type EpisodeCheckpoint,
@@ -205,4 +207,32 @@ test('interrupted tasks (nobody tracking them after an app restart) resubmit imm
   assert.equal(result.status, 'ready')
   assert.equal(submits.length, 3)
   assert.equal(registry(fs)['角色/莫甘娜'].attempts, 1)
+})
+
+test('regenerating one asset during review resubmits only that asset, with a fresh requestId and optional new prompt hash', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  tasks.set('t1', { status: 'success', localPath: '/p/a.png' })
+  tasks.set('t2', { status: 'success', localPath: '/p/b.png' })
+  assert.equal((await awaitEpisodeAssets(wiki, checkpoint(), deps, { timeoutMs: 1000, pollMs: 1, review: true })).status, 'awaiting_review')
+  fs.set('wiki/资产/场景/石道/场景生图提示词.md', '# 石道\n青灰石道，左侧加一株老松。')
+  await regenerateAsset(wiki, '场景/石道', deps, 'e'.repeat(64))
+  assert.equal(submits.length, 3)
+  assert.equal(submits[2].prompt, '青灰石道，左侧加一株老松。')
+  assert.notEqual(submits[2].requestId, submits[1].requestId)
+  const entry = registry(fs)['场景/石道']
+  assert.equal(entry.status, 'pending')
+  assert.equal(entry.prompt_hash, 'e'.repeat(64))
+  assert.equal(entry.image_path, undefined)
+  assert.equal(registry(fs)['角色/莫甘娜'].status, 'ready', '其他图不动')
+  tasks.set('t3', { status: 'success', localPath: '/p/b2.png' })
+  const one = await awaitAsset(wiki, '场景/石道', deps, { timeoutMs: 1000, pollMs: 1 })
+  assert.equal(one, '/p/b2.png')
+})
+
+test('regenerating a locked asset is refused so approved images stay stable', async () => {
+  const { deps } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  await lockAssets(wiki, ['角色/莫甘娜'], deps)
+  await assert.rejects(regenerateAsset(wiki, '角色/莫甘娜', deps), /已锁定/)
 })

@@ -187,3 +187,26 @@ export async function lockAssets(wikiRoot: string, ids: string[], deps: AssetSch
   for (const id of ids) if (registry.assets[id]) registry.assets[id].status = 'locked'
   await saveRegistry(wikiRoot, registry, deps)
 }
+
+/** 审图时单独重新生成一张（可带改过的提示词 hash）；只动这一张，已锁定的图不重做。 */
+export async function regenerateAsset(wikiRoot: string, id: string, deps: AssetSchedulerDeps, promptHash?: string) {
+  const registry = await loadRegistry(wikiRoot, deps)
+  const entry = registry.assets[id]
+  if (!entry) throw new Error(`未登记资产：${id}`)
+  if (entry.status === 'locked') throw new Error(`${id} 已锁定，不能重新生成`)
+  Object.assign(entry, { status: 'pending', attempts: 1, transient: 0 })
+  if (promptHash) entry.prompt_hash = promptHash
+  delete entry.image_path
+  delete entry.error
+  delete entry.retry_at
+  await submit(wikiRoot, registry, id, entry, deps)
+}
+
+/** 等单张资产出图（重新生成后用），返回本地图片路径；失败或超时抛错。 */
+export async function awaitAsset(wikiRoot: string, id: string, deps: AssetSchedulerDeps, options: { timeoutMs: number; pollMs: number }): Promise<string> {
+  const entry = (await loadRegistry(wikiRoot, deps)).assets[id]
+  if (!entry) throw new Error(`未登记资产：${id}`)
+  const result = await awaitEpisodeAssets(wikiRoot, { episode_number: entry.episode, assets: { [id]: { kind: entry.kind, prompt_path: entry.prompt_path, prompt_hash: entry.prompt_hash } } }, deps, options)
+  if (result.status !== 'ready') throw new Error(result.status === 'timeout' ? `${id} 生成超时` : `${id} 生成失败：${(await loadRegistry(wikiRoot, deps)).assets[id]?.error || ''}`)
+  return result.images[id]
+}

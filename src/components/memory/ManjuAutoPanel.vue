@@ -40,13 +40,30 @@
 
   <div v-if="review" class="manju-auto-card manju-auto-review" role="dialog" aria-label="审核资产图">
     <strong>审核第 1 集资产图</strong>
-    <p>确认后这些图会锁定，后续各集直接复用、不再重新生成。不满意可以停止，在文件树里替换图片或修改提示词后再续做。</p>
+    <p>不满意的图可以单独「重新生成」或「改提示词」后重生成，其他图不受影响。确认后全部锁定，后续各集直接复用。</p>
     <div class="manju-auto-images">
-      <figure v-for="id in review.ids" :key="id"><img :src="displaySrc(review.images[id])" :alt="id"><figcaption>{{ id }}</figcaption></figure>
+      <figure v-for="id in review.ids" :key="id" :class="{ busy: reviewBusy[id] }">
+        <img :src="displaySrc(review.images[id])" :alt="id">
+        <span v-if="reviewBusy[id]" class="manju-auto-busy">生成中…</span>
+        <figcaption>{{ id }}</figcaption>
+        <div class="manju-auto-image-actions">
+          <button type="button" :disabled="reviewBusy[id]" @click="emit('regenerate', id)">重新生成</button>
+          <button type="button" :disabled="reviewBusy[id]" @click="openPromptEditor(id)">改提示词</button>
+        </div>
+        <small v-if="reviewErrors[id]" class="manju-auto-image-error">{{ reviewErrors[id] }}</small>
+      </figure>
+    </div>
+    <div v-if="editingId" class="manju-auto-prompt-editor">
+      <span>修改「{{ editingId }}」的提示词（保存后写回 Wiki 并重新生成）</span>
+      <textarea v-model="editingText" rows="6" :disabled="loadingPrompt" />
+      <div class="manju-auto-actions">
+        <button type="button" @click="editingId = ''">取消</button>
+        <button type="button" class="primary" :disabled="loadingPrompt || !editingText.trim()" @click="savePrompt">保存并重新生成</button>
+      </div>
     </div>
     <div class="manju-auto-actions">
       <button type="button" @click="emit('stop')">停止</button>
-      <button type="button" class="primary" @click="emit('approve')">确认并继续</button>
+      <button type="button" class="primary" :disabled="anyBusy" :title="anyBusy ? '等重新生成的图出来再确认' : ''" @click="emit('approve')">确认并继续</button>
     </div>
   </div>
 
@@ -71,9 +88,29 @@ const props = defineProps<{
   draft: ManjuAutoDraft | null
   run: AutoRunState | null
   review: { ids: string[]; images: Record<string, string> } | null
+  reviewBusy: Record<string, boolean>
+  reviewErrors: Record<string, string>
+  loadPrompt: (id: string) => Promise<string>
   error: string
 }>()
-const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; stop: []; approve: [] }>()
+const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; stop: []; approve: []; regenerate: [id: string, prompt?: string] }>()
+
+const editingId = ref('')
+const editingText = ref('')
+const loadingPrompt = ref(false)
+const anyBusy = computed(() => Object.values(props.reviewBusy).some(Boolean))
+async function openPromptEditor(id: string) {
+  editingId.value = id
+  editingText.value = ''
+  loadingPrompt.value = true
+  try { editingText.value = await props.loadPrompt(id) } catch (cause) { editingText.value = `读取提示词失败：${cause instanceof Error ? cause.message : String(cause)}` } finally { loadingPrompt.value = false }
+}
+function savePrompt() {
+  const id = editingId.value
+  if (!id || !editingText.value.trim()) return
+  emit('regenerate', id, editingText.value)
+  editingId.value = ''
+}
 
 const episodes = ref<number[]>([])
 const imageModelId = ref('')
@@ -160,6 +197,15 @@ function displaySrc(path?: string) {
 .manju-auto-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 300px; overflow-y: auto; }
 .manju-auto-images figure { margin: 0; }
 .manju-auto-images img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+.manju-auto-images figure { position: relative; display: grid; gap: 3px; }
+.manju-auto-images figure.busy img { opacity: .35; }
+.manju-auto-busy { position: absolute; top: 34%; left: 0; right: 0; color: var(--ink1); font-size: 11px; text-align: center; }
+.manju-auto-image-actions { display: flex; gap: 4px; }
+.manju-auto-image-actions button { flex: 1; padding: 2px 0; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 10px; }
+.manju-auto-image-actions button:disabled { opacity: .45; cursor: default; }
+.manju-auto-image-error { color: var(--jc-error); font-size: 10px; line-height: 1.3; }
+.manju-auto-prompt-editor { display: grid; gap: 6px; }
+.manju-auto-prompt-editor textarea { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; font-size: 12px; resize: vertical; }
 .manju-auto-images figcaption { overflow: hidden; color: var(--ink3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .manju-auto-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 14px 6px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--jc-error) 30%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--jc-error) 5%, var(--paper)); color: var(--ink2); font-size: 12px; }
 .manju-auto-progress.done { border-color: color-mix(in srgb, var(--olive) 35%, var(--line)); background: color-mix(in srgb, var(--olive) 6%, var(--paper)); }

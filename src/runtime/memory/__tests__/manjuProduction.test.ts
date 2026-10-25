@@ -165,6 +165,12 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.doesNotMatch(prepare, /submit|runAuto/)
   assert.match(panel, /emit\('start'/)
   assert.match(panel, /第 1 集资产出齐后暂停审图/)
+  // 审图可单独重新生成或改提示词重生成，重生成期间不能确认（2026-10-25 用户要求）。
+  assert.match(panel, /emit\('regenerate', id\)/)
+  assert.match(panel, /保存并重新生成/)
+  assert.match(panel, /:disabled="anyBusy"/)
+  assert.match(workbench, /@regenerate="\(id, prompt\) => manjuAuto\.regenerate\(id, prompt\)"/)
+  assert.match(controller, /await regenerateAsset\(deps\.wikiRoot, id, deps\.asset, hash\)/)
   // 切换模式时没有分集剧本不弹卡，避免挡住待发送的剧本（2026-10-25 用户反馈）。
   assert.match(workbench, /manjuAuto\.prepare\(\{ onlyIfReady: true \}\)/)
   assert.match(controller, /onlyIfReady && !episodes\.length/)
