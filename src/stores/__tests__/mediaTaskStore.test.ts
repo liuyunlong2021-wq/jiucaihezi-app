@@ -109,6 +109,9 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
             if (url.endsWith('/v1/videos/task_retry_cdn_video')) {
               return { status: 200, body: JSON.stringify({ status: 'completed', metadata: { url: 'https://cdn.example.test/fresh.mp4' } }), headers: {} }
             }
+            if (url.endsWith('/v1/videos/task_fk_signed_retry')) {
+              return { status: 200, body: JSON.stringify({ status: 'completed', video_url: 'https://ai.fanke2026.xyz/api/video/result/job?exp=2&sig=fresh' }), headers: {} }
+            }
             if (url.endsWith('/v1/videos/task_retry_cdn_fail')) {
               return { status: 403, body: 'query unavailable', headers: {} }
             }
@@ -475,7 +478,7 @@ test('mediaTaskStore keeps result URL validation at the media boundary', () => {
 
   assert.equal(source.includes('function validateTaskInputs'), true)
   assert.equal(source.includes('validateTaskInputs(params)'), true)
-  assert.equal(source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"), true)
+  assert.equal(source.includes("import { isAllowedCreationResultUrl, isPublicUpstreamResultUrl } from '@/utils/urlSafety'"), true)
   assert.equal(source.includes('function assertSafeResultUrl'), false)
   assert.equal(source.includes("if (!isAllowedCreationResultUrl(downloadUrl, true)) throw new Error('媒体结果地址不安全，已阻止缓存')"), true)
   assert.equal(source.includes('const safeMediaUrl = assertSafeResultUrl(mediaUrl)'), false)
@@ -1585,6 +1588,46 @@ test(
       assert.equal(task?.status, 'success')
       assert.equal(task?.assetStatus, 'local')
       assert.match(task?.assetUri || '', /^\/projects\/shanhai\/\.raw\/jc-media\/视频\//)
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test(
+  '特价渠道旧任务重新下载时重查任务，改用插件透传的上游签名链接直接下载',
+  { concurrency: false },
+  async () => {
+    // 2026-10-26：这些任务原先存的是 content 地址，经服务器中转受 2.5 Mbps 出口限制而失败。
+    const contentUrl = 'https://api.jiucaihezi.studio/v1/videos/task_fk_signed_retry/content'
+    const signed = 'https://ai.fanke2026.xyz/api/video/result/job?exp=2&sig=fresh'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_fk_signed', type: 'video', model: '特价渠道 MiniMax H3 480p-1080p',
+      modelLabel: '特价渠道 MiniMax H3', prompt: '应县木塔', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl: contentUrl,
+      upstreamTaskId: 'task_fk_signed_retry',
+      pollUrl: '/v1/videos/task_fk_signed_retry',
+      pollKind: 'video',
+      assetStatus: 'failed',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/fk'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_fk_signed'), true)
+      })
+      assert.deepEqual(files.downloads, [signed])
+      assert.equal(store.getTask('mtask_fk_signed')?.assetStatus, 'local')
     } finally {
       projectStore.projectDir.value = originalProjectDir
       files.restore()

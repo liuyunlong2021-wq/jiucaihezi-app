@@ -120,7 +120,7 @@ import {
 } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
 import { sizeFromRatioResolution } from '@/utils/imageContracts'
-import { isAllowedCreationPollUrl, isLocalAssetUrl } from '@/utils/urlSafety'
+import { isAllowedCreationPollUrl, isLocalAssetUrl, isPublicUpstreamResultUrl } from '@/utils/urlSafety'
 
 let _cachedConfig: { apiKey: string; apiBase: string } | null = null
 
@@ -830,6 +830,10 @@ export async function pollTask(
         if (text) return text
         throw terminalCreationTaskError('任务已完成，但没有返回文本内容')
       }
+      // 插件在顶层 video_url 透传的上游签名地址直接下载（FK）；适配器放在 metadata.url 的
+      // 地址（comfy 内网、Omni）不可信，content 回收模型仍按任务号重建 content 地址。
+      const pluginVideoUrl = typeof data?.video_url === 'string' ? data.video_url : ''
+      if (kind === 'video' && useContentEndpoint && isPublicUpstreamResultUrl(pluginVideoUrl)) return pluginVideoUrl
       const newApiVideoUrl = kind === 'video' && useContentEndpoint ? newApiVideoContentUrl(pollPath) : null
       if (newApiVideoUrl) return newApiVideoUrl
       const url = extractMediaUrl(data, kind)

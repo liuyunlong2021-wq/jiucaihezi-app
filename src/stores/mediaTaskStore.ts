@@ -33,7 +33,7 @@ import type {
   MediaResult,
 } from '@/api/media-generation'
 import { emitEvent, emitEventAsync } from '@/utils/eventBus'
-import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { isAllowedCreationResultUrl, isPublicUpstreamResultUrl } from '@/utils/urlSafety'
 import { writeMediaAsset } from '@/utils/mediaFileWriter'
 import { downloadProjectMedia, writeProjectMedia } from '@/utils/projectMediaWriter'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
@@ -104,7 +104,7 @@ function taskUsesContentEndpoint(task: Pick<MediaTask, 'model' | 'planSnapshot'>
  * dev WebView 里的 `/__jc_api/…` 相对地址要靠它绕 CORS；任务号已经对了就别动。
  */
 function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {
-  if (task.type !== 'video' || !task.upstreamTaskId || !taskUsesContentEndpoint(task)) return url
+  if (task.type !== 'video' || !task.upstreamTaskId || !taskUsesContentEndpoint(task) || isPublicUpstreamResultUrl(url)) return url
   const contentPath = `/v1/videos/${encodeURIComponent(task.upstreamTaskId)}/content`
   return url === `/__jc_api${contentPath}` ? url : `${DEFAULT_API_BASE_URL}${contentPath}`
 }
@@ -1553,11 +1553,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           await persistTasksSafely('retry-media-persistence-refresh-failed')
           return false
         }
-      } else if (!task.planSnapshot?.protocol && task.type === 'video' && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
-        // CDN 签名链接可能已经过期；只重查已生成的任务，不重新生成。
+      } else if (!task.planSnapshot?.protocol && task.type === 'video' && task.pollUrl && task.pollKind) {
+        // CDN 签名链接可能已经过期；只重查已生成的任务，不重新生成。content 回收模型也重查：
+        // 插件改为透传上游签名地址后，旧任务存的 content 地址据此换成直连（comfy 仍得到 content）。
         // 查询暂不可用时仍尝试原链接，避免把有效下载也挡住。
         try {
-          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS, undefined, false, await taskPollKey(task))
+          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS, undefined, taskUsesContentEndpoint(task), await taskPollKey(task))
         } catch {
           // 原结果仍可下载时继续保存。
         }

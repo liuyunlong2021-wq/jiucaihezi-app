@@ -92,6 +92,22 @@ test('Omni video polling uses the authenticated content endpoint instead of upst
   }
 })
 
+test('content-endpoint video polling prefers a public upstream signed URL rendered by the plugin', { concurrency: false }, async () => {
+  // FK 插件把上游签名链接透传给客户端：直接下载，不再经服务器 content 中转。
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const signed = 'https://ai.fanke2026.xyz/api/video/result/job?exp=1700000000&sig=abc'
+  globalThis.fetch = async () => Response.json({ status: 'completed', video_url: signed })
+
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_fk_001', 'video', undefined, 1, 10, undefined, true))
+    assert.equal(result, signed)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('non-Omni NewAPI video polling keeps the original result extraction path', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

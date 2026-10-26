@@ -3116,3 +3116,4 @@
 - 同日 R2 中转镜像构建成功：`jiucaihezi/new-api:rc40-video-relay-20261026`，ID `sha256:0239e6f6…e4b4`，断网五包 go test 通过；第一次因 npm 偶发截断在 bun install 失败，已自动还原，重跑成功。生产未切换。
 - 同日 R2 中转激活脚本：`activate-video-relay.py` 沿用公共 R2 的激活流程（只换镜像、备份并验证数据库、只重建 NewAPI、失败自动回滚），新增中转探测：不带 Key 时本机和公网都返回 401，带 Key 时返回宿主原样传回的 4xx。先红后绿 7 项。部署前公网探测，新路径已经到达 NewAPI，返回 404 JSON（App 会退回原地址）。粘贴包已生成，尚未执行。
 - 同日 R2 中转生产激活：`VIDEO RELAY ACTIVE`，数据库已备份并验证，只重建了 NewAPI，全部回归通过，备份在 `/root/jc-video-relay-switch-n6nri74z`。旧版 App 重下仍报续传不一致，原因是旧版不含修复，需用新版或开发版验收。
+- 同日 R2 中转真实验收：服务器 4 路并发拉上游合计约 450 KB/s，上传 R2 只成功 2 条，App 在等待中遇到连接被断开后放弃。结论是服务器带宽本身就是瓶颈。用户确认方案 A：FK 插件 0.6.1 把上游签名 `videoUrl` 透传为 `video_url`；App 对 content 回收模型优先使用插件透传的 https 外部地址，重新下载时会重新查询任务。先红后绿：插件 25 项、focused 2371 项（2 项为之前就有的失败）、vue-tsc 通过。插件尚未上传激活，App 尚未发版。

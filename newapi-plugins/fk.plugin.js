@@ -3,7 +3,8 @@
 // 图片使用 openai_image 协议并由 NewAPI 主机轮询；视频使用 openai_video 协议。
 // 上游 Key 由 NewAPI 渠道配置提供，源码不保存密钥。Base URL: https://ai.fanke2026.xyz
 // Seedance 2.0/2.5 使用 /api/open/v1/video/generate 与 /video/status?jobId=。
-// 签名结果由宿主 content 代理免鉴权回收。旧任务仅保留历史兼容查询；H3 同样走标准接口。
+// 成片的上游签名 videoUrl 直接透传给客户端下载（2026-10-26 用户确认可暴露上游地址）；
+// 没有签名地址时由宿主 content 代理免鉴权回收。旧任务仅保留历史兼容查询；H3 同样走标准接口。
 // 事实源：用户提供的 FK 官方视频文档与公开模型映射。价格在 NewAPI Task Usage 中配置。
 // 按次型号使用 calls；按秒型号使用 seconds 或对应分辨率 seconds_480p/seconds_720p/seconds_768p/seconds_1080p。
 // 官方型号有参考视频时完成用量使用 video_reference_tokens，需同步更新定价表达式。
@@ -87,7 +88,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.6.0',
+  version: '0.6.1',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -318,8 +319,13 @@ export const protocols = {
         const data = snapshot(task.data)
         view.error = imageError(data)
       }
+      const data = snapshot(task.data)
+      const signed = videoResultUrl(data) || videoResultUrl(snapshot(data.data))
       const artifacts = snapshot(ctx && ctx.artifacts)
-      if (task.status === 'SUCCESS' && artifacts.video && artifacts.video.url) {
+      if (task.status === 'SUCCESS' && signed) {
+        // 服务器出口只有 2.5 Mbps，经宿主转发的大视频会断；上游文档也推荐直接用签名地址。
+        view.video_url = signed
+      } else if (task.status === 'SUCCESS' && artifacts.video && artifacts.video.url) {
         view.video_url = String(artifacts.video.url)
       }
       return view

@@ -259,3 +259,15 @@ test('FK 历史视频保留兼容轮询及 content 回收，examples 覆盖完�
  assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 5)
  for (const example of plugin.meta.usageExamples) assert.deepEqual(Object.keys(example.facts).sort(), Object.keys(plugin.meta.usageSchema).sort())
 })
+
+test('FK 成片把上游签名 videoUrl 透传给客户端直接下载，不经宿主 content 中转', () => {
+ // 2026-10-26 实测：宿主 content 代理与 R2 中转都受服务器 2.5 Mbps 出口限制，用户确认直连上游。
+ const signed = 'https://ai.fanke2026.xyz/api/video/result/job?exp=1700000000&sig=abc'
+ const render = (data, artifacts) => plugin.protocols.openai_video.render({ artifacts }, { task_id: 'task_fk', status: 'SUCCESS', data })
+ assert.equal(render({ status: 'success', videoUrl: signed }).video_url, signed)
+ assert.equal(render({ data: { video_url: signed } }).video_url, signed)
+ // 没有公开签名地址时仍交给宿主 content 通道。
+ assert.equal(render({ status: 'success' }, { video: { url: '/v1/videos/task_fk/content' } }).video_url, '/v1/videos/task_fk/content')
+ assert.equal(render({ status: 'success', videoUrl: 'http://ai.fanke2026.xyz/x.mp4' }, {}).video_url, undefined)
+ assert.equal(plugin.protocols.openai_video.render({}, { task_id: 'task_fk', status: 'IN_PROGRESS', data: { videoUrl: signed } }).video_url, undefined)
+})

@@ -121,6 +121,20 @@ export function isAllowedCreationResultUrl(input: string, allowLargeDataUrl = fa
   return isSafePublicHttpUrl(text)
 }
 
+/**
+ * 插件透传的上游公开签名成片地址（如 FK 的 videoUrl）：客户端直接下载，不经 content 回收。
+ * 只认 https 的外部主机：适配器内网地址（http://frps:8796/…）和我们自己的 API 域名
+ * （含 Omni 的 tian-shu.net content 地址）仍按 content 判据重建。
+ */
+export function isPublicUpstreamResultUrl(input: string): boolean {
+  try {
+    const parsed = new URL(String(input || '').trim())
+    return parsed.protocol === 'https:' && !['api.jiucaihezi.studio', 'tian-shu.net'].includes(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
 export function isAllowedCreationPollUrl(input: string): boolean {
   const text = String(input || '').trim()
   if (!text || !text.startsWith('/') || text.startsWith('//')) return false
