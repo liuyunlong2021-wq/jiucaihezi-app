@@ -1055,7 +1055,7 @@ onBeforeUnmount(() => setDesktopManjuAuto(null))
 watch(sending, busy => {
   if (busy || !pendingAutoIntake) return
   pendingAutoIntake = false
-  void manjuAuto.prepare()
+  if (activeRun.value?.phase === 'done') void manjuAuto.prepare()
 })
 watch(manjuSelected, on => { if (!on) manjuMode.value = 'free' })
 
@@ -1087,7 +1087,7 @@ function chooseManjuMode(mode: 'free' | 'prompts' | 'film' | 'off') {
   // 只有项目里已有分集剧本或未完成的运行时才立即弹卡；否则等用户发送剧本、入稿回合结束后再弹。
   void manjuAuto.prepare({ onlyIfReady: true })
 }
-const manjuModeLabels = { free: '漫剧制作', prompts: '漫剧·到提示词', film: '漫剧·全自动' } as const
+const manjuModeLabels = { free: '漫剧·自由', prompts: '全自动·到提示词', film: '全自动·到成片' } as const
 const manjuModeItems = [
   { mode: 'free', label: '自由创作', note: '按你的话自动选 Skill，想做哪步做哪步，不产生媒体费用' },
   { mode: 'prompts', label: '全自动·到提示词', note: '剧本按集拆分，逐集写完资产与视频提示词，不生图不生视频' },

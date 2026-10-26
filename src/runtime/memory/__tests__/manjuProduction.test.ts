@@ -159,6 +159,8 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // 2026-10-26：三种用法——自由创作 / 全自动·到提示词 / 全自动·到成片，默认自由创作。
   assert.match(workbench, /mode: 'free', label: '自由创作'[\s\S]*mode: 'prompts', label: '全自动·到提示词'[\s\S]*mode: 'film', label: '全自动·到成片'/)
   assert.match(workbench, /const manjuMode = ref<'free' \| 'prompts' \| 'film'>\('free'\)/, '默认自由创作')
+  // 按钮写明是否全自动，避免把到提示词误当自由创作（2026-10-26 用户要求）。
+  assert.match(workbench, /const manjuModeLabels = \{ free: '漫剧·自由', prompts: '全自动·到提示词', film: '全自动·到成片' \}/)
   assert.match(workbench, /:target="manjuMode === 'prompts' \? 'prompts' : 'film'"/)
   // 到提示词不读模型参数、不显示生图与预算；每集标出已有进度能否复用。
   assert.match(controller, /const media = state\.config\.target !== 'prompts'/)
@@ -185,6 +187,8 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // 切换模式时没有分集剧本不弹卡，避免挡住待发送的剧本（2026-10-25 用户反馈）。
   assert.match(workbench, /manjuAuto\.prepare\(\{ onlyIfReady: true \}\)/)
   assert.match(controller, /onlyIfReady && !episodes\.length/)
+  // 入稿回合失败或被停止时不弹确认卡，只留错误提示（2026-10-26 用户反馈：500 后仍弹“还没有分集剧本”）。
+  assert.match(workbench, /pendingAutoIntake = false\n  if \(activeRun\.value\?\.phase === 'done'\) void manjuAuto\.prepare\(\)/)
   assert.match(readFileSync('src/runtime/manjuAuto/autoRunner.ts', 'utf8'), /遵守本对话入稿时用户提出的制作要求/)
   // 模型选项：与 @影音 同一默认顺序、去掉已退出面板的型号、视频只列可收参考图的、Seedance 优先、读全部分页。
   assert.match(controller, /prioritizedCreationModelIds\(kind\)/)
