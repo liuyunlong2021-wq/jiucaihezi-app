@@ -1087,6 +1087,12 @@ function chooseManjuMode(mode: 'free' | 'prompts' | 'film' | 'off') {
   // 只有项目里已有分集剧本或未完成的运行时才立即弹卡；否则等用户发送剧本、入稿回合结束后再弹。
   void manjuAuto.prepare({ onlyIfReady: true })
 }
+/** H3 测试版定稿后用 Seedance 出正式版：切到全自动·到成片，确认卡预选 Seedance 与这几集。 */
+function openFormalVersion(episodes: number[]) {
+  if (!manjuSelected.value) toggleManjuProduction()
+  manjuMode.value = 'film'
+  void manjuAuto.prepare({ route: 'Seedance', select: episodes })
+}
 const manjuModeLabels = { free: '漫剧·自由', prompts: '全自动·到提示词', film: '全自动·到成片' } as const
 const manjuModeItems = [
   { mode: 'free', label: '自由创作', note: '按你的话自动选 Skill，想做哪步做哪步，不产生媒体费用' },
@@ -5203,6 +5209,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           :review-busy="manjuAuto.reviewBusy.value"
           :review-errors="manjuAuto.reviewErrors.value"
           :load-prompt="manjuAuto.loadPrompt"
+          :cut-review="manjuAuto.cutReview.value"
+          :load-segment-prompt="manjuAuto.loadSegmentPrompt"
+          @regenerate-segment="(index, prompt) => manjuAuto.regenerateSegment(index, prompt)"
+          @revise-episode="manjuAuto.reviseEpisode"
+          @approve-cut="manjuAuto.approveCut"
+          @formal="openFormalVersion"
           @regenerate="(id, prompt) => manjuAuto.regenerate(id, prompt)"
           :error="manjuAuto.error.value"
           :target="manjuMode === 'prompts' ? 'prompts' : 'film'"

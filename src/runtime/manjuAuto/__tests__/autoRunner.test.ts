@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createAutoRun, episodeInstruction, episodeTextStatus, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, runAuto, type AutoRunConfig, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
+import { adviceSummary, referenceAdvice } from '../autoRunner'
+import { createAutoRun, deriveCheckpoint, episodeInstruction, episodeTextStatus, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, revisionInstruction, runAuto, type AutoRunConfig, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
 
 /** 假世界：文字流水线一跑就写出完整进度；生图/视频任务按测试设定完成。 */
-function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number; newAssetIn?: number; config?: Partial<AutoRunConfig> } = {}) {
+function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number; newAssetIn?: number; config?: Partial<AutoRunConfig>; refs?: string[][] } = {}) {
   const fs = new Map<string, string>()
   const tasks = new Map<string, Task>()
   const log: string[] = []
@@ -13,6 +14,8 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
   const checkpoints = new Map<number, RunnerCheckpoint>()
   let reviewCalls = 0
   let approve: 'approved' | 'stopped' = 'approved'
+  const cutReviews: Array<{ episode: number; videos: string[] }> = []
+  let approveCut: 'approved' | 'stopped' = 'approved'
   let stop = false
   const settle = () => {
     for (const [id, task] of tasks) if (task.status === 'pending') {
@@ -46,10 +49,17 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
         fs.set('wiki/资产/场景/大殿/场景生图提示词.md', '# 大殿\n大殿')
         assets['场景/大殿'] = { kind: 'scene', prompt_path: 'wiki/资产/场景/大殿/场景生图提示词.md', prompt_hash: 'c'.repeat(64) }
       }
+      // refs 按段给出（每段 12.5 秒）：只登记被引用到的资产，全为空即纯文生。
+      const refs = options.refs ?? [['角色/甲', '场景/山门']]
+      for (const id of Object.keys(assets)) if (options.refs && !refs.flat().includes(id)) delete assets[id]
       // 资产阶段保存时宿主收到事件，提前提交生图
       await handleCheckpointSaved(run, { episode_number: episode, video_model: 'Seedance', stage: 'assets', assets, segments: [] }, deps)
       checkpoints.set(episode, { episode_number: episode, video_model: 'Seedance', stage: 'complete', status: 'completed', assets,
-        segments: [{ path: seg, start_seconds: 0, end_seconds: 12.5, refs: ['角色/甲', '场景/山门'] }] })
+        segments: refs.map((list, i) => {
+          const path = seg.replace('001', String(i + 1).padStart(3, '0'))
+          if (i) fs.set(path, `第${episode}集第${i + 1}段，纯文生。`)
+          return { path, start_seconds: i * 12.5, end_seconds: (i + 1) * 12.5, refs: list }
+        }) })
     },
     async readCheckpoint(episode) { return checkpoints.get(episode) },
     asset: {
@@ -63,6 +73,7 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
     },
     async concat(list, durations, out) { concats.push({ videos: list, durations, out }) },
     async waitForReview() { reviewCalls += 1; return approve },
+    async waitForVideoReview(episode, list) { cutReviews.push({ episode, videos: list }); return approveCut },
     async save(state) { fs.set('wiki/制作流水线/全自动运行.json', JSON.stringify(state)) },
     shouldStop: () => stop,
     async sleep() { log.push('sleep'); settle() },
@@ -70,7 +81,7 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
   const run = createAutoRun({
     episodes: options.episodes ?? [1, 2], videoModel: 'Seedance', imageModelId: 'img', videoModelId: 'vid', ratio: '9:16', review: true, ...options.config,
   })
-  return { deps, run, fs, log, checkpoints, images, videos, concats, get reviewCalls() { return reviewCalls }, setApprove(v: typeof approve) { approve = v }, setStop(v: boolean) { stop = v } }
+  return { deps, run, fs, log, checkpoints, images, videos, concats, get reviewCalls() { return reviewCalls }, setApprove(v: typeof approve) { approve = v }, cutReviews, setApproveCut(v: typeof approveCut) { approveCut = v }, setStop(v: boolean) { stop = v } }
 }
 
 test('runs episodes in order, submits assets early, reviews only the first episode, then concatenates each episode', async () => {
@@ -315,6 +326,38 @@ test('episode instruction for a rewrite tells the pipeline why the old prompts m
   assert.match(text, /片段1 30 秒/)
 })
 
+test('a partially written episode resumes from its saved stage instead of re-planning', () => {
+  const text = episodeInstruction(1, 'wiki', { videoModel: 'Seedance', limits: { max_seconds: 30 } }, undefined, 'engineering')
+  assert.match(text, /已有进度到 engineering 阶段/)
+  assert.doesNotMatch(text, /从 plan/)
+  assert.match(episodeInstruction(1, 'wiki', { videoModel: 'Seedance' }), /从 plan 连续执行/)
+})
+
+test('revision instruction lists the review notes in segment order, whole-episode note first', () => {
+  const text = revisionInstruction(2, { videoModel: 'H3', limits: { max_seconds: 30, max_refs: 6 } }, { 3: '打斗太慢', 0: '整体色调偏暗', 1: '  ', 2: '主角不要笑' })
+  assert.match(text, /【全自动成片·第2集·审片修改】/)
+  assert.match(text, /- 整集：整体色调偏暗\n- 第2段：主角不要笑\n- 第3段：打斗太慢/)
+  assert.doesNotMatch(text, /第1段/, '空意见不写')
+  assert.match(text, /「审片修改」/)
+  assert.match(text, /最多 6 张参考图/)
+})
+
+test('a finished H3 episode derives a Seedance checkpoint that keeps materials, assets and the engineering script', () => {
+  const h3 = { stage: 'complete', status: 'completed', video_model: 'H3', episode_number: 1, source_path: 's.md', source_hash: 'h',
+    files: { plan: {}, materials: { 'm.md': '1' }, style: { 'st.md': '2' }, assets: { 'a.md': '3' }, engineering: { 'e.md': '4' }, prompts: { 'p.md': '5' }, complete: {} },
+    assets: { '角色/甲': { kind: 'character' } }, limits: { max_seconds: 30, max_refs: 6 }, duration_seconds: 90, segments: [{ path: 'p.md' }] }
+  const derived = deriveCheckpoint(h3, 'Seedance', { max_seconds: 15, max_refs: 9, allowed_seconds: [15] })
+  assert.equal(derived.stage, 'engineering')
+  assert.equal(derived.status, 'running')
+  assert.equal(derived.video_model, 'Seedance')
+  assert.deepEqual(Object.keys(derived.files as object), ['plan', 'materials', 'style', 'assets', 'engineering'])
+  assert.deepEqual(derived.limits, { max_seconds: 15, max_refs: 9 })
+  assert.equal(derived.segments, undefined)
+  assert.equal(derived.duration_seconds, 90)
+  assert.deepEqual(derived.assets, h3.assets)
+  assert.equal(h3.files.prompts['p.md'], '5', '不改动原路线进度')
+})
+
 test('stopping while waiting for asset images stops at the next poll instead of after the 30-minute gate', async () => {
   const w = world({ episodes: [1] })
   const sleep = w.deps.asset.sleep
@@ -323,4 +366,89 @@ test('stopping while waiting for asset images stops at the next poll instead of 
   assert.equal(result.status, 'stopped')
   assert.equal(result.episodes['1'].phase, 'assets', '续做时从资产阶段接着等')
   assert.equal(w.videos.length, 0)
+})
+
+test('video review pauses each episode after its segments are ready and before concatenation', async () => {
+  const w = world({ episodes: [1] })
+  const result = await runAuto(w.run, w.deps)
+  assert.deepEqual(w.cutReviews, [{ episode: 1, videos: ['/out/v1.mp4'] }])
+  assert.equal(w.concats.length, 1)
+  assert.equal(result.episodes['1'].phase, 'done')
+})
+
+test('stopping at the video review leaves the episode unconcatenated and reviewed again on resume', async () => {
+  const w = world({ episodes: [1] })
+  w.setApproveCut('stopped')
+  const stopped = await runAuto(w.run, w.deps)
+  assert.equal(stopped.status, 'stopped')
+  assert.equal(stopped.episodes['1'].phase, 'videos')
+  assert.equal(w.concats.length, 0)
+  w.setApproveCut('approved')
+  const resumed = await runAuto(resumeAutoRun(stopped, stopped.config), w.deps)
+  assert.equal(resumed.status, 'done')
+  assert.equal(w.cutReviews.length, 2)
+  assert.equal(w.videos.length, 1, '续做不重交视频')
+})
+
+test('reviewVideos false concatenates without pausing', async () => {
+  const w = world({ episodes: [1], config: { reviewVideos: false } })
+  await runAuto(w.run, w.deps)
+  assert.equal(w.cutReviews.length, 0)
+  assert.equal(w.concats.length, 1)
+})
+
+test('pure text-to-video: no assets registered, no images generated, every segment submitted without reference images', async () => {
+  const w = world({ episodes: [1], refs: [[], []], config: { limits: { max_seconds: 30, max_refs: 0 } } })
+  const state = await runAuto(w.run, w.deps)
+  assert.equal(state.status, 'done')
+  assert.equal(w.images.length, 0)
+  assert.equal(w.reviewCalls, 0, '没有资产就不停下审图')
+  assert.deepEqual(w.videos.map(video => video.images.length), [0, 0])
+  assert.equal(w.concats.length, 1)
+})
+
+test('references are per segment: only the segment that needs the asset carries its image', async () => {
+  const w = world({ episodes: [1], refs: [['场景/山门'], []] })
+  const state = await runAuto(w.run, w.deps)
+  assert.equal(state.status, 'done')
+  assert.equal(w.images.length, 1, '只为被引用的资产生图')
+  assert.deepEqual(w.videos.map(video => video.images.length), [1, 0])
+})
+
+test('pure text-to-video limits (max_refs 0) reach plan, mark prompts with images stale, and survive derivation', () => {
+  const limits = { max_seconds: 30, max_refs: 0 }
+  const text = episodeInstruction(2, 'wiki', { videoModel: 'H3', limits })
+  assert.match(text, /"limits":\{"max_seconds":30,"max_refs":0\}/)
+  assert.match(text, /纯文生/)
+  assert.match(text, /T2VA/)
+  const segment = { path: 'p.md', start_seconds: 0, end_seconds: 30, refs: ['场景/木塔'] }
+  assert.equal(episodeTextStatus({ stage: 'complete', segments: [segment] }, limits).state, 'stale')
+  assert.equal(episodeTextStatus({ stage: 'complete', segments: [{ ...segment, refs: [] }] }, limits).state, 'complete')
+  assert.deepEqual(deriveCheckpoint({ stage: 'complete', files: {} }, 'Seedance', limits).limits, limits)
+  assert.match(revisionInstruction(2, { videoModel: 'H3', limits }, { 1: '慢一点' }), /纯文生/)
+})
+
+test('episode instruction: references are decided per segment, and the user\'s explicit requirements override skill defaults', () => {
+  const text = episodeInstruction(1, 'wiki', { videoModel: 'H3', limits: { max_seconds: 30, max_refs: 9 } })
+  assert.match(text, /按段/)
+  assert.match(text, /优先于 Skill 默认/)
+})
+
+const STYLE = '制作路线：旁白宣传片\n判断理由：英文旁白推动\n画面比例：16:9\n参考图方式：按段决定（只有木塔需要跨段一致）\n'
+  + '资产名称：木塔\n资产类别：场景\n参考图：需要（6段都出现，外观必须一致）\n'
+  + '资产名称：工匠\n资产类别：角色\n参考图：文字带过（群体，不露正脸）\n'
+  + '资产名称：墨斗\n资产类别：道具\n参考图：文字带过（一次性出现）\n'
+
+test('project style advice: route, reference mode, and which assets need reference images', () => {
+  assert.deepEqual(referenceAdvice(STYLE), { route: '旁白宣传片', mode: 'segment', reason: '只有木塔需要跨段一致', needed: ['木塔'], skipped: ['工匠', '墨斗'] })
+  assert.deepEqual(referenceAdvice('制作路线：旁白宣传片\n参考图方式：纯文生（广告不需要一致性）\n资产名称：木塔\n参考图：文字带过（远景）').mode, 'pure')
+  assert.deepEqual(referenceAdvice('# 影片比例与风格\n画面比例：9:16'), { needed: [], skipped: [] }, '旧项目风格没有建议')
+})
+
+test('advice summary tells the user what will be drawn and roughly what it costs', () => {
+  const advice = referenceAdvice(STYLE)
+  assert.equal(adviceSummary(advice, '0.2/张'), '旁白宣传片 · 按段决定：1 张参考图（木塔），生图约 ¥0.20；文字带过：工匠、墨斗')
+  assert.equal(adviceSummary(advice, '按量计费'), '旁白宣传片 · 按段决定：1 张参考图（木塔）；文字带过：工匠、墨斗')
+  assert.equal(adviceSummary(referenceAdvice('制作路线：旁白宣传片\n参考图方式：纯文生（广告）'), 0.2), '旁白宣传片 · 纯文生：不生图')
+  assert.equal(adviceSummary(referenceAdvice('画面比例：9:16'), 0.2), undefined)
 })

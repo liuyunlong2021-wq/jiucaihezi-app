@@ -167,3 +167,31 @@ export async function checkEpisodeVideos(wikiRoot: string, checkpoint: VideoChec
   const status = pending.length ? 'pending' : failed.length ? 'failed' : 'ready'
   return { status, videos: status === 'ready' ? registry.segments.map(entry => entry.video_path!) : [], pending, failed }
 }
+
+/**
+ * 审片时单独重做一段：沿用登记的参考图与时长，读取当前提示词（可能刚改过）重新提交，
+ * 指纹随提示词更新，之后的整集提交不会再交一次。
+ */
+export async function regenerateSegment(wikiRoot: string, checkpoint: VideoCheckpoint, index: number, deps: VideoSchedulerDeps) {
+  const registry = await load(wikiRoot, checkpoint, deps)
+  const entry = registry.segments[index]
+  if (!entry) throw new Error(`找不到第${index + 1}段视频任务`)
+  const prompt = promptBody(await deps.readText(entry.path))
+  Object.assign(entry, { fingerprint: await fingerprintOf(JSON.stringify([prompt, entry.images, entry.duration_seconds])), attempts: 1, transient: 0 })
+  delete entry.video_path
+  await submit(wikiRoot, checkpoint, registry, index, deps)
+}
+
+/** 等一段视频出片（失败重试仍由 checkEpisodeVideos 负责），返回本地路径。 */
+export async function awaitSegment(wikiRoot: string, checkpoint: VideoCheckpoint, index: number, deps: VideoSchedulerDeps,
+  options: { sleep(ms: number): Promise<void>; timeoutMs: number; pollMs?: number }): Promise<string> {
+  const deadline = Date.now() + options.timeoutMs
+  for (;;) {
+    const result = await checkEpisodeVideos(wikiRoot, checkpoint, deps)
+    const entry = (await load(wikiRoot, checkpoint, deps)).segments[index]
+    if (entry?.status === 'ready' && entry.video_path) return entry.video_path
+    if (result.failed.includes(index + 1)) throw new Error(entry?.error || `第${index + 1}段视频生成失败`)
+    if (Date.now() >= deadline) throw new Error(`第${index + 1}段视频等待超时`)
+    await options.sleep(options.pollMs ?? 5000)
+  }
+}

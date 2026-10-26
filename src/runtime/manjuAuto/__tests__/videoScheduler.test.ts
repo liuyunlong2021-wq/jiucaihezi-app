@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { checkEpisodeVideos, retryFailedVideos, submitEpisodeVideos, videoRegistryPath, type VideoCheckpoint, type VideoSchedulerDeps } from '../videoScheduler'
+import { awaitSegment, checkEpisodeVideos, regenerateSegment, retryFailedVideos, submitEpisodeVideos, videoRegistryPath, type VideoCheckpoint, type VideoSchedulerDeps } from '../videoScheduler'
 
 type FakeTask = { status: string; localPath?: string; error?: string }
 
@@ -196,4 +196,24 @@ test('stop between segment submissions: submitted segments stay registered, the 
   deps.waitSubmitted = undefined
   assert.equal(await submitEpisodeVideos(wiki, checkpoint, images, deps, () => stop), true)
   assert.equal(submits.length, 2, '续做只补交第 2 段')
+})
+
+test('regenerating one segment during video review resubmits only that segment with its current prompt', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  tasks.set('v1', { status: 'success', localPath: '/out/a.mp4' })
+  tasks.set('v2', { status: 'success', localPath: '/out/b.mp4' })
+  await checkEpisodeVideos(wiki, checkpoint, deps)
+  fs.set(seg2, '# 第1集002视频提示词\n书房对峙，改成雨夜。\n@图1：莫甘娜')
+  await regenerateSegment(wiki, checkpoint, 1, deps)
+  assert.equal(submits.length, 3)
+  assert.equal(submits[2].prompt, '书房对峙，改成雨夜。\n@图1：莫甘娜')
+  assert.deepEqual(submits[2].images, ['/p/莫甘娜.png'])
+  assert.notEqual(submits[2].requestId, submits[1].requestId)
+  tasks.set('v3', { status: 'success', localPath: '/out/b2.mp4' })
+  assert.equal(await awaitSegment(wiki, checkpoint, 1, deps, { sleep: async () => {}, timeoutMs: 1000 }), '/out/b2.mp4')
+  assert.deepEqual(registry(fs).map((s: { video_path: string }) => s.video_path), ['/out/a.mp4', '/out/b2.mp4'])
+  // 提示词指纹随之更新：之后的整集提交不会把这段再交一次
+  await submitEpisodeVideos(wiki, checkpoint, images, deps)
+  assert.equal(submits.length, 3)
 })

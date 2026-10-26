@@ -12,7 +12,7 @@ const props = defineProps<{
 }>()
 
 const phaseLabels: Record<string, string> = {
-  queued: '待做', text: '写提示词', assets: '生图中', review: '待审图', videos: '出片中', concat: '拼接中', done: '已成片', blocked: '已暂停',
+  queued: '待做', text: '写提示词', assets: '生图中', review: '待审图', videos: '出片中', cut: '待审片（请在电脑上审）', concat: '拼接中', done: '已成片', blocked: '已暂停',
 }
 const statusLabels: Record<string, string> = {
   running: '全自动成片运行中', blocked: '全自动成片已暂停', stopped: '全自动成片已停止', done: '全自动成片已完成',

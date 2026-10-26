@@ -70,7 +70,8 @@ export function buildRemoteAutoRunConfig(draft: ManjuAutoDraft, choice: RemoteMa
   return {
     episodes,
     videoModel: route,
-    limits: modelLimits(route, videoModel),
+    // 手机没有参考图选项：按项目风格的建议，纯文生即 max_refs 为 0（与确认卡预选一致）。
+    limits: draft.advice?.mode === 'pure' ? { ...modelLimits(route, videoModel), max_refs: 0 } : modelLimits(route, videoModel),
     imageModelId: imageModel.id,
     videoModelId: videoModel.id,
     ratio: draft.ratio,

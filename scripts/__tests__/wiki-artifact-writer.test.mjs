@@ -189,6 +189,14 @@ test('Seedance pipeline registers image assets and binds each segment @图 order
   assert.deepEqual(saved.segments[0].refs, ['角色/莫甘娜', '场景/石道'])
   await checkpoint({ stage: 'complete', outputs: [] })
   assert.deepEqual(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).sort(), ['人群/太虚宗弟子', '场景/石道', '角色/莫甘娜'])
+  // 审片修改：完成后只能从 engineering 或 prompts 重开，资产登记沿用。
+  await assert.rejects(checkpoint({ stage: 'assets', outputs: [portrait, sheet, voice, road, crowd] }), /跳过/)
+  await checkpoint({ stage: 'engineering', status: 'running', outputs: ['wiki/剧本/工程剧本/第1集工程剧本.md'], duration_seconds: 10 })
+  assert.equal(JSON.parse(files.get(join(root, progress.path)).content).stage, 'engineering')
+  await prompts(['角色/莫甘娜', '场景/石道'])
+  await checkpoint({ stage: 'complete', outputs: [] })
+  await prompts(['角色/莫甘娜', '场景/石道'])
+  assert.equal(Object.keys(JSON.parse(files.get(join(root, progress.path)).content).assets).length, 3)
 })
 
 test('costume looks register as their own character id, linked to the base identity and the costume', async t => {
@@ -256,6 +264,73 @@ test('plan max_refs caps the reference images of every segment', async t => {
   await checkpoint({ stage: 'engineering', outputs: [await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：莫甘娜、石道')], duration_seconds: 10 })
   const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: 'Seedance', segment: '001' }, '基调。\n@图1：莫甘娜\n@图2：石道')
   await assert.rejects(checkpoint({ stage: 'prompts', outputs: [first], segments: [{ path: first, start_seconds: 0, end_seconds: 10, refs: ['角色/莫甘娜', '场景/石道'] }] }), /最多 1 张/)
+})
+
+test('pure text-to-video (max_refs 0) skips assets: empty assets stage, H3 T2VA segments with empty refs', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-t2v-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'H3', episode_number: 2, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  const progress = await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [], limits: { max_seconds: 30, max_refs: 0 } })
+  assert.deepEqual(JSON.parse(files.get(join(root, progress.path)).content).limits, { max_seconds: 30, max_refs: 0 })
+  await checkpoint({ stage: 'materials', outputs: [await save({ artifact_kind: 'story_summary' }, '# 故事梗概')] })
+  await checkpoint({ stage: 'style', outputs: [await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：16:9')] })
+  const tower = await save({ artifact_kind: 'scene_asset', entity_name: '木塔' }, '# 木塔')
+  await assert.rejects(checkpoint({ stage: 'assets', outputs: [tower] }), /纯文生/)
+  await checkpoint({ stage: 'assets', outputs: [] })
+  await checkpoint({ stage: 'engineering', outputs: [await save({ artifact_kind: 'engineering_script', episode_number: 2 }, '# 工程剧本\n比例：16:9\n资产清单：无（纯文生）')], duration_seconds: 60 })
+  const segment = async (n, body) => save({ artifact_kind: 'video_prompt', episode_number: 2, video_model: 'H3', segment: n }, body)
+  const first = await segment('001', 'summary\nDawn mist over the wooden pagoda.')
+  const second = await segment('002', 'summary\nCarpenters raise the octagonal base.')
+  const prompts = refs => checkpoint({ stage: 'prompts', outputs: [first, second], segments: [
+    { path: first, start_seconds: 0, end_seconds: 30, refs }, { path: second, start_seconds: 30, end_seconds: 60, refs: [] }] })
+  await assert.rejects(prompts(['场景/木塔']), /最多 0 张/)
+  await prompts([])
+  await checkpoint({ stage: 'complete', outputs: [] })
+  const saved = JSON.parse(files.get(join(root, progress.path)).content)
+  assert.equal(saved.stage, 'complete')
+  assert.deepEqual(saved.assets, {})
+})
+
+test('references are per segment: a Seedance episode mixes a segment with @图 refs and a pure text segment', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-mixed-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'Seedance', episode_number: 1, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [], limits: { max_seconds: 30, max_refs: 9 } })
+  await checkpoint({ stage: 'materials', outputs: [await save({ artifact_kind: 'story_summary' }, '# 故事梗概')] })
+  await checkpoint({ stage: 'style', outputs: [await save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n画面比例：16:9')] })
+  await checkpoint({ stage: 'assets', outputs: [await save({ artifact_kind: 'scene_asset', entity_name: '木塔' }, '# 木塔')] })
+  await checkpoint({ stage: 'engineering', outputs: [await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：16:9\n资产清单：木塔')], duration_seconds: 20 })
+  const withTower = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: 'Seedance', segment: '001' },
+    '纪录片开场。\n@图1：木塔，八角九层。\n【全局设定】\n【时间戳剧本分镜】\n晨雾中的@图1\n【全局补充】')
+  const pureText = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: 'Seedance', segment: '002' },
+    '纪录片空镜。\n【全局设定】\n【时间戳剧本分镜】\n工匠刨木，木屑飞起\n【全局补充】')
+  const prompts = refs => checkpoint({ stage: 'prompts', outputs: [withTower, pureText], segments: [
+    { path: withTower, start_seconds: 0, end_seconds: 10, refs: ['场景/木塔'] }, { path: pureText, start_seconds: 10, end_seconds: 20, refs }] })
+  await assert.rejects(prompts(['场景/木塔']), /数量/)
+  await prompts([])
+})
+
+test('assets stage follows the project style list: assets marked 文字带过 cannot be registered', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pipeline-advice-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '# 来源', version: 1 })
+  const checkpoint = input => tool.execute({ artifact_kind: 'pipeline_checkpoint', video_model: 'H3', episode_number: 1, content: JSON.stringify(input) }, exec)
+  const save = async (args, content) => (await tool.execute({ ...args, content }, exec)).path
+  await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+  await checkpoint({ stage: 'materials', outputs: [await save({ artifact_kind: 'story_summary' }, '# 故事梗概')] })
+  await checkpoint({ stage: 'style', outputs: [await save({ artifact_kind: 'film_style' },
+    '制作路线：旁白宣传片\n画面比例：16:9\n参考图方式：按段决定（只有木塔需要跨段一致）\n资产名称：木塔\n资产类别：场景\n参考图：需要（6段都出现）\n资产名称：工匠\n资产类别：角色\n参考图：文字带过（群体）')] })
+  const tower = await save({ artifact_kind: 'scene_asset', entity_name: '木塔' }, '# 木塔')
+  const crowd = await save({ artifact_kind: 'crowd_asset', entity_name: '工匠' }, '# 工匠')
+  await assert.rejects(checkpoint({ stage: 'assets', outputs: [tower, crowd] }), /工匠.*文字带过/)
+  await checkpoint({ stage: 'assets', outputs: [tower] })
 })
 
 test('full-auto may write a character three-panel format prompt straight from the read bio, without a separate design prompt', async t => {
@@ -606,7 +681,9 @@ test('source links use document-relative targets and summaries contain only read
 test('Seedance submits standalone five-module prompts with @ image lines and voice identity only in character lines', () => {
   const valid = '古装女子石道追问的电影片段。\n@图1：莫甘娜，银发金瞳。声音九维：年龄感成熟；音高中低；明暗冷亮；厚薄饱满；共鸣胸腔；气息稳定；颗粒感平滑；口音普通话；稳定表达习惯短句尾压低。\n@图2：石道，右侧石壁。\n@图1莫甘娜站在@图2石道左侧，面朝画外右侧。\n【全局设定】\n日间石道，二维平涂，左上日光，表演克制，无字幕。\n【时间戳剧本分镜】\n镜头1【0—1.5秒】：【追问】 ｜ 近景，平视，固定 ｜ @图1莫甘娜站在@图2石道中，轻声问：“真的要走吗？”\n情感解析：她等待对方亲口回答，目光不移开。\n【全局补充】\n保持同侧观察、统一光向，无BGM。'
   assert.doesNotThrow(() => validateSeedanceReferences(valid))
-  assert.throws(() => validateSeedanceReferences(valid.replace(/^@图.*\n/gm, '')), /参考图占位/)
+  // 本段没有入画资产（纯文生段）时不写 @图 行；但引用了 @图 就必须先定义。
+  assert.doesNotThrow(() => validateSeedanceReferences(valid.replace(/^@图.*\n/gm, '').replace(/@图\d/g, '')))
+  assert.throws(() => validateSeedanceReferences(valid.replace(/^@图.*\n/gm, '')), /未定义/)
   assert.throws(() => validateSeedanceReferences(valid.replace('@图2：', '@图1：')), /连续/)
   assert.throws(() => validateSeedanceReferences(valid.replace('站在@图2', '站在@图3')), /未定义/)
   assert.throws(() => validateSeedanceReferences(valid.replace('轻声问', '声音九维：音高中低，轻声问')), /九维/)

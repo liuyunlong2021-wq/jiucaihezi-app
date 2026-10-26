@@ -164,11 +164,29 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(workbench, /:target="manjuMode === 'prompts' \? 'prompts' : 'film'"/)
   // 到提示词不读模型参数、不显示生图与预算；每集标出已有进度能否复用。
   assert.match(controller, /const media = state\.config\.target !== 'prompts'/)
-  assert.match(panel, /<label v-if="film" class="manju-auto-row"><span>生图模型/)
+  assert.match(panel, /<label v-if="film && !pureText" class="manju-auto-row"><span>生图模型/)
+  // 参考图（2026-10-26 用户确认）：按段决定或纯文生；纯文生即 max_refs 为 0，不选生图模型、不审图。
+  assert.match(panel, /return pureText\.value \? \{ \.\.\.base, max_refs: 0 \} : base/)
+  assert.match(panel, /pureText\.value = last\.limits\?\.max_refs === 0/)
+  // 项目风格里的参考图建议（2026-10-26 用户确认）：确认卡优先按它预选，并显示要生几张图、约多少钱。
+  assert.match(controller, /advice: referenceAdvice\(style\)/)
+  assert.match(panel, /if \(draft\.advice\.mode\) pureText\.value = draft\.advice\.mode === 'pure'/)
+  assert.match(panel, /adviceSummary\(props\.draft\.advice, imageModel\.value\?\.price\)/)
+  const style = readFileSync('public/skills/jc-film-style/SKILL.md', 'utf8')
+  assert.match(style, /参考图方式：纯文生或按段决定/)
+  assert.match(style, /参考图：需要或文字带过/)
+  const pipeline = readFileSync('public/skills/jc-manju-pipeline/SKILL.md', 'utf8')
+  assert.match(pipeline, /入稿[\s\S]*参考图方式[\s\S]*风险/)
   assert.match(panel, /episodeTextStatus\(props\.draft\?\.checkpoints\[route\.value\]\[episode\], limits\.value\)/)
   // 确认卡默认沿用上一次运行（含已完成的）的模型、路线、分辨率、预算与审图方式。
   assert.match(controller, /last: saved\?\.config/)
   assert.match(panel, /const last = draft\.saved\?\.config \?\? draft\.last/)
+  // 审片（2026-10-26 用户要求）：拼接前逐段看，可单段重生成或改提示词，重生成期间不能确认。
+  assert.match(panel, /审核第 \{\{ cutReview\.episode \}\} 集视频片段/)
+  assert.match(panel, /emit\('regenerateSegment', index\)/)
+  assert.match(panel, /:disabled="anyBusy"[^>]*@click="emit\('approveCut'\)"/)
+  assert.match(workbench, /@approve-cut="manjuAuto\.approveCut"/)
+  assert.match(controller, /await resubmitSegment\(deps\.wikiRoot, checkpoint, index, deps\.video\)/)
   assert.match(workbench, /autoIntake \? `\$\{AUTO_INTAKE_PREFIX\}/, '全自动模式下用户剧本先入稿拆集')
   assert.match(workbench, /path\.endsWith\('\.json'\)[\s\S]*manjuAuto\.handleArtifactSaved\(path\)/)
   assert.match(workbench, /@start="\(config, resume\) => manjuAuto\.start\(config, resume\)"/)

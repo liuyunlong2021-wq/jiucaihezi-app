@@ -17,6 +17,7 @@ const draft: ManjuAutoDraft = {
   wikiRoot: 'wiki',
   episodes: [1, 2, 3],
   ratio: '9:16',
+  advice: { needed: [], skipped: [] },
   imageModels: [{ id: 'img-a', label: '生图 A', price: '0.2元/张' }, { id: 'img-b', label: '生图 B' }],
   videoModels: [{ id: 'vid-a', label: 'Seedance 2.5', price: '720p ¥0.5元/秒 · 480p ¥0.2元/秒',
     resolutions: ['720P', '480P'], duration: { max: 15 }, maxImages: 6 }],
@@ -69,6 +70,13 @@ test('全自动·参数：手机只给选择，电脑按确认卡同一规则拼
   const saved = { ...draft, saved: { version: 1, status: 'stopped', reviewed: false, episodes: {},
     config: { videoModel: 'H3' } } } as unknown as ManjuAutoDraft
   assert.equal(buildRemoteAutoRunConfig(saved, { episodes: [1], imageModelId: 'img-a', videoModelId: 'vid-a', reviewMode: 'new', route: 'Seedance' }).videoModel, 'Seedance')
+})
+
+test('全自动·参数：项目风格建议纯文生时，手机启动同样按纯文生（max_refs 为 0）', () => {
+  const config = buildRemoteAutoRunConfig({ ...draft, advice: { mode: 'pure', needed: [], skipped: [] } }, {
+    episodes: [1], imageModelId: 'img-a', videoModelId: 'vid-a', reviewMode: 'off',
+  })
+  assert.deepEqual(config.limits, { ...modelLimits('Seedance', draft.videoModels[0]!), max_refs: 0 })
 })
 
 test('全自动·参数：不在确认卡里的集数或模型、没确认比例，一律拒绝', () => {

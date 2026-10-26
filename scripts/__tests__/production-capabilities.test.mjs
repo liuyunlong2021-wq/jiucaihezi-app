@@ -456,7 +456,8 @@ test('actual SDK resumes a stopped pipeline until verified completion for both m
     const progress = JSON.parse(readFileSync(join(f.root, `wiki/制作流水线/${model}/第1集进度.json`), 'utf8'))
     assert.equal(progress.stage, 'complete')
     assert.equal(progress.status, 'completed')
-    if (model === 'Seedance') assert.ok(f.results().some(result => /缺少参考图占位/.test(String(result))))
+    // 纯文生段可以没有 @图 行（2026-10-26），但仍须五模块交付。
+    if (model === 'Seedance') assert.ok(f.results().some(result => /五模块/.test(String(result))))
     assert.ok(f.requests.some(request => JSON.stringify(request.messages).includes('流水线尚未完成')))
     assert.ok(f.results().every(result => !String(result).includes('前置阶段')))
   }

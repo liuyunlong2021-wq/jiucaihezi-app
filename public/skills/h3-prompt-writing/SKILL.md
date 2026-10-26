@@ -16,9 +16,9 @@ compatibility: Portable to any agent that can read local files — no external A
 
 # H3 Prompt Writing
 
-## 漫剧全自动成片（参考图生视频）
+## 全自动成片（按段选 Ref2VA 或 T2VA）
 
-流水线指令为【全自动成片·第N集】且视频模型为 H3 时，每段按 Ref2VA（`references/ref-en.txt`）写，宿主按本段资产图生成参考视频：
+流水线指令为【全自动成片·第N集】且视频模型为 H3 时，参考图按段决定：本段 refs 不为空就按 Ref2VA（`references/ref-en.txt`）写，宿主按本段资产图生成参考视频；refs 为空（纯文生项目，或本段是空镜、氛围等无需外观一致的画面）就按 T2VA（`references/base-en.txt`）写，不出现 `<Picture N>`，主体外观在正文里写清。用户明确要求纯文生或不用参考图时一律 T2VA，不以本节默认为由暂停。Ref2VA 段的规则：
 
 - 本段入画的角色、场景、已登记道具（仅剧情道具与角色标志物；杯碗筷、桌椅、食物等日常物件属于场景陈设，不占图）各对应一张 `<Picture N>`，从1连续编号，顺序与进度中本段 refs 一致；张数不超过指令给出的上限（如 6 张），超出就拆镜或减少本段入画资产，不合并资产。
 - 换装角色用其造型资产作一张 `<Picture N>` 并写全名（如 `<Subject 1> is 顾云舟·帝王 from <Picture 1>`），不另放服装图。

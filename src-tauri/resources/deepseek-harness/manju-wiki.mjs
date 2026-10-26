@@ -725,7 +725,6 @@ export function recordWikiRead(agent, target, observation, exec) {
 
 export function validateSeedanceReferences(content) {
   const definitions = [...content.matchAll(/^@图(\d+)[：:]([^\n]*)$/gm)]
-  if (!definitions.length) throw new Error('Seedance缺少参考图占位：每个资产须以@图1：……单独成行，镜内引用相同编号')
   if (definitions.some(match => /@图\d+[：:]/.test(match[2]))) throw new Error('每个参考图定义必须单独一行')
   if (definitions.some(match => !match[2].trim())) throw new Error('参考图行必须写明资产名称与特征')
   for (const match of definitions)
@@ -744,7 +743,7 @@ export function validateSeedanceReferences(content) {
   for (const line of content.split('\n'))
     if (/声音九维|年龄感[：:]|音高[：:]|共鸣[：:]|颗粒感[：:]/.test(line) && !/^@图\d+[：:]/.test(line))
       throw new Error('声音九维身份信息只能写在角色参考图行，不能放在分镜或全局设定里')
-  if (!/@图\d+/.test(content.slice(shots, ending))) throw new Error('分镜必须使用@图引用当前镜头资产')
+  if (definitions.length && !/@图\d+/.test(content.slice(shots, ending))) throw new Error('分镜必须使用@图引用当前镜头资产')
 }
 
 async function requirePipelineReads(ctx, args, exec, agent) {
@@ -823,7 +822,9 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   if (stage < 0 || !Array.isArray(input.outputs)) throw new Error('流水线进度需要有效stage和outputs数组')
   const target = await projectTarget(ctx, cwd, `${wikiRoot}/${spec.path}`, exec.signal, workspace)
   const previous = await ctx.fs.stat(target, exec.signal) ? JSON.parse(await ctx.fs.readText(target, exec.signal)) : undefined
-  if (stage > 0 && (!previous || ![stage - 1, stage].includes(pipelineStages.indexOf(previous.stage))))
+  // 审片修改（2026-10-26）：已完成的集可从 engineering 或 prompts 重开，沿用已登记的项目资料、风格与资产。
+  const reopen = previous?.stage === 'complete' && (input.stage === 'engineering' || input.stage === 'prompts')
+  if (stage > 0 && !reopen && (!previous || ![stage - 1, stage].includes(pipelineStages.indexOf(previous.stage))))
     throw new Error('流水线不能跳过尚未完成的前置阶段')
   if (input.stage === 'complete' && input.status === 'blocked') throw new Error('完成阶段不能同时标记暂停')
   if (input.status !== undefined && !['running', 'blocked', ...(input.stage === 'complete' ? ['completed'] : [])].includes(input.status)) throw new Error('流水线status无效')
@@ -832,7 +833,7 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   // 模型限制：全自动按所选视频模型写入（每段最长秒数、最多参考图张数）；未写入时两条路线都默认 30 秒（2026-10-26 MiniMax H3 也支持 30 秒）。
   const limits = stage === 0 ? input.limits : state.limits
   if (limits !== undefined && (!limits || !Number.isFinite(limits.max_seconds) || limits.max_seconds <= 0 || limits.max_seconds > 30
-    || (limits.max_refs !== undefined && (!Number.isInteger(limits.max_refs) || limits.max_refs < 1)))) throw new Error('limits 需为 {max_seconds: 1–30, max_refs: 正整数}')
+    || (limits.max_refs !== undefined && (!Number.isInteger(limits.max_refs) || limits.max_refs < 0)))) throw new Error('limits 需为 {max_seconds: 1–30, max_refs: 非负整数（0 为纯文生）}')
   const maxSeconds = limits?.max_seconds ?? 30
   const hashFile = async (path, output = true) => {
     if (typeof path !== 'string' || (output && !path.startsWith(`${wikiRoot}/`))) throw new Error('流水线产物必须位于当前Wiki')
@@ -848,7 +849,9 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
     if (await hashFile(path) !== hash) throw new Error(`前置产物已修改，请从该阶段重新规划：${path}`)
   const outputs = {}
   for (const path of input.outputs) outputs[path] = await hashFile(path)
-  if (stage > 0 && stage < 6 && Object.keys(outputs).length === 0) throw new Error('当前阶段没有真实产物，不能标记完成')
+  // 资产按需（2026-10-26）：纯文生或本集无需保持一致的实体时，资产阶段可以没有产物。
+  if (stage > 0 && stage < 6 && input.stage !== 'assets' && Object.keys(outputs).length === 0) throw new Error('当前阶段没有真实产物，不能标记完成')
+  if (input.stage === 'assets' && limits?.max_refs === 0 && input.outputs.length) throw new Error('本集为纯文生（max_refs 为 0）：不建资产提示词，assets 阶段 outputs 留空')
   if (input.stage === 'materials' && !input.outputs.some(path => /项目资料\/(?:[^/]+\/)?故事梗概\.md$/.test(path))) throw new Error('项目资料阶段需要故事梗概')
   if (input.stage === 'style') {
     const path = `${wikiRoot}/项目风格/影片比例与风格.md`
@@ -881,6 +884,15 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
       assets[id] = { kind: kinds[match[1]], prompt_path: path, prompt_hash: outputs[path] }
     }
   }
+  // 资产按项目风格清单执行（2026-10-26）：标为“参考图：文字带过”的实体不建资产、不生图。
+  if (input.stage === 'assets') {
+    const stylePath = `${wikiRoot}/项目风格/影片比例与风格.md`
+    const style = files.style?.[stylePath] ? await ctx.fs.readText(await projectTarget(ctx, cwd, stylePath, exec.signal, workspace), exec.signal) : ''
+    const skipped = style.split(/^(?=资产名称[：:])/m).slice(1)
+      .filter(block => /^参考图[：:]\s*文字带过/m.test(block)).map(block => block.match(/^资产名称[：:]\s*(.+)$/m)[1].trim())
+    const id = Object.keys(assets).find(id => skipped.includes(id.split('/')[1].split('·')[0]))
+    if (id) throw new Error(`项目风格把 ${id.split('/')[1]} 标为“参考图：文字带过”，不建资产：从 outputs 去掉，或先修改项目风格`)
+  }
   const duration = input.duration_seconds ?? state.duration_seconds
   if (stage >= 4 && (!Number.isFinite(duration) || duration <= 0)) throw new Error('工程阶段必须提供有效总时长预算duration_seconds')
   if (input.stage === 'engineering') {
@@ -900,7 +912,8 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
         || segment.end_seconds - segment.start_seconds > maxSeconds + 0.01) throw new Error(`片段命名、连续时间或每段${maxSeconds}秒上限不符合流水线合同`)
       await hashFile(path)
       if (stage === 5 && !outputs[path]) throw new Error('片段必须包含在本阶段outputs中')
-      if (stage === 5 && Object.keys(assets).length) {
+      // 参考图按段决定：没有登记资产且本段 refs 为空时即纯文生段，不做 @图/<Picture N> 绑定检查。
+      if (stage === 5 && (Object.keys(assets).length || segment.refs?.length)) {
         const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
         // Seedance：每个“@图N：”行；H3 Ref2VA：所有含 <Picture N> 的行（subject_definitions 等处写明对应资产）。
         const h3 = args.video_model === 'H3'

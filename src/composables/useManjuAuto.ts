@@ -6,9 +6,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
-import { createAutoRun, episodeInstruction, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint, type VideoRoute } from '@/runtime/manjuAuto/autoRunner'
+import { createAutoRun, deriveCheckpoint, episodeInstruction, handleCheckpointSaved, referenceAdvice, resumeAutoRun, revisionInstruction, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type ReferenceAdvice, type ReviewNotes, type RunnerCheckpoint, type VideoRoute } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
-import { ASSET_REGISTRY_PATH, awaitAsset, promptBody, regenerateAsset, type AssetRegistryEntry } from '@/runtime/manjuAuto/assetScheduler'
+import { ASSET_REGISTRY_PATH, awaitAsset, awaitEpisodeAssets, promptBody, regenerateAsset, type AssetRegistryEntry } from '@/runtime/manjuAuto/assetScheduler'
+import { awaitSegment, checkEpisodeVideos, regenerateSegment as resubmitSegment, submitEpisodeVideos } from '@/runtime/manjuAuto/videoScheduler'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 import { emitEvent } from '@/utils/eventBus'
 
@@ -25,6 +26,8 @@ export interface ManjuAutoDraft {
   wikiRoot: string
   episodes: number[]
   ratio?: string
+  /** 项目风格里的参考图建议：确认卡据此预选参考图方式并显示要生的图与费用。 */
+  advice: ReferenceAdvice
   imageModels: ManjuAutoModelOption[]
   videoModels: ManjuAutoModelOption[]
   saved?: AutoRunState
@@ -32,6 +35,9 @@ export interface ManjuAutoDraft {
   last?: AutoRunConfig
   /** 各路线已有的每集文字进度（自由创作或之前的运行写的），确认卡据此标出哪几集可直接复用。 */
   checkpoints: Record<VideoRoute, Record<number, RunnerCheckpoint>>
+  /** 「用 Seedance 出正式版」：确认卡预选的路线与集数。 */
+  route?: VideoRoute
+  select?: number[]
 }
 
 export const AUTO_INTAKE_PREFIX = '【全自动成片·入稿】'
@@ -75,6 +81,8 @@ export function useManjuAuto(options: {
   const run = ref<AutoRunState | null>(null)
   const draft = ref<ManjuAutoDraft | null>(null)
   const review = shallowRef<{ ids: string[]; images: Record<string, string> } | null>(null)
+  /** 审片：本集各段视频（按片段顺序），revised 为按修改意见重做过的段号（从 0 起）。忙碌与错误沿用 reviewBusy / reviewErrors，键为段号，整集修改用 revise。 */
+  const cutReview = shallowRef<{ episode: number; videos: string[]; revised?: number[] } | null>(null)
   /** 审图时正在单独重新生成的图，以及每张图最近一次重新生成的错误。 */
   const reviewBusy = ref<Record<string, boolean>>({})
   const reviewErrors = ref<Record<string, string>>({})
@@ -86,6 +94,7 @@ export function useManjuAuto(options: {
   const stopping = ref(false)
   let runFinished: Promise<void> | undefined
   let reviewResolve: ((value: 'approved' | 'stopped') => void) | undefined
+  let cutResolve: ((value: 'approved' | 'stopped') => void) | undefined
   let liveDeps: Parameters<typeof runAuto>[1] | undefined
   // runAuto 原地修改这份状态；事件处理必须改同一个对象，run.value 只是界面快照。
   let liveState: AutoRunState | undefined
@@ -103,7 +112,7 @@ export function useManjuAuto(options: {
    * 入稿回合结束后：扫描分集剧本、读取已确认比例、列出可用模型，弹出确认卡。
    * onlyIfReady：切换模式时用，没有分集剧本也没有可续做的运行就不弹卡，避免挡住待发送的剧本。
    */
-  async function prepare(prepareOptions: { onlyIfReady?: boolean } = {}) {
+  async function prepare(prepareOptions: { onlyIfReady?: boolean; route?: VideoRoute; select?: number[] } = {}) {
     const owner = options.owner()
     if (!owner) return
     preparing.value = true
@@ -133,11 +142,14 @@ export function useManjuAuto(options: {
       }
       draft.value = {
         wikiRoot, episodes, ratio,
+        advice: referenceAdvice(style),
         imageModels: normalizeModels(models, 'image'),
         videoModels: normalizeModels(models, 'video'),
         saved: saved && saved.status !== 'done' ? saved : undefined,
         last: saved?.config,
         checkpoints,
+        route: prepareOptions.route,
+        select: prepareOptions.select,
       }
     } catch (cause) {
       error.value = `无法准备全自动成片：${cause instanceof Error ? cause.message : String(cause)}`
@@ -193,6 +205,12 @@ export function useManjuAuto(options: {
           review.value = { ids, images }
           return new Promise(resolve => { reviewResolve = resolve })
         },
+        waitForVideoReview(episode, videos) {
+          reviewBusy.value = {}
+          reviewErrors.value = {}
+          cutReview.value = { episode, videos }
+          return new Promise(resolve => { cutResolve = resolve })
+        },
         async save(next) {
           // 第一次保存是“认领”：直接写入本轮 runId；之后每次保存才检查是否已被更新的运行接管。
           const onDisk = claimed ? await readJson<AutoRunState>(owner, `${wikiRoot}/${AUTO_RUN_PATH}`) : undefined
@@ -207,6 +225,14 @@ export function useManjuAuto(options: {
         shouldStop: () => mine.stopped,
         sleep,
       }
+      // 本路线还没写、另一路线已写完的集：沿用共用的项目资料、资产与工程剧本，只按本路线重写视频提示词。
+      const other: VideoRoute = state.config.videoModel === 'H3' ? 'Seedance' : 'H3'
+      for (const episode of state.config.episodes) {
+        const done = current.checkpoints[other][episode]
+        if (current.checkpoints[state.config.videoModel][episode] || done?.stage !== 'complete') continue
+        const derived = deriveCheckpoint(done as unknown as Record<string, unknown>, state.config.videoModel, state.config.limits)
+        await projectFiles.writeText(checkpointPath(wikiRoot, state.config.videoModel, episode), JSON.stringify(derived, null, 2) + '\n')
+      }
       liveDeps = deps
       liveState = state
       await runAuto(state, deps)
@@ -220,6 +246,7 @@ export function useManjuAuto(options: {
         liveDeps = undefined
         liveState = undefined
         review.value = null
+        cutReview.value = null
       }
       if (session === mine) stopping.value = false
       runFinished = undefined
@@ -251,6 +278,91 @@ export function useManjuAuto(options: {
     return promptBody(await files(owner).readText((await registryEntry(id)).prompt_path))
   }
 
+  /** 改写一个 Wiki 提示词正文，保留原标题；返回写入后的全文。 */
+  async function rewritePrompt(owner: string, path: string, body: string) {
+    const original = await files(owner).readText(path)
+    const heading = original.match(/^(?:\s*#[^\n]*\n)+/)?.[0] || ''
+    const text = `${heading}${body.trim()}\n`
+    await files(owner).writeText(path, text)
+    return text
+  }
+
+  async function segmentCheckpoint() {
+    const current = cutReview.value
+    const checkpoint = current && liveDeps ? await liveDeps.readCheckpoint(current.episode) : undefined
+    if (!current || !checkpoint) throw new Error('找不到本集进度')
+    return checkpoint
+  }
+
+  /** 审片面板读取一段的视频提示词正文（index 从 0 起）。 */
+  async function loadSegmentPrompt(index: number): Promise<string> {
+    const checkpoint = await segmentCheckpoint()
+    return promptBody(await files(options.owner()!).readText(checkpoint.segments[index].path))
+  }
+
+  /** 审片时单独重做一段：可先改提示词（保留标题），沿用原参考图与时长，只动这一段。 */
+  async function regenerateSegment(index: number, newPrompt?: string) {
+    const owner = options.owner()
+    const deps = liveDeps
+    const key = String(index)
+    if (!owner || !deps || !cutReview.value || reviewBusy.value[key]) return
+    reviewBusy.value = { ...reviewBusy.value, [key]: true }
+    reviewErrors.value = { ...reviewErrors.value, [key]: '' }
+    try {
+      const checkpoint = await segmentCheckpoint()
+      if (newPrompt !== undefined) await rewritePrompt(owner, checkpoint.segments[index].path, newPrompt)
+      await resubmitSegment(deps.wikiRoot, checkpoint, index, deps.video)
+      const video = await awaitSegment(deps.wikiRoot, checkpoint, index, deps.video, { sleep: ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs: 60 * 60_000 })
+      if (cutReview.value) cutReview.value = { ...cutReview.value, videos: cutReview.value.videos.map((item, i) => i === index ? video : item) }
+    } catch (cause) {
+      reviewErrors.value = { ...reviewErrors.value, [key]: cause instanceof Error ? cause.message : String(cause) }
+    } finally {
+      reviewBusy.value = { ...reviewBusy.value, [key]: false }
+    }
+  }
+
+  /**
+   * 审片后按修改意见重做本集：模型改工程剧本（或只改受影响的提示词），之后只重新提交提示词变了的段，
+   * 出齐后回到审片，可以反复改直到满意。
+   */
+  async function reviseEpisode(notes: ReviewNotes) {
+    const deps = liveDeps
+    const state = liveState
+    const current = cutReview.value
+    if (!deps || !state || !current || Object.values(reviewBusy.value).some(Boolean) || !Object.values(notes).some(note => note.trim())) return
+    reviewBusy.value = { ...reviewBusy.value, revise: true }
+    reviewErrors.value = {}
+    try {
+      await options.sendText(revisionInstruction(current.episode, state.config, notes))
+      const checkpoint = await deps.readCheckpoint(current.episode)
+      if (checkpoint?.stage !== 'complete') throw new Error(checkpoint?.reason || '修改没有完成，请看对话里的说明')
+      const gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { timeoutMs: 30 * 60_000, pollMs: 5000 })
+      if (gate.status !== 'ready') throw new Error(`参考图未就绪：${gate.status === 'stopped' ? '已停止' : [...gate.failed, ...gate.pending].join('、')}`)
+      await submitEpisodeVideos(deps.wikiRoot, checkpoint, gate.images, deps.video)
+      const deadline = Date.now() + 60 * 60_000
+      for (;;) {
+        const result = await checkEpisodeVideos(deps.wikiRoot, checkpoint, deps.video)
+        if (result.status === 'ready') {
+          if (cutReview.value) cutReview.value = { episode: current.episode, videos: result.videos, revised: result.videos.flatMap((video, i) => video === current.videos[i] ? [] : [i]) }
+          break
+        }
+        if (result.status === 'failed') throw new Error(`第${result.failed.join('、')}段视频生成失败`)
+        if (Date.now() >= deadline) throw new Error('等待重做的片段超时')
+        await new Promise(resolve => setTimeout(resolve, 5000))
+      }
+    } catch (cause) {
+      reviewErrors.value = { revise: cause instanceof Error ? cause.message : String(cause) }
+    } finally {
+      reviewBusy.value = { ...reviewBusy.value, revise: false }
+    }
+  }
+
+  function approveCut() {
+    if (Object.values(reviewBusy.value).some(Boolean)) return
+    cutReview.value = null
+    cutResolve?.('approved')
+  }
+
   /** 审图时单独重新生成一张：可先把改过的提示词写回 Wiki（保留原标题），只动这一张。 */
   async function regenerate(id: string, newPrompt?: string) {
     const owner = options.owner()
@@ -262,11 +374,7 @@ export function useManjuAuto(options: {
     try {
       let hash: string | undefined
       if (newPrompt !== undefined) {
-        const entry = await registryEntry(id)
-        const original = await files(owner).readText(entry.prompt_path)
-        const heading = original.match(/^(?:\s*#[^\n]*\n)+/)?.[0] || ''
-        const text = `${heading}${newPrompt.trim()}\n`
-        await files(owner).writeText(entry.prompt_path, text)
+        const text = await rewritePrompt(owner, (await registryEntry(id)).prompt_path, newPrompt)
         const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
         hash = [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
       }
@@ -300,7 +408,11 @@ export function useManjuAuto(options: {
       review.value = null
       reviewResolve?.('stopped')
     }
+    if (cutReview.value) {
+      cutReview.value = null
+      cutResolve?.('stopped')
+    }
   }
 
-  return { run, stopping, draft, review, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
+  return { run, stopping, draft, review, cutReview, loadSegmentPrompt, regenerateSegment, reviseEpisode, approveCut, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
 }
