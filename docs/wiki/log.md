@@ -3113,3 +3113,4 @@
 - 同日 R2 中转第 2 步回执：用户在服务器执行连通性脚本，R2 读、写、删除均正常，但 40 MB 上传用了 133 秒（约 315 KB/s，疑似 ECS 公网出口带宽上限，待用户在控制台确认）。同步搬运会超过 Cloudflare 回源 100 秒的上限，所以改为后台搬运：请求最多等 60 秒，没搬完就回 503 + Retry-After；App 对这种「准备中」按总时长最多等 15 分钟，不计入 4 次重试。先红后绿：r2direct 7 项（race ×3）、cargo media_download 12 项、cargo test --lib 527 项通过。未部署。
 - 同日 R2 中转第 4 步：App 的 Rust 下载层对 `https://api.jiucaihezi.studio/v1/videos/{task}/content` 先请求 `/api/creations/videos/{task}/content`，中转地址返回 404 时退回原地址；前端和任务记录都不改，旧任务也能用上。先红后绿：新增 3 项（改写规则、404 回退、跳转 R2 不带用户密钥），cargo test --lib 530 项通过。服务器路由未部署，未做真实验收。
 - 同日 R2 中转第 3 步：新增 `prepare-video-relay.sh`（只构建 `rc40-video-relay-20261026`，不切换生产，失败还原源码）及 4 项护栏测试，先红后绿。服务器只读核对：生产镜像、源码版本、5 个锁定文件的哈希全部一致。粘贴包已生成，尚未在服务器执行。
+- 同日 R2 中转镜像构建成功：`jiucaihezi/new-api:rc40-video-relay-20261026`，ID `sha256:0239e6f6…e4b4`，断网五包 go test 通过；第一次因 npm 偶发截断在 bun install 失败，已自动还原，重跑成功。生产未切换。
