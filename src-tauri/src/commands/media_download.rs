@@ -81,7 +81,7 @@ pub(crate) async fn download(
             Err(error) => Some(format!("下载连接失败：{}", super::http::download_error_detail(error))),
             Ok(response) => {
                 let status = response.status().as_u16();
-                if matches!(status, 408 | 429 | 500 | 502 | 503 | 504) {
+                if matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 520..=524) {
                     if let Some(seconds) = response.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| h.parse::<u64>().ok()) {
                         retry_delay = Duration::from_secs(seconds.min(60));
                     }
@@ -92,6 +92,12 @@ pub(crate) async fn download(
                     Some("服务器拒绝续传，改为完整下载".into())
                 } else if status != 200 && status != 206 {
                     return Err(format!("HTTP 下载失败：{status}"));
+                } else if status == 206 && response.headers().get("content-range").and_then(|h| h.to_str().ok()).and_then(range)
+                    .is_some_and(|(start, _, total)| offset == 0 || start != offset || saved.total.is_some_and(|old| old != total)
+                        || validator(response.headers()).is_some_and(|value| Some(&value) != saved.validator.as_ref())) {
+                    // Proxies may resume a different version; drop the partial rather than stay stuck on it.
+                    saved.validator = None;
+                    Some("续传响应与已有文件不一致，改为完整下载".into())
                 } else {
                     let response_headers = response.headers().clone();
                     let content_type = response_headers.get("content-type").and_then(|h| h.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("");
@@ -104,10 +110,6 @@ pub(crate) async fn download(
                     let (start, total) = if status == 206 {
                         let (start, _, total) = response_headers.get("content-range").and_then(|h| h.to_str().ok()).and_then(range)
                             .ok_or_else(|| "续传响应范围无效".to_string())?;
-                        if offset == 0 || start != offset || saved.total.is_some_and(|old| old != total)
-                            || received_validator.as_ref().is_some_and(|value| Some(value) != saved.validator.as_ref()) {
-                            return Err("续传响应与已有文件不一致，未追加".into());
-                        }
                         (start, Some(total))
                     } else { (0, response.content_length()) };
                     saved.validator = received_validator.or_else(|| (status == 206).then(|| saved.validator.clone()).flatten());
@@ -256,6 +258,8 @@ mod tests {
                 loop {
                     match listener.accept() {
                         Ok((mut socket, _)) => {
+                            // macOS sockets inherit the listener's non-blocking mode.
+                            socket.set_nonblocking(false).unwrap();
                             socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                             let mut buffer = [0; 4096];
                             let n = socket.read(&mut buffer).unwrap();
@@ -313,24 +317,56 @@ mod tests {
         assert_eq!(tokio::fs::read(temp).await.unwrap(), b"abcdefghij");
     }
 
+    async fn resume_from_partial(responses: Vec<&'static [u8]>) -> (Result<(HashMap<String, String>, u64), String>, Vec<String>, Vec<u8>) {
+        let (url, server) = scripted_server(responses);
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp = dir.path().join("video.mp4.part");
+        let meta = dir.path().join("video.mp4.part.json");
+        tokio::fs::write(&temp, b"12345").await.unwrap();
+        tokio::fs::write(&meta, serde_json::to_vec(&Checkpoint { identity: identity(&url), validator: Some("\"v1\"".into()), total: Some(10) }).unwrap()).await.unwrap();
+        let (_tx, rx) = watch::channel(false);
+        let result = download(&reqwest::Client::new(), &url, &HashMap::new(), &temp, &meta, rx, |_| {}).await;
+        (result, server.join().unwrap(), tokio::fs::read(temp).await.unwrap())
+    }
+
     #[tokio::test]
-    async fn wrong_range_never_appends_and_authentication_failure_is_not_retried() {
-        for (response, expected) in [
-            (&b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 0-4/10\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n67890"[..], "不一致"),
-            (&b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"[..], "401"),
+    async fn mismatched_resume_discards_partial_and_refetches_whole_file() {
+        // 实测：代理转发的续传给出不同 ETag 或错位范围，旧实现报错后半截文件永久卡死。
+        for mismatch in [
+            &b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 0-4/10\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n67890"[..],
+            &b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 5-9/10\r\nETag: \"v2\"\r\nConnection: close\r\n\r\n67890"[..],
         ] {
-            let (url, server) = scripted_server(vec![response]);
-            let dir = tempfile::TempDir::new().unwrap();
-            let temp = dir.path().join("video.mp4.part");
-            let meta = dir.path().join("video.mp4.part.json");
-            tokio::fs::write(&temp, b"12345").await.unwrap();
-            tokio::fs::write(&meta, serde_json::to_vec(&Checkpoint { identity: identity(&url), validator: Some("\"v1\"".into()), total: Some(10) }).unwrap()).await.unwrap();
-            let (_tx, rx) = watch::channel(false);
-            let result = download(&reqwest::Client::new(), &url, &HashMap::new(), &temp, &meta, rx, |_| {}).await;
-            assert!(result.unwrap_err().contains(expected));
-            assert_eq!(server.join().unwrap().len(), 1);
-            assert_eq!(tokio::fs::read(temp).await.unwrap(), b"12345");
+            let (result, requests, bytes) = resume_from_partial(vec![
+                mismatch,
+                b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nETag: \"v2\"\r\nConnection: close\r\n\r\nabcdefghij",
+            ]).await;
+            assert_eq!(result.unwrap().1, 10);
+            assert_eq!(requests.len(), 2);
+            assert!(!requests[1].contains("range:"), "{}", requests[1]);
+            assert_eq!(bytes, b"abcdefghij");
         }
+    }
+
+    #[tokio::test]
+    async fn authentication_failure_is_not_retried_and_keeps_partial() {
+        let (result, requests, bytes) = resume_from_partial(vec![b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"]).await;
+        assert!(result.unwrap_err().contains("401"));
+        assert_eq!(requests.len(), 1);
+        assert_eq!(bytes, b"12345");
+    }
+
+    #[tokio::test]
+    async fn cloudflare_origin_errors_are_retried() {
+        let (url, server) = scripted_server(vec![
+            b"HTTP/1.1 520 Unknown Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo",
+        ]);
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp = dir.path().join("video.mp4.part");
+        let meta = dir.path().join("video.mp4.part.json");
+        let (_tx, rx) = watch::channel(false);
+        download(&reqwest::Client::new(), &url, &HashMap::new(), &temp, &meta, rx, |_| {}).await.unwrap();
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]
