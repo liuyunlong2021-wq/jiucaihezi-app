@@ -59,7 +59,7 @@ export const meta = {
   apiVersion: 1,
   key: 'yuanliu',
   name: '源流 AI',
-  version: '0.3.0',
+  version: '0.3.1',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Yuanliu AI Seedance and Wan video generation',
@@ -196,8 +196,11 @@ export const protocols = {
         progress: Number(String(task.progress || '0').replace('%', '')),
         created_at: task.created_at,
       }
-      if (video.url) view.video_url = String(video.url)
       const snapshot = objectOf(task && task.data)
+      // 上游签名 OSS 地址直接给客户端下载（2026-10-26 用户确认可暴露）：经服务器转发的大视频受出口带宽限制会断。
+      const signed = [snapshot.result_url, snapshot.url].find(value => typeof value === 'string' && /^https:\/\//i.test(value))
+      if (task.status === 'SUCCESS' && signed) view.video_url = signed
+      else if (video.url) view.video_url = String(video.url)
       const error = objectOf(snapshot.error)
       if (error.message) view.error = String(error.message)
       return view

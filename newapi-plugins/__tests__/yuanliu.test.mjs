@@ -33,7 +33,7 @@ test('源流面板目录是标记包裹的纯 JSON，六型号与截图规格一
   const match = /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)
   assert.ok(match, 'catalog markers missing')
   assert.deepEqual(JSON.parse(match[1]), plugin.catalog)
-  assert.equal(plugin.meta.version, '0.3.0')
+  assert.equal(plugin.meta.version, '0.3.1')
   assert.deepEqual(models.map(model => model.name), Object.keys(EXPECTED))
   for (const model of models) {
     const expected = EXPECTED[model.name]
@@ -103,4 +103,16 @@ test('定价清单与目录一致，表达式按用户售价收费', () => {
       else assert.equal(price(row, { calls: 1, seconds: 10, resolution: key }), 10 * value, `${row.model} ${key}`)
     }
   }
+})
+
+test('源流成片把快照里的上游签名 result_url/url 透传为 video_url，客户端直接下载', () => {
+  // 2026-10-26 生产任务快照：result_url/url 为 ai.oss.tsyzai.com 的签名 OSS 地址；用户确认可暴露。
+  const signed = 'https://ai.oss.tsyzai.com/os/yuanliuai/aiwork/157/result-8636.mp4?Expires=1&Signature=s'
+  const render = (data, artifacts) => plugin.protocols.openai_video.render({ artifacts }, { task_id: 'task_yl', status: 'SUCCESS', data })
+  assert.equal(render({ result_url: signed, url: signed }).video_url, signed)
+  assert.equal(render({ url: signed }).video_url, signed)
+  // 没有 https 签名地址时仍交给宿主 content 通道。
+  assert.equal(render({}, { video: { url: '/v1/videos/task_yl/content' } }).video_url, '/v1/videos/task_yl/content')
+  assert.equal(render({ result_url: 'http://ai.oss.tsyzai.com/x.mp4' }, {}).video_url, undefined)
+  assert.equal(plugin.protocols.openai_video.render({}, { task_id: 'task_yl', status: 'IN_PROGRESS', data: { result_url: signed } }).video_url, undefined)
 })
