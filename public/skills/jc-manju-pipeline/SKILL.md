@@ -1,6 +1,6 @@
 ---
 name: jc-manju-pipeline
-description: 将用户提供的分集剧本与已确认的影片比例和风格，自动组织为项目资料、独立资产提示词、含资产清单的工程剧本，以及Seedance每段不超过30秒或MiniMax H3每段不超过15秒的视频提示词；逐步保存Wiki、校验阶段并支持中断续做，不生成图片或视频。
+description: 将用户提供的分集剧本与已确认的影片比例和风格，自动组织为项目资料、独立资产提示词、含资产清单的工程剧本，以及Seedance或MiniMax H3每段不超过30秒（以所选模型限制为准）的视频提示词；逐步保存Wiki、校验阶段并支持中断续做，不生成图片或视频。
 ---
 # 漫剧提示词流水线
 
@@ -29,7 +29,7 @@ description: 将用户提供的分集剧本与已确认的影片比例和风格�
 - **style**：用户已确认比例/风格直接填入film_style，不重新推荐另一套方向；缺明确风格才按 [项目风格](../jc-film-style/SKILL.md) 从故事梗概和本轮消息生成并等待必要确认。
 - **assets**：先read影片比例与风格；每个实体先read对应人物小传、场景说明或道具说明，形象生成后先read该角色生图提示词再生成格式提示词。刚写入不等于读取，不能凭聊天复用未读正文。按本集真实实体分别读取 [角色形象](../jc-juese-sheji/SKILL.md)、[角色格式](../jc-juese-geshi/SKILL.md)、[场景](../jc-scene-prompt/SKILL.md)、[道具](../jc-prop-prompt/SKILL.md)，有发声角色时读取 [角色声音](../jc-shengyin-sheji/SKILL.md)。场景说明记有“人群”的，每个群体按 [人群群像](../jc-renqun/SKILL.md) 保存一份 crowd_asset（跨集复用，已有则不重做）。本集用到人物小传“造型表”里尚未建立的造型时，按 [服装](../jc-fuzhuang-prompt/SKILL.md) 同阶段保存 costume_asset 与 character_look（entity_name 均为“角色名·造型名”），宿主先出身份图与服装图再融合成该造型的三格参考图；已有造型直接复用。各自输出并保存独立提示词；不生成图片，不虚构已存在参考图。
 - **engineering**：先read本集来源剧本、比例/风格及出场人物小传正文，再读取 [工程剧本](../jc-gongchengjuben/SKILL.md)，交付影片比例/风格、整集资产清单和逐镜正文。提前按选定模型上限设计自然切点，记录整集时长预算。已确认声音稿存在时继承，不额外增加未经要求的内容。
-- **prompts**：H3实际读取 [H3](../h3-prompt-writing/SKILL.md)，每段≤15秒；Seedance实际读取 [Seedance](../jc-seedance/SKILL.md)，每段≤30秒。只有用户选择分镜路线时才额外使用对应分镜Skill。每段按实际入画资产生成有序参考图占位，即使没有图片也写全，正文引用同一编号，提交正文不写待上传等操作备注；逐段read工程稿/对应分镜和所需资产正文，不用刚生成的聊天内容代替。逐段完整转写，不加速对白、不删动作、不机械截断；片段承接角色、位置、持物、场景、光线与声音状态。每段时间从0起。工程镜映射、全片时间与未实测的预算只记在工程稿/进度中，不写入Seedance提示词。
+- **prompts**：H3实际读取 [H3](../h3-prompt-writing/SKILL.md)，Seedance实际读取 [Seedance](../jc-seedance/SKILL.md)，每段不超过 limits.max_seconds（未给时30秒）。只有用户选择分镜路线时才额外使用对应分镜Skill。每段按实际入画资产生成有序参考图占位，即使没有图片也写全，正文引用同一编号，提交正文不写待上传等操作备注；逐段read工程稿/对应分镜和所需资产正文，不用刚生成的聊天内容代替。逐段完整转写，不加速对白、不删动作、不机械截断；片段承接角色、位置、持物、场景、光线与声音状态。每段时间从0起。工程镜映射、全片时间与未实测的预算只记在工程稿/进度中，不写入Seedance提示词。
 - **complete**：核对所有阶段文件仍存在、视频段连续覆盖工程总时长、格式与参考占位一致，保存完成checkpoint，再报告真实路径与时长预算。
 
 模型上限是产品分段策略，不代表任意供应商都支持该时长。若单句对白/动作无法在上限自然完成，保持内容因果重新拆镜；无法兼容时明确报告冲突，不谎报短时长。
@@ -38,7 +38,7 @@ description: 将用户提供的分集剧本与已确认的影片比例和风格�
 
 使用既有wiki_save_artifact，artifact_kind="pipeline_checkpoint"，episode_number与video_model必填。content传JSON字符串。阶段严格为plan → materials → style → assets → engineering → prompts → complete。
 
-- plan：`{"stage":"plan","source_path":"项目内真实剧本路径","outputs":[]}`。全自动指令给出 `"limits":{...}` 时原样写入 plan（如 `"limits":{"max_seconds":28,"max_refs":6}`）：程序据此校验每段时长与参考图张数，工程分段与视频提示词都按它设计；不写时默认 Seedance 30 秒、H3 15 秒。
+- plan：`{"stage":"plan","source_path":"项目内真实剧本路径","outputs":[]}`。全自动指令给出 `"limits":{...}` 时原样写入 plan（如 `"limits":{"max_seconds":28,"max_refs":6}`）：程序据此校验每段时长与参考图张数，工程分段与视频提示词都按它设计；不写时两条路线都默认30秒。
 - 中间阶段：`{"stage":"materials","outputs":["wiki/项目资料/故事梗概.md", "其他真实路径"]}`；每阶段只登记已成功写入的实际文件，不传示例占位。
 - engineering另传 `duration_seconds`（整集时间预算）。
 - prompts另传 `segments:[{"path":"wiki/剧本/视频提示词/Seedance/第1集001视频提示词.md","start_seconds":0,"end_seconds":28,"refs":["角色/顾云舟","场景/石道"]}, ...]`，使用整集连续时间、实际模型/集数/序号，末段终点等于工程总时长；outputs包括每段视频提示词。每段必传refs：按参考图编号顺序列出资产ID（`角色|场景|道具/实体名`，即assets阶段登记的资产），数量不超过 limits.max_refs。Seedance：数量等于本段@图行数，第N个ID的实体名须出现在@图N行。H3：使用 Ref2VA，`<Picture N>` 从1连续编号，数量等于本段不同的 `<Picture N>` 个数，第N个ID的实体名须出现在含 `<Picture N>` 的行（subject_definitions 逐行定义）。refs只记在进度里，不写进提示词正文。

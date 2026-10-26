@@ -81,7 +81,7 @@ test('character format requests accept existing character text and override ordi
 
 test('the composer retains the production entry without a model selector or model state', () => {
   const source = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
-  // 2026-10-25：按钮改为弹出模式菜单（提示词模式 / 全自动成片 / 退出），菜单项仍走 toggleManjuProduction。
+  // 2026-10-25：按钮改为弹出模式菜单（2026-10-26 起：自由创作 / 全自动·到提示词 / 全自动·到成片 / 退出），菜单项仍走 toggleManjuProduction。
   assert.match(source, /class="memory-manju-button"[^>]*@click="toggleManjuMenu\(\$event\)"/)
   assert.match(source, /function chooseManjuMode[\s\S]*?toggleManjuProduction\(\)/)
   assert.doesNotMatch(source, /memory-manju-model|manjuVideoModel|manjuModelSnapshot|changeManjuVideoModel/)
@@ -156,8 +156,17 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
   const panel = readFileSync('src/components/memory/ManjuAutoPanel.vue', 'utf8')
   const controller = readFileSync('src/composables/useManjuAuto.ts', 'utf8')
-  assert.match(workbench, /chooseManjuMode\('prompt'\)[\s\S]*提示词模式[\s\S]*chooseManjuMode\('auto'\)[\s\S]*全自动成片/)
-  assert.match(workbench, /const manjuAutoMode = ref\(false\)/, '默认提示词模式')
+  // 2026-10-26：三种用法——自由创作 / 全自动·到提示词 / 全自动·到成片，默认自由创作。
+  assert.match(workbench, /mode: 'free', label: '自由创作'[\s\S]*mode: 'prompts', label: '全自动·到提示词'[\s\S]*mode: 'film', label: '全自动·到成片'/)
+  assert.match(workbench, /const manjuMode = ref<'free' \| 'prompts' \| 'film'>\('free'\)/, '默认自由创作')
+  assert.match(workbench, /:target="manjuMode === 'prompts' \? 'prompts' : 'film'"/)
+  // 到提示词不读模型参数、不显示生图与预算；每集标出已有进度能否复用。
+  assert.match(controller, /const media = state\.config\.target !== 'prompts'/)
+  assert.match(panel, /<label v-if="film" class="manju-auto-row"><span>生图模型/)
+  assert.match(panel, /episodeTextStatus\(props\.draft\?\.checkpoints\[route\.value\]\[episode\], limits\.value\)/)
+  // 确认卡默认沿用上一次运行（含已完成的）的模型、路线、分辨率、预算与审图方式。
+  assert.match(controller, /last: saved\?\.config/)
+  assert.match(panel, /const last = draft\.saved\?\.config \?\? draft\.last/)
   assert.match(workbench, /autoIntake \? `\$\{AUTO_INTAKE_PREFIX\}/, '全自动模式下用户剧本先入稿拆集')
   assert.match(workbench, /path\.endsWith\('\.json'\)[\s\S]*manjuAuto\.handleArtifactSaved\(path\)/)
   assert.match(workbench, /@start="\(config, resume\) => manjuAuto\.start\(config, resume\)"/)
@@ -207,7 +216,7 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(panel, /limits: limits\.value/)
   // 回归（2026-10-25 实测）：有未完成运行时路线下拉被锁，无法改用 H3 重新开始。
   assert.doesNotMatch(panel, /v-model="route" :disabled/)
-  assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config\)/)
+  assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config, rewrite\)/)
   assert.match(controller, /checkpointPath\(wikiRoot, state\.config\.videoModel, episode\)/)
   // 每次运行独立停止开关 + runId 落盘守卫：旧运行（含热更新遗留）发现记录属于新运行就退出（2026-10-25 实测两个运行互相覆盖）。
   assert.doesNotMatch(controller, /stopRequested/)

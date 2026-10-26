@@ -63,7 +63,7 @@ export interface AssetSchedulerDeps extends WikiTaskDeps {
 }
 
 export interface AssetGateResult {
-  status: 'ready' | 'awaiting_review' | 'failed' | 'timeout'
+  status: 'ready' | 'awaiting_review' | 'failed' | 'timeout' | 'stopped'
   images: Record<string, string>
   failed: string[]
   pending: string[]
@@ -137,7 +137,7 @@ export async function awaitEpisodeAssets(
   wikiRoot: string,
   checkpoint: EpisodeCheckpoint,
   deps: AssetSchedulerDeps,
-  options: { timeoutMs: number; pollMs: number; review?: boolean },
+  options: { timeoutMs: number; pollMs: number; review?: boolean; shouldStop?: () => boolean },
 ): Promise<AssetGateResult> {
   const now = deps.now ?? Date.now
   const deadline = now() + options.timeoutMs
@@ -202,7 +202,10 @@ export async function awaitEpisodeAssets(
       return { status: review.length ? 'awaiting_review' : 'ready', images, failed, pending, review }
     }
     if (now() >= deadline) return { status: 'timeout', images, failed, pending, review: [] }
+    // 用户点停止：等图时每轮轮询都检查，不必等到 30 分钟闸门结束；已提交的任务继续在后台生成，续做时接着等。
+    if (options.shouldStop?.()) return { status: 'stopped', images, failed, pending, review: [] }
     await deps.sleep(options.pollMs)
+    if (options.shouldStop?.()) return { status: 'stopped', images, failed, pending, review: [] }
   }
 }
 

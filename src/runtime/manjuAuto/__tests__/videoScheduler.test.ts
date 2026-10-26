@@ -184,3 +184,16 @@ test('segments are submitted one at a time: each waits until the previous upload
   await submitEpisodeVideos(wiki, checkpoint, images, deps)
   assert.deepEqual(events, ['submit:v1', 'wait:v1', 'submit:v2', 'wait:v2'])
 })
+
+test('stop between segment submissions: submitted segments stay registered, the rest are submitted on resume', async () => {
+  const { deps, fs, submits } = fakeDeps(prompts)
+  let stop = false
+  deps.waitSubmitted = async () => { stop = true }
+  assert.equal(await submitEpisodeVideos(wiki, checkpoint, images, deps, () => stop), false)
+  assert.equal(submits.length, 1)
+  assert.equal(registry(fs).length, 1)
+  stop = false
+  deps.waitSubmitted = undefined
+  assert.equal(await submitEpisodeVideos(wiki, checkpoint, images, deps, () => stop), true)
+  assert.equal(submits.length, 2, '续做只补交第 2 段')
+})

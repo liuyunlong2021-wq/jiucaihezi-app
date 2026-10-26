@@ -134,7 +134,7 @@ test('pipeline checkpoints reject missing stages and overlong segments, then com
     const asset = await save({ artifact_kind: 'scene_asset', entity_name: '山门' }, '# 山门提示词')
     await checkpoint({ stage: 'assets', outputs: [asset] })
     const engineering = await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：山门\n镜头1')
-    const limit = model === 'H3' ? 15 : 30
+    const limit = 30
     await checkpoint({ stage: 'engineering', outputs: [engineering], duration_seconds: limit + 1 })
     const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, model === 'H3' ? '# 第一段\n<Picture 1> is 山门.' : '# 第一段\n@图1：山门')
     await assert.rejects(checkpoint({ stage: 'prompts', outputs: [first], segments: [{ path: first, start_seconds: 0, end_seconds: limit + 1 }] }), /上限/)

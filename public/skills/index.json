@@ -410,7 +410,7 @@
     "id": "jc-manju-pipeline",
     "name": "jc-manju-pipeline",
     "displayName": "jc-manju-pipeline",
-    "description": "将用户提供的分集剧本与已确认的影片比例和风格，自动组织为项目资料、独立资产提示词、含资产清单的工程剧本，以及Seedance每段不超过30秒或MiniMax H3每段不超过15秒的视频提示词；逐步保存Wiki、校验阶段并支持中断续做，不生成图片或视频。",
+    "description": "将用户提供的分集剧本与已确认的影片比例和风格，自动组织为项目资料、独立资产提示词、含资产清单的工程剧本，以及Seedance或MiniMax H3每段不超过30秒（以所选模型限制为准）的视频提示词；逐步保存Wiki、校验阶段并支持中断续做，不生成图片或视频。",
     "triggers": [],
     "commands": [],
     "files": [

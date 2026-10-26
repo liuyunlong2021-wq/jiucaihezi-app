@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
-import { createAutoRun, episodeInstruction, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint } from '@/runtime/manjuAuto/autoRunner'
+import { createAutoRun, episodeInstruction, handleCheckpointSaved, resumeAutoRun, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type RunnerCheckpoint, type VideoRoute } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
 import { ASSET_REGISTRY_PATH, awaitAsset, promptBody, regenerateAsset, type AssetRegistryEntry } from '@/runtime/manjuAuto/assetScheduler'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
@@ -28,6 +28,10 @@ export interface ManjuAutoDraft {
   imageModels: ManjuAutoModelOption[]
   videoModels: ManjuAutoModelOption[]
   saved?: AutoRunState
+  /** 上一次运行的设置（含已完成的运行）：确认卡默认沿用，不用每次重选模型与路线。 */
+  last?: AutoRunConfig
+  /** 各路线已有的每集文字进度（自由创作或之前的运行写的），确认卡据此标出哪几集可直接复用。 */
+  checkpoints: Record<VideoRoute, Record<number, RunnerCheckpoint>>
 }
 
 export const AUTO_INTAKE_PREFIX = '【全自动成片·入稿】'
@@ -77,7 +81,9 @@ export function useManjuAuto(options: {
   const error = ref('')
   const preparing = ref(false)
   /** 每次运行独立的停止开关：新运行不会把旧运行的“停止”重置掉。 */
-  let session: { stopped: boolean; wake?: () => void } | undefined
+  let session: { stopped: boolean; wakers: Set<() => void> } | undefined
+  /** 已点停止、正在等当前步骤收尾（模型回合或正在上传的视频结束后才真正停下）。 */
+  const stopping = ref(false)
   let runFinished: Promise<void> | undefined
   let reviewResolve: ((value: 'approved' | 'stopped') => void) | undefined
   let liveDeps: Parameters<typeof runAuto>[1] | undefined
@@ -112,6 +118,11 @@ export function useManjuAuto(options: {
       const ratio = style.match(/(\d+)\s*[:：]\s*(\d+)/)?.slice(1, 3).join(':')
       const saved = await readJson<AutoRunState>(owner, `${wikiRoot}/${AUTO_RUN_PATH}`)
       if (prepareOptions.onlyIfReady && !episodes.length && (!saved || saved.status === 'done')) return
+      const checkpoints: ManjuAutoDraft['checkpoints'] = { Seedance: {}, H3: {} }
+      for (const route of ['Seedance', 'H3'] as const) for (const episode of episodes) {
+        const path = checkpointPath(wikiRoot, route, episode)
+        if (paths.includes(path)) checkpoints[route][episode] = JSON.parse(await files(owner).readText(path)) as RunnerCheckpoint
+      }
       const models: Array<Record<string, unknown>> = []
       let cursor: string | null | undefined
       for (let page = 0; page < 10; page += 1) {
@@ -125,6 +136,8 @@ export function useManjuAuto(options: {
         imageModels: normalizeModels(models, 'image'),
         videoModels: normalizeModels(models, 'video'),
         saved: saved && saved.status !== 'done' ? saved : undefined,
+        last: saved?.config,
+        checkpoints,
       }
     } catch (cause) {
       error.value = `无法准备全自动成片：${cause instanceof Error ? cause.message : String(cause)}`
@@ -143,7 +156,13 @@ export function useManjuAuto(options: {
     }
     const state = { ...(resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)), runId: crypto.randomUUID() }
     const { wikiRoot } = current
-    const mine = { stopped: false } as { stopped: boolean; wake?: () => void }
+    const mine = { stopped: false, wakers: new Set<() => void>() }
+    // 运行器的 30 分钟等待和生图的 30 秒轮询都要能被“停止”立即唤醒。
+    const sleep = (ms: number) => new Promise<void>(resolve => {
+      const wake = () => { clearTimeout(timer); mine.wakers.delete(wake); resolve() }
+      const timer = setTimeout(wake, ms)
+      mine.wakers.add(wake)
+    })
     let claimed = false
     session = mine
     draft.value = null
@@ -152,13 +171,17 @@ export function useManjuAuto(options: {
     let finish: () => void = () => {}
     runFinished = new Promise(resolve => { finish = resolve })
     try {
-      const [imageProfile, videoProfile] = await Promise.all([loadMediaParamProfile(state.config.imageModelId), loadMediaParamProfile(state.config.videoModelId)])
+      // 只写提示词时不生图也不生视频，不读取模型参数（生图模型可以未选）。
+      const media = state.config.target !== 'prompts'
+      const [imageProfile, videoProfile] = media
+        ? await Promise.all([loadMediaParamProfile(state.config.imageModelId), loadMediaParamProfile(state.config.videoModelId)])
+        : [{ keys: [], imageKey: 'images' }, { keys: [], imageKey: 'images' }]
       const projectFiles = files(owner)
       const deps: Parameters<typeof runAuto>[1] = {
         wikiRoot,
-        runEpisodeText: episode => options.sendText(episodeInstruction(episode, wikiRoot, state.config)),
+        runEpisodeText: (episode, rewrite) => options.sendText(episodeInstruction(episode, wikiRoot, state.config, rewrite)),
         readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, state.config.videoModel, episode)),
-        asset: createDesktopAssetDeps(owner, { imageModelId: state.config.imageModelId, ratio: state.config.ratio }, imageProfile),
+        asset: { ...createDesktopAssetDeps(owner, { imageModelId: state.config.imageModelId, ratio: state.config.ratio }, imageProfile), sleep },
         video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio, resolution: state.config.videoResolution }, videoProfile),
         async concat(videos, durations, outputPath) {
           await invoke('media_concat_videos', { input: { inputs: videos, durations, outputPath: `${owner.replace(/[\\/]+$/, '')}/${outputPath}` } })
@@ -182,10 +205,7 @@ export function useManjuAuto(options: {
           await projectFiles.writeText(`${wikiRoot}/${AUTO_RUN_PATH}`, JSON.stringify(next, null, 2) + '\n')
         },
         shouldStop: () => mine.stopped,
-        sleep: ms => new Promise(resolve => {
-          const timer = setTimeout(resolve, ms)
-          mine.wake = () => { clearTimeout(timer); resolve() }
-        }),
+        sleep,
       }
       liveDeps = deps
       liveState = state
@@ -201,6 +221,7 @@ export function useManjuAuto(options: {
         liveState = undefined
         review.value = null
       }
+      if (session === mine) stopping.value = false
       runFinished = undefined
       finish()
     }
@@ -272,13 +293,14 @@ export function useManjuAuto(options: {
   }
 
   function stop() {
+    if (session && run.value?.status === 'running') stopping.value = true
     if (session) session.stopped = true
-    session?.wake?.()
+    for (const wake of [...session?.wakers ?? []]) wake()
     if (review.value) {
       review.value = null
       reviewResolve?.('stopped')
     }
   }
 
-  return { run, draft, review, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
+  return { run, stopping, draft, review, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
 }

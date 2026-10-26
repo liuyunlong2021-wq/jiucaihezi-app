@@ -97,12 +97,16 @@ async function submit(wikiRoot: string, checkpoint: VideoCheckpoint, registry: R
   await deps.waitSubmitted?.(entry.task_id)
 }
 
-/** 资产齐全后调用：按 refs 顺序取图提交每段视频，立即返回。指纹未变的段不重复提交。 */
-export async function submitEpisodeVideos(wikiRoot: string, checkpoint: VideoCheckpoint, images: Record<string, string>, deps: VideoSchedulerDeps) {
+/**
+ * 资产齐全后调用：按 refs 顺序取图提交每段视频，立即返回。指纹未变的段不重复提交。
+ * 每段要等上传完成（可能数分钟），段与段之间检查 shouldStop；停下返回 false，续做时只补交未提交的段。
+ */
+export async function submitEpisodeVideos(wikiRoot: string, checkpoint: VideoCheckpoint, images: Record<string, string>, deps: VideoSchedulerDeps, shouldStop?: () => boolean): Promise<boolean> {
   const prepared = await Promise.all(checkpoint.segments.map(segment => prepare(segment, images, deps)))
   const registry = await load(wikiRoot, checkpoint, deps)
   registry.segments.length = Math.min(registry.segments.length, checkpoint.segments.length)
   for (const [index, segment] of checkpoint.segments.entries()) {
+    if (shouldStop?.()) { await save(wikiRoot, checkpoint, registry, deps); return false }
     const current = registry.segments[index]
     if (current?.path === segment.path && current.fingerprint === prepared[index].fingerprint && current.status !== 'failed') continue
     const { fingerprint, images: ordered, durationSeconds } = prepared[index]
@@ -111,6 +115,7 @@ export async function submitEpisodeVideos(wikiRoot: string, checkpoint: VideoChe
     await submit(wikiRoot, checkpoint, registry, index, deps)
   }
   await save(wikiRoot, checkpoint, registry, deps)
+  return true
 }
 
 /** 新一次运行时调用：上次最终失败的片段用登记的参考图与时长重新给一轮机会。返回重提的段号（从 1 起）。 */

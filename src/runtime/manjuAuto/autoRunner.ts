@@ -3,7 +3,7 @@
  *
  * 每集：文字流水线（模型）→ 资产生图（资产阶段保存时已提前提交）→ 资产闸门（第 1 集审图）
  * → 按 refs 提交视频，不等待 → 直接进入下一集。视频在集与集之间、以及全部文字完成后
- * 每 30 分钟检查一次；某集视频全部完成即用 ffmpeg 拼接成片。
+ * 每分钟检查一次；某集视频全部完成即用 ffmpeg 拼接成片。
  * 运行状态落盘在 Wiki，停止后可从原集续做；花钱的参数只来自启动确认卡写入的 config。
  */
 import { assetsToSubmit, awaitEpisodeAssets, lockAssets, submitEpisodeAssets, type AssetSchedulerDeps, type EpisodeCheckpoint } from './assetScheduler'
@@ -11,7 +11,8 @@ import { checkEpisodeVideos, retryFailedVideos, submitEpisodeVideos, type VideoC
 
 export const AUTO_RUN_PATH = '制作流水线/全自动运行.json'
 const ASSET_GATE = { timeoutMs: 30 * 60_000, pollMs: 30_000 }
-const VIDEO_CHECK_MS = 30 * 60_000
+// 只读本机任务记录（上游轮询由任务系统负责），查得勤不多花钱；实测 H3 几分钟就出片，30 分钟一查会白等。
+const VIDEO_CHECK_MS = 60_000
 
 export type VideoRoute = 'Seedance' | 'H3'
 
@@ -24,6 +25,8 @@ export interface ModelLimits {
 }
 
 export interface AutoRunConfig {
+  /** prompts：只跑文字流水线到 complete（不生图、不生视频）；film（缺省）：直到成片。 */
+  target?: 'prompts' | 'film'
   episodes: number[]
   videoModel: VideoRoute
   limits?: ModelLimits
@@ -70,8 +73,8 @@ export interface RunnerCheckpoint extends EpisodeCheckpoint, VideoCheckpoint {
 
 export interface AutoRunnerDeps {
   wikiRoot: string
-  /** 发送本集文字流水线指令并等待模型回合结束。 */
-  runEpisodeText(episode: number): Promise<void>
+  /** 发送本集文字流水线指令并等待模型回合结束；rewrite 为已有提示词不符合所选模型的原因。 */
+  runEpisodeText(episode: number, rewrite?: string): Promise<void>
   readCheckpoint(episode: number): Promise<RunnerCheckpoint | undefined>
   asset: AssetSchedulerDeps
   video: VideoSchedulerDeps
@@ -94,18 +97,36 @@ export function resumeAutoRun(saved: AutoRunState, config: AutoRunConfig): AutoR
 /** 由视频模型登记的时长与参考图上限得出限制；固定档位取 ≤30 秒的最大档，范围上限封顶 30 秒；未知时按路线默认。 */
 export function modelLimits(route: VideoRoute, model: { duration?: { min?: number; max?: number; allowedValues?: number[] }; maxImages?: number }): ModelLimits {
   const allowed = model.duration?.allowedValues?.filter(value => value <= 30).sort((a, b) => a - b)
-  const max = allowed?.length ? allowed.at(-1)! : Math.min(model.duration?.max ?? (route === 'H3' ? 15 : 30), 30)
+  const max = allowed?.length ? allowed.at(-1)! : Math.min(model.duration?.max ?? 30, 30)
   return { max_seconds: max, ...(model.maxImages !== undefined && { max_refs: model.maxImages }), ...(allowed?.length && { allowed_seconds: allowed }) }
 }
 
-export function episodeInstruction(episode: number, wikiRoot: string, config: Pick<AutoRunConfig, 'videoModel' | 'limits'>): string {
+/**
+ * 本集文字进度对所选模型是否可用：自由创作或别的运行写好的进度直接复用，
+ * 但有片段超过所选模型的时长或参考图上限时要按新模型重写（路线不同本来就是另一份进度文件）。
+ */
+export function episodeTextStatus(checkpoint: Pick<RunnerCheckpoint, 'stage' | 'segments'> | undefined, limits: ModelLimits):
+  { state: 'none' } | { state: 'partial'; stage: string } | { state: 'complete' } | { state: 'stale'; reason: string } {
+  if (!checkpoint) return { state: 'none' }
+  if (checkpoint.stage !== 'complete') return { state: 'partial', stage: checkpoint.stage }
+  for (const [index, segment] of checkpoint.segments.entries()) {
+    const seconds = Math.round((segment.end_seconds - segment.start_seconds) * 100) / 100
+    if (seconds > limits.max_seconds) return { state: 'stale', reason: `片段${index + 1} ${seconds} 秒，超过所选模型 ${limits.max_seconds} 秒` }
+    const refs = segment.refs?.length ?? 0
+    if (limits.max_refs !== undefined && refs > limits.max_refs) return { state: 'stale', reason: `片段${index + 1} 用了 ${refs} 张参考图，超过所选模型 ${limits.max_refs} 张` }
+  }
+  return { state: 'complete' }
+}
+
+export function episodeInstruction(episode: number, wikiRoot: string, config: Pick<AutoRunConfig, 'videoModel' | 'limits'>, rewrite?: string): string {
   const limits = config.limits ?? modelLimits(config.videoModel, {})
   const duration = limits.allowed_seconds?.length
     ? `所选视频模型只支持 ${limits.allowed_seconds.join('/')} 秒：每段尽量写满一档（优先 ${limits.max_seconds} 秒），每段不超过 ${limits.max_seconds} 秒`
     : `所选视频模型每段不超过 ${limits.max_seconds} 秒`
   const refs = limits.max_refs ? `，每段最多 ${limits.max_refs} 张参考图（超出就拆镜或减少本段入画资产）` : ''
   const plan = JSON.stringify({ max_seconds: limits.max_seconds, ...(limits.max_refs && { max_refs: limits.max_refs }) })
-  return `【全自动成片·第${episode}集】请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${config.videoModel}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求，从 plan 连续执行到 complete。${duration}${refs}；plan 进度写入 "limits":${plan}。`
+  const redo = rewrite ? `本集已有提示词不符合所选视频模型（${rewrite}），请从 plan 重新执行，按新限制重写分段与视频提示词，已确认的项目资料与资产提示词可沿用。` : ''
+  return `【全自动成片·第${episode}集】${redo}请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${config.videoModel}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求，从 plan 连续执行到 complete。${duration}${refs}；plan 进度写入 "limits":${plan}。`
 }
 
 /** 分档价格（如“480P ¥0.2/秒 · 720P ¥0.4/秒”）取所选分辨率那一档；不分档返回 undefined。 */
@@ -152,7 +173,7 @@ async function submitAssets(state: AutoRunState, checkpoint: RunnerCheckpoint, d
 /** 宿主收到进度文件保存事件时调用：资产阶段一完成就提交生图，不等文字流水线结束。 */
 export async function handleCheckpointSaved(state: AutoRunState, checkpoint: RunnerCheckpoint, deps: AutoRunnerDeps) {
   const episode = state.episodes[String(checkpoint.episode_number)]
-  if (state.status !== 'running' || !episode || checkpoint.video_model !== state.config.videoModel || !checkpoint.assets) return
+  if (state.config.target === 'prompts' || state.status !== 'running' || !episode || checkpoint.video_model !== state.config.videoModel || !checkpoint.assets) return
   await submitAssets(state, checkpoint, deps)
   await deps.save(state)
 }
@@ -188,34 +209,43 @@ export async function runAuto(state: AutoRunState, deps: AutoRunnerDeps): Promis
     if (['videos', 'concat', 'done'].includes(episode.phase)) continue
     if (deps.shouldStop()) { state.status = 'stopped'; await deps.save(state); return state }
 
+    const limits = state.config.limits ?? modelLimits(state.config.videoModel, {})
     let checkpoint = await deps.readCheckpoint(n)
-    if (checkpoint?.stage !== 'complete') {
+    let text = episodeTextStatus(checkpoint, limits)
+    if (text.state !== 'complete') {
       episode.phase = 'text'
       await deps.save(state)
-      await deps.runEpisodeText(n)
+      await deps.runEpisodeText(n, text.state === 'stale' ? text.reason : undefined)
       // 资产阶段保存事件可能已因预算拦截本集（TS 不知道回调会改状态，需显式放宽类型）。
       if ((state.status as AutoRunState['status']) === 'blocked') { await deps.save(state); return state }
       checkpoint = await deps.readCheckpoint(n)
+      text = episodeTextStatus(checkpoint, limits)
     }
-    if (checkpoint?.stage !== 'complete') {
-      block(state, episode, checkpoint?.reason || `第${n}集文字流水线未完成`)
+    if (!checkpoint || text.state !== 'complete') {
+      block(state, episode, text.state === 'stale' ? text.reason : checkpoint?.reason || `第${n}集文字流水线未完成`)
       await deps.save(state)
       return state
+    }
+    if (state.config.target === 'prompts') {
+      episode.phase = 'done'
+      await deps.save(state)
+      continue
     }
 
     if (episode.phase !== 'review') episode.phase = 'assets'
     if (!await submitAssets(state, checkpoint, deps)) { await deps.save(state); return state }
     await deps.save(state)
     const reviewMode = state.config.reviewMode ?? (state.config.review ? 'first' : 'off')
-    let gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { ...ASSET_GATE, review: reviewMode === 'new' || (reviewMode === 'first' && !state.reviewed) })
+    let gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { ...ASSET_GATE, shouldStop: deps.shouldStop, review: reviewMode === 'new' || (reviewMode === 'first' && !state.reviewed) })
     if (gate.status === 'awaiting_review') {
       episode.phase = 'review'
       await deps.save(state)
       if (await deps.waitForReview(gate.review, gate.images) === 'stopped') { state.status = 'stopped'; await deps.save(state); return state }
       await lockAssets(deps.wikiRoot, gate.review, deps.asset)
       state.reviewed = true
-      gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, ASSET_GATE)
+      gate = await awaitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { ...ASSET_GATE, shouldStop: deps.shouldStop })
     }
+    if (gate.status === 'stopped') { state.status = 'stopped'; await deps.save(state); return state }
     if (gate.status !== 'ready') {
       block(state, episode, `资产未就绪：${[...gate.failed, ...gate.pending].join('、')}`)
       await deps.save(state)
@@ -233,7 +263,7 @@ export async function runAuto(state: AutoRunState, deps: AutoRunnerDeps): Promis
       return state
     }
     try {
-      await submitEpisodeVideos(deps.wikiRoot, checkpoint, gate.images, deps.video)
+      if (!await submitEpisodeVideos(deps.wikiRoot, checkpoint, gate.images, deps.video, deps.shouldStop)) { state.status = 'stopped'; await deps.save(state); return state }
     } catch (error) {
       block(state, episode, error instanceof Error ? error.message : String(error))
       await deps.save(state)

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createAutoRun, episodeInstruction, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, runAuto, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
+import { createAutoRun, episodeInstruction, episodeTextStatus, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, runAuto, type AutoRunConfig, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
 
 /** 假世界：文字流水线一跑就写出完整进度；生图/视频任务按测试设定完成。 */
-function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number; newAssetIn?: number } = {}) {
+function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: boolean; textFails?: number; newAssetIn?: number; config?: Partial<AutoRunConfig> } = {}) {
   const fs = new Map<string, string>()
   const tasks = new Map<string, Task>()
   const log: string[] = []
@@ -28,8 +28,8 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
   }
   const deps: AutoRunnerDeps = {
     wikiRoot: 'wiki',
-    async runEpisodeText(episode) {
-      log.push(`text:${episode}`)
+    async runEpisodeText(episode, rewrite) {
+      log.push(rewrite ? `text:${episode}:rewrite` : `text:${episode}`)
       if (options.textFails === episode) {
         checkpoints.set(episode, { episode_number: episode, video_model: 'Seedance', stage: 'assets', status: 'blocked', reason: '缺少风格', segments: [] })
         return
@@ -68,9 +68,9 @@ function world(options: { episodes?: number[]; imageOk?: boolean; videoOk?: bool
     async sleep() { log.push('sleep'); settle() },
   }
   const run = createAutoRun({
-    episodes: options.episodes ?? [1, 2], videoModel: 'Seedance', imageModelId: 'img', videoModelId: 'vid', ratio: '9:16', review: true,
+    episodes: options.episodes ?? [1, 2], videoModel: 'Seedance', imageModelId: 'img', videoModelId: 'vid', ratio: '9:16', review: true, ...options.config,
   })
-  return { deps, run, fs, log, images, videos, concats, get reviewCalls() { return reviewCalls }, setApprove(v: typeof approve) { approve = v }, setStop(v: boolean) { stop = v } }
+  return { deps, run, fs, log, checkpoints, images, videos, concats, get reviewCalls() { return reviewCalls }, setApprove(v: typeof approve) { approve = v }, setStop(v: boolean) { stop = v } }
 }
 
 test('runs episodes in order, submits assets early, reviews only the first episode, then concatenates each episode', async () => {
@@ -233,7 +233,7 @@ test('model limits come from the chosen video model: fixed tiers use the largest
   assert.deepEqual(modelLimits('H3', { duration: { min: 1, max: 28 }, maxImages: 6 }), { max_seconds: 28, max_refs: 6 })
   assert.deepEqual(modelLimits('Seedance', { duration: { allowedValues: [15, 30] }, maxImages: 9 }), { max_seconds: 30, max_refs: 9, allowed_seconds: [15, 30] })
   assert.deepEqual(modelLimits('Seedance', { duration: { min: 2, max: 60 } }), { max_seconds: 30 })
-  assert.deepEqual(modelLimits('H3', {}), { max_seconds: 15 }, '未知限制时按路线默认')
+  assert.deepEqual(modelLimits('H3', {}), { max_seconds: 30 }, '未知限制时按默认 30 秒（2026-10-26 MiniMax H3 也支持 30 秒）')
 })
 
 test('episode instruction names the route and the model limits the pipeline must write into plan', () => {
@@ -276,4 +276,51 @@ test('review mode "new" skips the pause when an episode has no new assets; "off"
   off.deps.waitForReview = async () => { offCalls += 1; return 'approved' }
   assert.equal((await runAuto(off.run, off.deps)).status, 'done')
   assert.equal(offCalls, 0)
+})
+
+test('target "prompts" writes every episode up to complete prompts and never spends on images or videos', async () => {
+  const w = world({ config: { target: 'prompts' } })
+  const result = await runAuto(w.run, w.deps)
+  assert.equal(result.status, 'done')
+  assert.deepEqual(w.log.filter(entry => entry.startsWith('text')), ['text:1', 'text:2'])
+  assert.equal(w.images.length, 0, '资产阶段保存事件也不提交生图')
+  assert.equal(w.videos.length, 0)
+  assert.equal(w.concats.length, 0)
+  assert.equal(result.episodes['1'].phase, 'done')
+})
+
+test('episode text status: complete within limits, stale when a segment breaks the chosen model limits, partial, none', () => {
+  const checkpoint = (stage: string, seconds: number, refs: number) => ({ episode_number: 1, video_model: 'H3', stage,
+    segments: [{ path: 'a.md', start_seconds: 0, end_seconds: seconds, refs: Array.from({ length: refs }, (_, i) => `角色/${i}`) }] })
+  assert.deepEqual(episodeTextStatus(undefined, { max_seconds: 28, max_refs: 6 }), { state: 'none' })
+  assert.deepEqual(episodeTextStatus(checkpoint('engineering', 0, 0), { max_seconds: 28 }), { state: 'partial', stage: 'engineering' })
+  assert.deepEqual(episodeTextStatus(checkpoint('complete', 28, 6), { max_seconds: 28, max_refs: 6 }), { state: 'complete' })
+  assert.match(episodeTextStatus(checkpoint('complete', 30, 2), { max_seconds: 15 }).reason!, /30 秒.*15 秒/)
+  assert.match(episodeTextStatus(checkpoint('complete', 10, 7), { max_seconds: 28, max_refs: 6 }).reason!, /7 张.*6 张/)
+  assert.equal(episodeTextStatus(checkpoint('complete', 30, 2), { max_seconds: 15 }).state, 'stale')
+})
+
+test('an episode already complete from free creation skips the text turn; one written for another model is rewritten', async () => {
+  const w = world({ episodes: [1, 2], config: { target: 'prompts', limits: { max_seconds: 15 } } })
+  w.checkpoints.set(1, { episode_number: 1, video_model: 'Seedance', stage: 'complete', segments: [{ path: 'a.md', start_seconds: 0, end_seconds: 12, refs: [] }] })
+  w.checkpoints.set(2, { episode_number: 2, video_model: 'Seedance', stage: 'complete', segments: [{ path: 'b.md', start_seconds: 0, end_seconds: 30, refs: [] }] })
+  const result = await runAuto(w.run, w.deps)
+  assert.deepEqual(w.log.filter(entry => entry.startsWith('text')), ['text:2:rewrite'])
+  assert.equal(result.status, 'done')
+})
+
+test('episode instruction for a rewrite tells the pipeline why the old prompts must be redone from plan', () => {
+  const text = episodeInstruction(2, 'wiki', { videoModel: 'H3', limits: { max_seconds: 15 } }, '片段1 30 秒，超过所选模型 15 秒')
+  assert.match(text, /重新执行/)
+  assert.match(text, /片段1 30 秒/)
+})
+
+test('stopping while waiting for asset images stops at the next poll instead of after the 30-minute gate', async () => {
+  const w = world({ episodes: [1] })
+  const sleep = w.deps.asset.sleep
+  w.deps.asset.sleep = async ms => { w.setStop(true); await sleep(ms) }
+  const result = await runAuto(w.run, w.deps)
+  assert.equal(result.status, 'stopped')
+  assert.equal(result.episodes['1'].phase, 'assets', '续做时从资产阶段接着等')
+  assert.equal(w.videos.length, 0)
 })

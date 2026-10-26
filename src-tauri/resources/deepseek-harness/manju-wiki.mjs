@@ -829,11 +829,11 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   if (input.status !== undefined && !['running', 'blocked', ...(input.stage === 'complete' ? ['completed'] : [])].includes(input.status)) throw new Error('流水线status无效')
   if (input.status === 'blocked' && !String(input.reason || '').trim()) throw new Error('暂停流水线必须说明原因')
   const state = stage === 0 ? {} : previous
-  // 模型限制：全自动按所选视频模型写入（每段最长秒数、最多参考图张数）；未写入时沿用默认 Seedance 30 / H3 15 秒。
+  // 模型限制：全自动按所选视频模型写入（每段最长秒数、最多参考图张数）；未写入时两条路线都默认 30 秒（2026-10-26 MiniMax H3 也支持 30 秒）。
   const limits = stage === 0 ? input.limits : state.limits
   if (limits !== undefined && (!limits || !Number.isFinite(limits.max_seconds) || limits.max_seconds <= 0 || limits.max_seconds > 30
     || (limits.max_refs !== undefined && (!Number.isInteger(limits.max_refs) || limits.max_refs < 1)))) throw new Error('limits 需为 {max_seconds: 1–30, max_refs: 正整数}')
-  const maxSeconds = limits?.max_seconds ?? (args.video_model === 'H3' ? 15 : 30)
+  const maxSeconds = limits?.max_seconds ?? 30
   const hashFile = async (path, output = true) => {
     if (typeof path !== 'string' || (output && !path.startsWith(`${wikiRoot}/`))) throw new Error('流水线产物必须位于当前Wiki')
     const file = await projectTarget(ctx, cwd, path, exec.signal, workspace)
