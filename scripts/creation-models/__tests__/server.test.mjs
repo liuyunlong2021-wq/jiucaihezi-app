@@ -268,7 +268,7 @@ test('calibrated yihong, yuanliu and FK official routes match exact public chann
     ['newapi/yuanliu/yl_seedance-2-5_6caffaca7390', 'Seedance 2.5(HD)'],
     ['newapi/yuanliu/yl_pp_mj_sd25_30010', 'Seedance 2.5 720p (QN-12)'],
     ['newapi/yuanliu/yl_g7zy_seedance_v2_5_s', 'Seedance 2.5 (LJ-02)'],
-    ['官方渠道-Seedance 2.5 满血 720p', '官方渠道-Seedance 2.5 满血 720p'],
+    ['特价渠道 MiniMax H3 480p-1080p', 'ft-video-v1-1eb6d53a32efa02adf7ae338f3239628'],
   ]
   for (const [id, model] of cases) {
     assert.equal(buildCreationModelAvailability([{ id: 1, name: 'fixture', status: 1, models: [model] }]).find(item => item.id === id)?.status, 'enabled')
@@ -305,26 +305,27 @@ test('目录型号随可用性下发规格，价格以 NewAPI 实际表达式为
   const { readFileSync } = await import('node:fs')
   const source = readFileSync(new URL('../../../newapi-plugins/fk.plugin.js', import.meta.url), 'utf8')
   const real = '特价渠道 Seedance 2.5 满血 720p（可过真人）'
-  const official = '官方渠道-Seedance 2.5 满血 720p'
+  const special = '特价渠道 Seedance 2.0 满血 480p (933)'
+  const h3 = '特价渠道 MiniMax H3 480p-1080p'
   const catalogModels = buildCatalogModels(
-    [{ key: 'fk', version: '0.5.0', catalog: /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)[1] }, { key: 'other', version: '1', catalog: null }],
+    [{ key: 'fk', version: '0.6.0', catalog: /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)[1] }, { key: 'other', version: '1', catalog: null }],
     {
       'billing_setting.plugin_billing_expr': JSON.stringify({ [`fk::${real}`]: 'tier("base", u("calls") * 6)' }),
-      'billing_setting.billing_expr': JSON.stringify({ 'Wan 3.0 720-1080p': 'tier("base", u("seconds_720p") * 0.3 + u("seconds_1080p") * 0.4)' }),
+      'billing_setting.billing_expr': JSON.stringify({ [h3]: 'tier("base", u("seconds_480p") * 0.1 + u("seconds_720p") * 0.1 + u("seconds_768p") * 0.2 + u("seconds_1080p") * 0.3)' }),
     },
   )
-  assert.equal(catalogModels.length, 7)
-  const channels = [{ id: 1, name: 'fk', status: 1, baseUrl: '', models: [real, 'Wan 3.0 720-1080p'] }]
+  assert.equal(catalogModels.length, 5)
+  const channels = [{ id: 1, name: 'fk', status: 1, baseUrl: '', models: [real, h3] }]
   const models = buildCreationModelAvailability(channels, new Date('2026-10-25T00:00:00Z'), catalogModels)
   const byId = new Map(models.map(model => [model.id, model]))
-  assert.equal(models.filter(model => model.id === 'Wan 3.0 720-1080p').length, 1)
+  assert.equal(models.filter(model => model.id === h3).length, 1)
   assert.equal(byId.get(real).status, 'enabled')
   assert.equal(byId.get(real).spec.channel, 'fk')
   assert.equal(byId.get(real).spec.price, '¥6/次')
-  assert.deepEqual(byId.get(real).spec.duration, { values: [15, 30], default: 15 })
-  assert.equal(byId.get('Wan 3.0 720-1080p').spec.price, '720p ¥0.3/秒 · 1080p ¥0.4/秒')
-  assert.equal(byId.get(official).status, 'disabled')
-  assert.equal(byId.get(official).spec.price, '¥1/秒 · 视频参考 ¥31.5/百万Token')
+  assert.deepEqual(byId.get(real).spec.duration, { values: [30], default: 30 })
+  assert.equal(byId.get(h3).spec.price, '480p/720p ¥0.1/秒 · 768p ¥0.2/秒 · 1080p ¥0.3/秒')
+  assert.equal(byId.get(special).status, 'disabled')
+  assert.equal(byId.get(special).spec.price, '¥2/次')
   assert.ok(byId.get('newapi/yihong/yh-minimax H3'), '非目录渠道保持原静态路由')
   assert.deepEqual(buildCreationModelAvailability(channels).map(model => model.id), CREATION_MODEL_ROUTES.map(route => route.id))
 })

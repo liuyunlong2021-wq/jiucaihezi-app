@@ -19,30 +19,23 @@ const LEGACY_VIDEO_IDS = [
 export const catalog = /*jc-catalog*/{
   "schema": "jc-catalog-v1",
   "models": [
-    { "name": "Wan 3.0 720-1080p", "upstream": "ft-video-v1-9cf6b90d6d04866453951fc3a26720aa", "task": "video", "group": "FK · Wan 3.0",
-      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["720p", "1080p"], "duration": { "min": 2, "max": 30, "default": 5 },
-      "refs": { "images": 10, "videos": 5, "audios": 5 }, "billing": "second", "price": "720p ¥0.2/秒 · 1080p ¥0.25/秒" },
-    { "name": "官方渠道-Seedance 2.5 满血 720p", "upstream": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98", "task": "video", "group": "FK · Seedance 2.5",
-      "ratios": ["16:9", "9:16", "1:1", "21:9", "4:3", "3:4"], "resolutions": ["720p"], "duration": { "min": 4, "max": 30, "default": 4 },
-      "refs": { "images": 30, "videos": 10, "audios": 10 }, "billing": "token-with-video", "price": "¥1/秒 · 视频参考 ¥31.5/百万Token" },
+    { "name": "特价渠道 MiniMax H3 480p-1080p", "upstream": "ft-video-v1-1eb6d53a32efa02adf7ae338f3239628", "task": "video", "group": "FK · H3",
+      "ratios": ["16:9", "9:16"], "resolutions": ["480p", "720p", "768p", "1080p"], "duration": { "min": 4, "max": 30, "default": 5 },
+      "refs": { "images": 9, "videos": 1, "audios": 3 }, "billing": "second", "price": "480p ¥0.06/秒 · 720p/768p ¥0.07/秒 · 1080p ¥0.25/秒" },
+    { "name": "特价渠道 Seedance 2.5 满血 720p（可过真人）", "upstream": "ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["720p"], "duration": { "values": [30], "default": 30 },
+      "refs": { "images": 9, "videos": 0, "audios": 0 }, "billing": "request", "price": "¥5/次" },
     { "name": "Seedance 2.5 满血 480-720p", "upstream": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848", "task": "video", "group": "FK · Seedance 2.5",
-      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["480p", "720p"], "duration": { "min": 4, "max": 30, "default": 4 },
-      "refs": { "images": 30, "videos": 10, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "¥0.5/秒" },
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["480p", "720p"], "duration": { "min": 4, "max": 30, "default": 5 },
+      "refs": { "images": 30, "videos": 10, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "480p ¥0.4/秒 · 720p ¥0.5/秒" },
     { "name": "XN2-Seedance 2.5 满血 480-720p", "upstream": "ft-video-v1-756e0feb4b3e1f893726314109762123", "task": "video", "group": "FK · Seedance 2.5",
       "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1"], "resolutions": ["480p", "720p"], "duration": { "min": 15, "max": 30, "default": 15 },
-      "refs": { "images": 30, "videos": 0, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "¥0.5/秒" },
+      "refs": { "images": 30, "videos": 0, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "480p ¥0.4/秒 · 720p ¥0.5/秒" },
     { "name": "特价渠道 Seedance 2.0 满血 480p (933)", "upstream": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c", "task": "video", "group": "FK · Seedance 2.5",
       "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], "resolutions": ["480p"], "duration": { "min": 4, "max": 15, "default": 4 },
-      "refs": { "images": 9, "videos": 3, "audios": 3 }, "billing": "request", "price": "¥2/次" },
-    { "name": "特价渠道 Seedance 2.5 满血 720p（可过真人）", "upstream": "ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70", "task": "video", "group": "FK · Seedance 2.5",
-      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["720p"], "duration": { "values": [15, 30], "default": 15 },
-      "refs": { "images": 9, "videos": 0, "audios": 0 }, "billing": "request", "price": "¥5/次" },
-    { "name": "特价渠道 MiniMax H3 480p-1080p", "upstream": "ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746", "task": "video", "group": "FK · H3",
-      "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16"], "resolutions": ["768p", "480p", "1080p"], "duration": { "min": 1, "max": 15, "default": 1 },
-      "refs": { "images": 9, "videos": 0, "audios": 3 }, "billing": "second", "price": "480p/768p ¥0.08/秒 · 1080p ¥0.25/秒" }
+      "refs": { "images": 9, "videos": 3, "audios": 3 }, "billing": "request", "price": "¥2/次" }
   ]
 }/*end-jc-catalog*/
-const WAN_MODEL = 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
 const VIDEO_SPECS = Object.fromEntries(catalog.models.map(model => [model.upstream, {
   min: model.duration.min,
   max: model.duration.max,
@@ -94,11 +87,11 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.5.0',
+  version: '0.6.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
-    zh: 'Fk渠道图片与 Seedance / Wan 3.0 / MiniMax H3 视频生成',
+    zh: 'Fk渠道图片与 Seedance / MiniMax H3 视频生成',
   },
   models: MODEL_IDS,
   fetchMode: 'per_task',
@@ -213,10 +206,6 @@ function normalizeRequest(body, fileRefs = []) {
     resolution: String(body.resolution || (spec ? spec.resolutions[0] : '768p')),
   }
 
-  if (model === WAN_MODEL) {
-    if (body.prompt_extend !== undefined && typeof body.prompt_extend !== 'boolean') fail('prompt_extend must be a boolean')
-    payload.prompt_extend = body.prompt_extend === undefined ? false : body.prompt_extend
-  }
   const images = mediaUrls(body, ['imageUrls', 'images', 'image_urls', 'imageUrl', 'image_url', 'image'])
   const videos = mediaUrls(body, ['videoUrls', 'videos', 'video_urls', 'video_url', 'videoUrl', 'video'])
   const audios = mediaUrls(body, ['audioUrls', 'audios', 'audio_urls', 'audio_url', 'audioUrl', 'audio'])

@@ -24,7 +24,7 @@
 | `comfy.plugin.js` | `comfy` | 不取代（`comfy-adapter` 是执行器，插件只代理它） | 代码已就绪，**未上传** |
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
-| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.5` 新增三个官方 Seedance 2.0 型号，图片及其他视频保持；四官方型号最新售价见 `fk-pricing.json` 与统一手册F节。未上传激活，画布配套源码未发布，图生图500仍在排查 |
+| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | 0.6.0（2026-10-26）视频五型号，`catalog` 面板目录；映射 `fk-video-model-mapping.json`、售价 `fk-pricing.json`；图片型号不变。待上传激活与真实验收 |
 | `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.1` 新增原生异步提交/查询，覆盖五个 `xy-` 图片模型；本地通过，尚未上传，宿主容量与真实出图待验收 |
 | `t8-mj.plugin.js` | `t8-mj` | 直接取代 T8 的 MJ 代理（无需适配器） | `0.3.0` 只接 `mj_relax_imagine`（T8 的 `mj-relax` 模式），插件直连 `https://ai.t8star.org` 的 `/mj/submit/imagine` 与 `/mj/task/{id}/fetch`；固定打 T8（忽略渠道 Base URL）、接受 JSON 与面板的 multipart，把面板比例拼成 `--ar`，仅文生图（垫图待接入）；待上传激活与真实验收 |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |

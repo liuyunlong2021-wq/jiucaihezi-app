@@ -1,65 +1,49 @@
 {
   "plugin": "fk",
-  "version": "0.5.0",
-  "scope": "七个当前视频型号；保留既有对外售价，新增价格经用户2026-10-24/10-25确认",
+  "version": "0.6.0",
+  "scope": "五个当前视频型号；售价为用户 2026-10-26 提供的定价",
   "coefficientConvention": "沿用用户确认人民币与Task Usage系数同数值口径；实际分组倍率和实扣待验收",
-  "videoReferenceBilling": "带参考视频按上游Token价格结算；完成后seconds=0，使用upstream_cost_yuan收取上游已结算人民币分金额，包含四舍五入和最低1分，不再叠加Token或秒费。预扣仍沿用宿主按请求秒数估算，不等于上游Token预扣，最终多退少补待真实验收。",
   "models": [
     {
       "model": "特价渠道 MiniMax H3 480p-1080p",
-      "upstreamModel": "ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746",
+      "upstreamModel": "ft-video-v1-1eb6d53a32efa02adf7ae338f3239628",
       "salePriceCnyPerSecond": {
-        "480p": 0.08,
-        "768p": 0.08,
+        "480p": 0.06,
+        "720p": 0.07,
+        "768p": 0.07,
         "1080p": 0.25
       },
-      "expression": "tier(\"base\", u(\"seconds_480p\") * 0.08 + u(\"seconds_768p\") * 0.08 + u(\"seconds_1080p\") * 0.25)"
-    },
-    {
-      "model": "特价渠道 Seedance 2.0 满血 480p (933)",
-      "upstreamModel": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c",
-      "salePriceCnyPerRequest": 2,
-      "expression": "tier(\"base\", u(\"calls\") * 2)"
-    },
-    {
-      "model": "Wan 3.0 720-1080p",
-      "upstreamModel": "ft-video-v1-9cf6b90d6d04866453951fc3a26720aa",
-      "salePriceCnyPerSecond": {
-        "720p": 0.2,
-        "1080p": 0.25
-      },
-      "expression": "tier(\"base\", u(\"seconds_720p\") * 0.2 + u(\"seconds_1080p\") * 0.25)"
-    },
-    {
-      "model": "Seedance 2.5 满血 480-720p",
-      "upstreamModel": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848",
-      "salePriceCnyPerSecond": {
-        "480p": 0.5,
-        "720p": 0.5
-      },
-      "expression": "tier(\"base\", u(\"seconds_480p\") * 0.5 + u(\"seconds_720p\") * 0.5)"
-    },
-    {
-      "model": "XN2-Seedance 2.5 满血 480-720p",
-      "upstreamModel": "ft-video-v1-756e0feb4b3e1f893726314109762123",
-      "salePriceCnyPerSecond": {
-        "480p": 0.5,
-        "720p": 0.5
-      },
-      "expression": "tier(\"base\", u(\"seconds_480p\") * 0.5 + u(\"seconds_720p\") * 0.5)"
-    },
-    {
-      "model": "官方渠道-Seedance 2.5 满血 720p",
-      "upstreamModel": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98",
-      "salePriceCnyPerSecond": 1,
-      "videoReferencePriceCnyPerMillionTokens": 31.5,
-      "expression": "u(\"seconds\") > 0 ? tier(\"base\", u(\"seconds\") * 1) : tier(\"video_reference\", u(\"upstream_cost_yuan\"))"
+      "expression": "tier(\"base\", u(\"seconds_480p\") * 0.06 + u(\"seconds_720p\") * 0.07 + u(\"seconds_768p\") * 0.07 + u(\"seconds_1080p\") * 0.25)"
     },
     {
       "model": "特价渠道 Seedance 2.5 满血 720p（可过真人）",
       "upstreamModel": "ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70",
       "salePriceCnyPerRequest": 5,
       "expression": "tier(\"base\", u(\"calls\") * 5)"
+    },
+    {
+      "model": "Seedance 2.5 满血 480-720p",
+      "upstreamModel": "ft-video-v1-b8a797753dd4c6bf8e5a69820b293848",
+      "salePriceCnyPerSecond": {
+        "480p": 0.4,
+        "720p": 0.5
+      },
+      "expression": "tier(\"base\", u(\"seconds_480p\") * 0.4 + u(\"seconds_720p\") * 0.5)"
+    },
+    {
+      "model": "XN2-Seedance 2.5 满血 480-720p",
+      "upstreamModel": "ft-video-v1-756e0feb4b3e1f893726314109762123",
+      "salePriceCnyPerSecond": {
+        "480p": 0.4,
+        "720p": 0.5
+      },
+      "expression": "tier(\"base\", u(\"seconds_480p\") * 0.4 + u(\"seconds_720p\") * 0.5)"
+    },
+    {
+      "model": "特价渠道 Seedance 2.0 满血 480p (933)",
+      "upstreamModel": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c",
+      "salePriceCnyPerRequest": 2,
+      "expression": "tier(\"base\", u(\"calls\") * 2)"
     }
   ]
 }

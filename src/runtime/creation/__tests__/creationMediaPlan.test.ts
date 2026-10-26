@@ -1362,10 +1362,9 @@ test('灵动 0.4.1 两个公开名与插件、定价清单逐字一致，视频�
 
 test('FK当前Seedance型号规格与执行目录一致', () => {
   const expected = [
-    ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '¥0.5/秒'],
-    ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '¥0.5/秒'],
-    ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1/秒 · 视频参考 ¥31.5/百万Token'],
-    ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [15, 30], 9, 0, 0, '¥5/次'],
+    ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '480p ¥0.4/秒 · 720p ¥0.5/秒'],
+    ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '480p ¥0.4/秒 · 720p ¥0.5/秒'],
+    ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [30], 9, 0, 0, '¥5/次'],
   ] as const
   const plugin = readFileSync('newapi-plugins/fk.plugin.js', 'utf8')
   const availability = readFileSync('scripts/creation-models/server.mjs', 'utf8')
@@ -1622,16 +1621,16 @@ test('Yihong three-model durations, references and price labels follow 0.2.1', (
   assert.throws(() => buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance2.5 Ultra', params: { prompt: 'p', audios: ['https://a/audio.mp3'] } }), /必须同时提供参考图/)
 })
 
-test('FK Wan 3.0 在面板显示公开名、两档售价和独立分组，执行目录对齐规格', () => {
-  const id = 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
+test('FK H3 在面板显示公开名、四档售价和独立分组，执行目录对齐规格', () => {
+  const id = 'ft-video-v1-1eb6d53a32efa02adf7ae338f3239628'
   const spec = getCreationModelSpec(`newapi/fk/${id}`)!
-  assert.equal(spec.model, 'Wan 3.0 720-1080p')
-  assert.equal(spec.price, '720p ¥0.2/秒 · 1080p ¥0.25/秒')
-  assert.equal(creationModelFamily(spec), 'FK · Wan 3.0')
+  assert.equal(spec.model, '特价渠道 MiniMax H3 480p-1080p')
+  assert.equal(spec.price, '480p ¥0.06/秒 · 720p/768p ¥0.07/秒 · 1080p ¥0.25/秒')
+  assert.equal(creationModelFamily(spec), 'FK · H3')
   assert.ok(listCreationPanelModels({ task: 'video' }).some(model => model.id === spec.id))
   const executable = getMediaModel(id)!
   assert.equal(executable.model, spec.model)
-  assert.deepEqual(spec.files, { images: { min: 0, max: 10 }, videos: { min: 0, max: 5 }, audios: { min: 0, max: 5 } })
+  assert.deepEqual(spec.files, { images: { min: 0, max: 9 }, videos: { min: 0, max: 1 }, audios: { min: 0, max: 3 } })
   for (const key of ['ratio', 'resolution', 'duration']) {
     const field = executable.fields.find(field => field.key === key)!
     const panel = spec.fields.find(field => field.key === key)!
@@ -1639,18 +1638,18 @@ test('FK Wan 3.0 在面板显示公开名、两档售价和独立分组，执行
     assert.equal(field.min, panel.min)
     assert.equal(field.max, panel.max)
   }
-  for (const resolution of ['720p', '1080p']) {
-    for (const duration of [2, 30]) assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', resolution, duration } }).model, spec.model)
+  for (const resolution of ['480p', '720p', '768p', '1080p']) {
+    for (const duration of [4, 30]) assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', resolution, duration } }).model, spec.model)
   }
-  for (const params of [{ duration: 1 }, { duration: 31 }, { resolution: '480p' }, { ratio: '21:9' }]) {
+  for (const params of [{ duration: 3 }, { duration: 31 }, { resolution: '2k' }, { ratio: '1:1' }]) {
     assert.throws(() => buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', ...params } }))
   }
 })
 
-test('FK seven current video choices share public names, specs and content recovery', () => {
+test('FK five current video choices share public names, specs and content recovery', () => {
   const mapping = JSON.parse(readFileSync('newapi-plugins/fk-video-model-mapping.json', 'utf8')) as Record<string, string>
   const visible = listCreationModels({ task: 'video' }).filter(model => model.id.startsWith('newapi/fk/'))
-  assert.equal(visible.length, 7)
+  assert.equal(visible.length, 5)
   for (const [name, id] of Object.entries(mapping)) {
     const spec = getCreationModelSpec(`newapi/fk/${id}`)!
     assert.equal(spec.model, name)

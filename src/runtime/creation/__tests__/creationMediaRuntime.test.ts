@@ -83,18 +83,18 @@ test('FK 面板中文模型名进入实际 NewAPI 请求体', { concurrency: fal
   }
 })
 
-test('FK Wan 3.0 两档分辨率与公开名进入实际 NewAPI 请求体', { concurrency: false }, async () => {
+test('FK H3 四档分辨率与公开名进入实际 NewAPI 请求体', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     assert.ok(String(input).endsWith('/v1/videos'))
-    assert.equal(JSON.parse(String(init?.body)).model, 'Wan 3.0 720-1080p')
-    assert.ok(['720p', '1080p'].includes(JSON.parse(String(init?.body)).resolution))
+    assert.equal(JSON.parse(String(init?.body)).model, '特价渠道 MiniMax H3 480p-1080p')
+    assert.ok(['480p', '720p', '768p', '1080p'].includes(JSON.parse(String(init?.body)).resolution))
     return Response.json({ video_url: 'https://cdn.example.test/fk.mp4' })
   }
   try {
-    for (const resolution of ['720p', '1080p']) {
-      const plan = buildCreationRunPlan({ modelId: 'newapi/fk/ft-video-v1-9cf6b90d6d04866453951fc3a26720aa', params: { prompt: 'p', duration: 2, resolution, ratio: '9:16' } })
+    for (const resolution of ['480p', '720p', '768p', '1080p']) {
+      const plan = buildCreationRunPlan({ modelId: 'newapi/fk/ft-video-v1-1eb6d53a32efa02adf7ae338f3239628', params: { prompt: 'p', duration: 4, resolution, ratio: '9:16' } })
       const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
       assert.equal(result.url, 'https://cdn.example.test/fk.mp4')
     }

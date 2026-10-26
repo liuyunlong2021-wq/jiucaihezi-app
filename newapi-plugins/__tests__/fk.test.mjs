@@ -102,9 +102,9 @@ test('FK 失败原因保留 error.message，用量不混入参考图数量', () 
  assert.deepEqual(plugin.extractUsageOnComplete(ctx(), {}, { resultUrls: [URL] }), { image_count: 1, seconds_1080p: 0 })
 })
 
-const VIDEO = 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98'
+const VIDEO = 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848'
 const SPECIAL = 'ft-video-v1-43644108aaba72b7cbad4cd322737f6c'
-const H3 = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
+const H3 = 'ft-video-v1-1eb6d53a32efa02adf7ae338f3239628'
 
 test('FK 成功响应缺少可靠计费字段时保留预扣，不以零用量全额退款', () => {
  const model = 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848'
@@ -127,14 +127,17 @@ test('FK 成功响应缺少可靠计费字段时保留预扣，不以零用量�
  assert.equal(plugin.extractUsageOnComplete(ctx(VIDEO), {}, token).video_reference_tokens, 123456)
  assert.equal(plugin.extractUsageOnComplete(ctx(VIDEO), {}, { ...token, billing: { ...token.billing, settled: false } }), null)
 })
-const OFFICIAL_20 = [
- ['官方渠道-Seedance 2.0 Mini 720p', 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', 0.4, 10.5],
- ['官方渠道-Seedance 2.0 Fast 720p', 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', 0.6, 16.5],
- ['官方渠道-Seedance 2.0 满血 720p', 'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', 0.7, 21],
+const RETIRED = [
+ ['官方渠道-Seedance 2.0 Mini 720p', 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde'],
+ ['官方渠道-Seedance 2.0 Fast 720p', 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3'],
+ ['官方渠道-Seedance 2.0 满血 720p', 'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30'],
+ ['官方渠道-Seedance 2.5 满血 720p', 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98'],
+ ['Wan 3.0 720-1080p', 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'],
+ ['旧特价渠道 MiniMax H3', 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'],
 ]
 
 test('FK 退役型号拒绝新提交', () => {
- for (const [name, id] of OFFICIAL_20) {
+ for (const [name, id] of RETIRED) {
    assert.ok(!plugin.meta.models.includes(name))
    assert.ok(!plugin.meta.models.includes(id))
    assert.throws(() => video({ duration: 5 }, id), /Unsupported/)
@@ -145,7 +148,7 @@ test('FK H3 当前合同支持公开映射、本地文件和标准 jobId 查询'
  for (const upstreamModel of ['特价渠道 MiniMax H3 480p-1080p', H3]) {
    const context = { ...ctx('特价渠道 MiniMax H3 480p-1080p'), upstreamModel }
    const intent = plugin.protocols.openai_video.decodeRequest({ ...context, body: {
-     kind: 'multipart', fields: { prompt: ['p'], duration: ['1'], resolution: ['768p'], ratio: ['4:3'] },
+     kind: 'multipart', fields: { prompt: ['p'], duration: ['5'], resolution: ['768p'], ratio: ['9:16'] },
      files: [{ field: 'images', ref: 'request_file:images', filename: 'a.png' }, { field: 'audios', ref: 'request_file:audios', filename: 'a.mp3' }],
    } })
    const request = plugin.buildSubmitRequest({ ...context, requestBody: intent.requestBody })
@@ -160,7 +163,7 @@ test('FK H3 当前合同支持公开映射、本地文件和标准 jobId 查询'
    assert.equal(plugin.parseTaskResult(context, { success: true, status: 'success', videoUrl: URL }).status, 'SUCCESS')
  }
  assert.ok(plugin.meta.models.includes('特价渠道 MiniMax H3 480p-1080p'))
- for (const value of [{ duration: 0 }, { duration: 16 }, { duration: 1, resolution: '720p' }, { duration: 1, videoUrls: ['https://a/v.mp4'] }, { duration: 1, imageUrls: Array(10).fill('https://a/i.png') }, { duration: 1, audioUrls: Array(4).fill('https://a/a.mp3') }])
+ for (const value of [{ duration: 3 }, { duration: 31 }, { duration: 5, ratio: '1:1' }, { duration: 5, resolution: '2k' }, { duration: 5, videoUrls: Array(2).fill('https://a/v.mp4') }, { duration: 5, imageUrls: Array(10).fill('https://a/i.png') }, { duration: 5, audioUrls: Array(4).fill('https://a/a.mp3') }])
    assert.throws(() => video(value, H3))
  const legacy = { ...ctx(H3), data: { id: 'old-h3', job_id: 'old-h3' }, taskId: 'old-h3' }
  assert.equal(plugin.buildQueryRequest(legacy).url, 'https://ai.fanke2026.xyz/v1/videos/old-h3')
@@ -176,7 +179,7 @@ test('FK 中文公开名可提交且始终转为真实公共 ID，计费和轮�
  for (const [name, model, duration] of [
    ['Seedance 2.5 满血 480-720p', 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', 15],
    ['XN2-Seedance 2.5 满血 480-720p', 'ft-video-v1-756e0feb4b3e1f893726314109762123', 15],
-   ['官方渠道-Seedance 2.5 满血 720p', VIDEO, 15],
+   ['特价渠道 Seedance 2.5 满血 720p（可过真人）', 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', 30],
  ]) {
    assert.ok(plugin.meta.models.includes(name))
    for (const upstreamModel of [name, model]) {
@@ -232,10 +235,8 @@ test('FK 视频成功须有成片与 Token 结算，签名 URL 经免鉴权代�
  assert.equal(plugin.extractUsageOnComplete(ctx(VIDEO), {}, { ...body, billing: { ...body.billing, settled: false } }), null)
  assert.equal(plugin.extractUsage({ ...ctx(SPECIAL), requestBody: video({ duration: 4, resolution: '480p' }, SPECIAL).requestBody }).calls, 1)
  assert.equal(plugin.extractUsage({ ...ctx(SPECIAL), requestBody: video({ duration: 4, resolution: '480p' }, SPECIAL).requestBody }).seconds, 0)
- const withVideo = { ...ctx(VIDEO), requestBody: video({ duration: 5, videoUrls: ['https://a/ref.mp4'] }).requestBody }
- assert.equal(plugin.parseTaskResult(withVideo, { success: true, status: 'success', videoUrl: URL }).status, 'IN_PROGRESS')
- for (const billing of [{ ...body.billing, usage: { total_tokens: -1 } }, { ...body.billing, charged_cost_cents: null }, { ...body.billing, mode: 'second' }]) {
-   assert.equal(plugin.parseTaskResult(withVideo, { ...body, billing }).status, 'IN_PROGRESS')
+ for (const billing of [{ ...body.billing, usage: { total_tokens: -1 } }, { ...body.billing, charged_cost_cents: null }]) {
+   assert.equal(plugin.parseTaskResult(ctx(VIDEO), { ...body, billing }).status, 'IN_PROGRESS')
  }
 })
 
@@ -255,37 +256,6 @@ test('FK 历史视频保留兼容轮询及 content 回收，examples 覆盖完�
  assert.equal(plugin.buildQueryRequest(previous).url, 'https://ai.fanke2026.xyz/v1/videos/compat-job')
  assert.equal(plugin.parseTaskResult(previous, { status: 'completed' }).status, 'SUCCESS')
  assert.equal(plugin.extractUsage({ ...ctx('ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'), requestBody: { duration: 3, resolution: '768p' } }).seconds, 3)
- assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 7)
+ assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 5)
  for (const example of plugin.meta.usageExamples) assert.deepEqual(Object.keys(example.facts).sort(), Object.keys(plugin.meta.usageSchema).sort())
-})
-
-test('FK Wan 3.0 映射、规格、HTTPS素材和两档计费', () => {
- const name = 'Wan 3.0 720-1080p'
- const id = 'ft-video-v1-9cf6b90d6d04866453951fc3a26720aa'
- assert.ok(plugin.meta.models.includes(name))
- assert.ok(plugin.meta.models.includes(id))
- const pricing = JSON.parse(readFileSync(new globalThis.URL('../fk-pricing.json', import.meta.url))).models.find(model => model.model === name)
- assert.equal(pricing.upstreamModel, id)
- assert.deepEqual(pricing.salePriceCnyPerSecond, { '720p': 0.2, '1080p': 0.25 })
- assert.equal(pricing.expression, 'tier("base", u("seconds_720p") * 0.2 + u("seconds_1080p") * 0.25)')
- assert.deepEqual(JSON.parse(readFileSync(new globalThis.URL('../fk-wan30-model-mapping.json', import.meta.url))), { [name]: id })
- for (const model of [name, id]) {
-   for (const resolution of ['720p', '1080p']) {
-     for (const duration of [2, 30]) {
-       const intent = video({ duration, resolution, imageUrls: Array(10).fill('https://a/i.png'), videoUrls: Array(5).fill('https://a/v.mp4'), audioUrls: Array(5).fill('https://a/a.mp3') }, model)
-       const request = plugin.buildSubmitRequest({ ...ctx(model), requestBody: intent.requestBody })
-       assert.equal(request.body.model, id)
-       assert.equal(request.body.prompt_extend, false)
-       const context = { ...ctx(model), requestBody: request.body }
-       const estimated = plugin.extractUsage(context)
-       assert.equal(estimated['seconds_' + resolution], duration)
-       const actual = plugin.extractUsageOnComplete(context, {}, { duration: 3, resolution })
-       assert.equal(actual['seconds_' + resolution], 3)
-       assert.equal(actual[resolution === '720p' ? 'seconds_1080p' : 'seconds_720p'], 0)
-       assert.equal(actual.seconds_720p * 0.2 + actual.seconds_1080p * 0.25, resolution === '720p' ? 3 * 0.2 : 0.75)
-     }
-   }
-   assert.equal(video({ duration: 2, prompt_extend: true }, model).requestBody.prompt_extend, true)
-   for (const value of [{ duration: 1 }, { duration: 31 }, { duration: 2.5 }, { resolution: '480p' }, { ratio: '21:9' }, { imageUrls: Array(11).fill('https://a/i') }, { videoUrls: Array(6).fill('https://a/v') }, { audioUrls: Array(6).fill('https://a/a') }, { imageUrls: ['http://a/i'] }, { prompt_extend: 'true' }]) assert.throws(() => video({ duration: 2, ...value }, model))
- }
 })
