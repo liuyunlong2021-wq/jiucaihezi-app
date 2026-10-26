@@ -13,8 +13,8 @@ base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
 base.OLD_ID = 'sha256:0239e6f663f3c81c05043b2fdfd55e1d7f4311dcd2951590202c64c48161e3b4'
 base.IMAGE = 'jiucaihezi/new-api:rc40-video-relay-logs-20261026'
-# Pin only after the prepare receipt prints the built image ID; an empty pin refuses to activate.
-base.PREPARED_ID = ''
+# Prepare receipt 2026-10-26: VIDEO RELAY LOGS PREPARED.
+base.PREPARED_ID = 'sha256:0211b15446936b7b0dec93a64547565b45e423a0034dd7e4df235964f6a9ce95'
 
 
 if __name__ == '__main__':

@@ -15,6 +15,8 @@ class ActivationLogsTests(unittest.TestCase):
         base = module.base
         self.assertEqual(base.OLD_ID, 'sha256:0239e6f663f3c81c05043b2fdfd55e1d7f4311dcd2951590202c64c48161e3b4')
         self.assertEqual(base.IMAGE, 'jiucaihezi/new-api:rc40-video-relay-logs-20261026')
+        # Receipt: VIDEO RELAY LOGS PREPARED (2026-10-26).
+        self.assertEqual(base.PREPARED_ID, 'sha256:0211b15446936b7b0dec93a64547565b45e423a0034dd7e4df235964f6a9ce95')
         # The switch, backup, rollback and relay probes are the ones covered by activate_video_relay_test.py.
         self.assertTrue(callable(base.verify_relay) and callable(base.main))
 
