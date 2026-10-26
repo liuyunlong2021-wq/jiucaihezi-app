@@ -66,3 +66,101 @@ test('costume looks: same face, new outfit, fused from identity sheet + costume 
   assert.match(read('jc-gongchengjuben'), /同一段内换装须在换装处切段/)
   assert.match(read('jc-seedance'), /顾云舟·帝王，龙袍冕旒/)
 })
+
+test('engineering script picks shots by scene: dramatic motive and film style first, scene-type references as a method library', () => {
+  const dir = 'public/skills/jc-gongchengjuben'
+  const skill = readFileSync(`${dir}/SKILL.md`, 'utf8')
+  assert.match(skill, /## 按戏选镜与节奏/)
+  assert.match(skill, /戏剧动机[\s\S]*影片比例与风格/)
+  assert.match(skill, /\(references\/dialogue-scenes\.md\)/)
+  assert.match(skill, /\(references\/camera-grammar\.md\)/)
+  assert.match(skill, /方法库，不是配额/)
+  assert.match(skill, /无对白、也没有需要看清的动作[\s\S]*约1秒/)
+  assert.match(skill, /单镜一般不超过约5秒/)
+  assert.match(skill, /不写过渡镜头/)
+  assert.doesNotMatch(skill, /文戏优先克制/)
+  assert.doesNotMatch(skill, /空间已清楚时无需建立镜/)
+  assert.doesNotMatch(skill, /全景／大全景和固定镜头各1—2个/)
+
+  const dialogue = readFileSync(`${dir}/references/dialogue-scenes.md`, 'utf8')
+  for (const section of ['双人对坐', '双人站立', '边走边谈', '车内', '三人', '四人及以上', '一人对众人', '电话与隔空', '冲突与力量对比', '紧张与暗流', '揭示与转折', '暧昧与建立联系', '亲密与吻戏', '情绪爆发', '冷战与疏离']) {
+    assert.match(dialogue, new RegExp(`## .*${section}`), section)
+  }
+  assert.ok((dialogue.match(/短剧切法：/g) || []).length >= 40)
+  assert.match(dialogue, /一镜最多一个说话角色/)
+
+  const grammar = readFileSync(`${dir}/references/camera-grammar.md`, 'utf8')
+  for (const topic of ['焦段', '机位高度', '距离与景别', '构图', '视线', '轴线', '运镜', '光', '竖屏']) {
+    assert.match(grammar, new RegExp(`## .*${topic}`), topic)
+  }
+  assert.match(grammar, /长焦[\s\S]*压缩/)
+  assert.match(grammar, /仰拍[\s\S]*强势/)
+
+  for (const text of [dialogue, grammar]) {
+    assert.doesNotMatch(text, /参考影片|《[^》]+》/)
+  }
+  const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
+  const files = index.find(skill => skill.name === 'jc-gongchengjuben').files
+  assert.ok(files.includes('references/dialogue-scenes.md'))
+  assert.ok(files.includes('references/camera-grammar.md'))
+})
+
+test('character entrances and exits have their own reference, routed from the engineering script', () => {
+  const dir = 'public/skills/jc-gongchengjuben'
+  assert.match(readFileSync(`${dir}/SKILL.md`, 'utf8'), /\(references\/character-entrance\.md\)/)
+  const text = readFileSync(`${dir}/references/character-entrance.md`, 'utf8')
+  for (const section of ['突出一个人', '经典登场', '短剧常用登场', '按人物定位', '退场']) {
+    assert.match(text, new RegExp(`## .*${section}`), section)
+  }
+  for (const role of ['主角首次登场', '强者', '反派', '恋爱对象', '再次登场']) assert.match(text, new RegExp(role), role)
+  assert.ok((text.match(/短剧切法：/g) || []).length >= 15)
+  assert.doesNotMatch(text, /参考影片|《[^》]+》/)
+  const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
+  assert.ok(index.find(skill => skill.name === 'jc-gongchengjuben').files.includes('references/character-entrance.md'))
+})
+
+test('suspense, dread and scares have their own reference, routed from the engineering script', () => {
+  const dir = 'public/skills/jc-gongchengjuben'
+  assert.match(readFileSync(`${dir}/SKILL.md`, 'utf8'), /\(references\/suspense-scenes\.md\)/)
+  const text = readFileSync(`${dir}/references/suspense-scenes.md`, 'utf8')
+  for (const section of ['通用原则', '观众先知道', '看不见的威胁', '惊吓', '搜索与潜伏', '发现与揭示']) {
+    assert.match(text, new RegExp(`## .*${section}`), section)
+  }
+  assert.match(text, /\(dialogue-scenes\.md\)/)
+  assert.ok((text.match(/短剧切法：/g) || []).length >= 20)
+  assert.doesNotMatch(text, /参考影片|《[^》]+》/)
+  const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
+  assert.ok(index.find(skill => skill.name === 'jc-gongchengjuben').files.includes('references/suspense-scenes.md'))
+})
+
+test('camera grammar covers shape language, indirect showing, and cross-shot continuity with rising tension', () => {
+  const dir = 'public/skills/jc-gongchengjuben/references'
+  const grammar = readFileSync(`${dir}/camera-grammar.md`, 'utf8')
+  for (const section of ['画面的形状与环境', '间接表现', '镜头衔接与张力递增']) {
+    assert.match(grammar, new RegExp(`## .*${section}`), section)
+  }
+  assert.match(grammar, /视觉焦点接力/)
+  assert.match(grammar, /曲线[\s\S]*折线/)
+  assert.match(grammar, /只拍结果/)
+  assert.match(grammar, /中立机位/)
+  assert.doesNotMatch(grammar, /参考影片|《[^》]+》/)
+  assert.match(readFileSync(`${dir}/dialogue-scenes.md`, 'utf8'), /环境逐步收紧/)
+})
+
+test('every scene is planned beat by beat with a rhythm curve before shot design, and beats stay internal', () => {
+  const dir = 'public/skills/jc-gongchengjuben'
+  const skill = readFileSync(`${dir}/SKILL.md`, 'utf8')
+  assert.match(skill, /观看原则[\s\S]*\[场戏节奏设计\]\(references\/scene-rhythm\.md\)[\s\S]*拆节拍[\s\S]*逐镜设计/)
+  assert.match(skill, /节拍划分只在内部规划，不写进台本/)
+  assert.match(skill, /整场节奏有起伏/)
+
+  const rhythm = readFileSync(`${dir}/references/scene-rhythm.md`, 'utf8')
+  for (const section of ['拆节拍', '节奏档位', '节奏曲线', '先建立规律，再打破', '紧与松', '景别的走法', '爽点与钩子', '时长按节拍分配', '检查']) {
+    assert.match(rhythm, new RegExp(`## .*${section}`), section)
+  }
+  assert.match(rhythm, /每一场戏都要/)
+  assert.match(rhythm, /节拍边界/)
+  assert.doesNotMatch(rhythm, /参考影片|《[^》]+》/)
+  const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
+  assert.ok(index.find(skill => skill.name === 'jc-gongchengjuben').files.includes('references/scene-rhythm.md'))
+})

@@ -226,12 +226,17 @@
     "commands": [],
     "files": [
       "SKILL.md",
+      "references/camera-grammar.md",
+      "references/character-entrance.md",
+      "references/dialogue-scenes.md",
       "references/drama-performance.md",
       "references/exaggerated-animation-performance.md",
       "references/kungfu-duel.md",
       "references/maoshan-exorcism-action.md",
+      "references/scene-rhythm.md",
       "references/shot-visibility.md",
-      "references/single-scene-cinematic.md"
+      "references/single-scene-cinematic.md",
+      "references/suspense-scenes.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -240,6 +245,18 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/camera-grammar.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/character-entrance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/dialogue-scenes.md",
+          "kind": "reference"
         },
         {
           "path": "references/drama-performance.md",
@@ -258,11 +275,19 @@
           "kind": "reference"
         },
         {
+          "path": "references/scene-rhythm.md",
+          "kind": "reference"
+        },
+        {
           "path": "references/shot-visibility.md",
           "kind": "reference"
         },
         {
           "path": "references/single-scene-cinematic.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/suspense-scenes.md",
           "kind": "reference"
         }
       ]
