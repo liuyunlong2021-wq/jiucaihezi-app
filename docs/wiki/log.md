@@ -3115,3 +3115,4 @@
 - 同日 R2 中转第 3 步：新增 `prepare-video-relay.sh`（只构建 `rc40-video-relay-20261026`，不切换生产，失败还原源码）及 4 项护栏测试，先红后绿。服务器只读核对：生产镜像、源码版本、5 个锁定文件的哈希全部一致。粘贴包已生成，尚未在服务器执行。
 - 同日 R2 中转镜像构建成功：`jiucaihezi/new-api:rc40-video-relay-20261026`，ID `sha256:0239e6f6…e4b4`，断网五包 go test 通过；第一次因 npm 偶发截断在 bun install 失败，已自动还原，重跑成功。生产未切换。
 - 同日 R2 中转激活脚本：`activate-video-relay.py` 沿用公共 R2 的激活流程（只换镜像、备份并验证数据库、只重建 NewAPI、失败自动回滚），新增中转探测：不带 Key 时本机和公网都返回 401，带 Key 时返回宿主原样传回的 4xx。先红后绿 7 项。部署前公网探测，新路径已经到达 NewAPI，返回 404 JSON（App 会退回原地址）。粘贴包已生成，尚未执行。
+- 同日 R2 中转生产激活：`VIDEO RELAY ACTIVE`，数据库已备份并验证，只重建了 NewAPI，全部回归通过，备份在 `/root/jc-video-relay-switch-n6nri74z`。旧版 App 重下仍报续传不一致，原因是旧版不含修复，需用新版或开发版验收。
