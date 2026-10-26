@@ -62,7 +62,7 @@ func SetCreationMediaRouter(router *gin.Engine) {
 			port = "3000"
 		}
 		videoRelay = &r2direct.VideoRelay{Origin: "http://127.0.0.1:" + port, Client: &http.Client{Timeout: 10 * time.Minute},
-			Objects: r2Signer, TempDir: "/data/video-relay", MaxSize: r2direct.ResultMaxFile, HasSpace: jcmedia.HasDiskSpace}
+			Objects: r2Signer, TempDir: "/data/video-relay", MaxSize: r2direct.ResultMaxFile, Wait: 60 * time.Second, HasSpace: jcmedia.HasDiskSpace}
 	}
 	// Read-only auth keeps results retrievable after quota is exhausted, like /v1/creation/tasks.
 	router.GET("/api/creations/videos/:task_id/content", middleware.TokenAuthReadOnly(), func(c *gin.Context) {

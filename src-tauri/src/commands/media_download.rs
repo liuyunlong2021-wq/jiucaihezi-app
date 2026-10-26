@@ -5,6 +5,8 @@ use std::{collections::HashMap, path::Path, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 
+const PREPARING_BUDGET: Duration = Duration::from_secs(15 * 60);
+
 #[derive(Default, Deserialize, Serialize)]
 pub(crate) struct Checkpoint {
     identity: String,
@@ -63,7 +65,9 @@ pub(crate) async fn download(
         // A refreshed result may use a new path; never append its bytes to an old resource.
         saved = Checkpoint { identity: resource, ..Default::default() };
     }
-    for attempt in 0..4 {
+    let started = std::time::Instant::now();
+    let mut attempt = 0;
+    loop {
         if *cancel.borrow() { return Err("下载已暂停".into()); }
         let offset = if saved.validator.is_some() { tokio::fs::metadata(temp).await.map(|m| m.len()).unwrap_or(0) } else { 0 };
         let mut request = client.get(url).header("Accept-Encoding", "identity");
@@ -77,6 +81,7 @@ pub(crate) async fn download(
             response = request.send() => response,
         };
         let mut retry_delay = Duration::from_secs(1 << attempt);
+        let mut preparing = false;
         let mut retry_error = match response {
             Err(error) => Some(format!("下载连接失败：{}", super::http::download_error_detail(error))),
             Ok(response) => {
@@ -84,6 +89,7 @@ pub(crate) async fn download(
                 if matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 520..=524) {
                     if let Some(seconds) = response.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| h.parse::<u64>().ok()) {
                         retry_delay = Duration::from_secs(seconds.min(60));
+                        preparing = status == 503;
                     }
                     Some(format!("HTTP 下载暂不可用：{status}"))
                 } else if status == 416 && offset > 0 {
@@ -152,13 +158,16 @@ pub(crate) async fn download(
                 }
             }
         };
-        if attempt == 3 { return Err(retry_error.take().unwrap_or_else(|| "下载失败".into())); }
+        // 503 + Retry-After means the result is still being prepared (R2 relay); wait on time, not attempts.
+        if !(preparing && started.elapsed() < PREPARING_BUDGET) {
+            if attempt == 3 { return Err(retry_error.take().unwrap_or_else(|| "下载失败".into())); }
+            attempt += 1;
+        }
         tokio::select! {
             _ = cancel.changed() => return Err("下载已暂停".into()),
             _ = tokio::time::sleep(retry_delay) => {},
         }
     }
-    unreachable!()
 }
 
 /// Validate MP4/MOV atom boundaries without a whole-file allocation or external tools.
@@ -353,6 +362,21 @@ mod tests {
         assert!(result.unwrap_err().contains("401"));
         assert_eq!(requests.len(), 1);
         assert_eq!(bytes, b"12345");
+    }
+
+    #[tokio::test]
+    async fn preparing_result_waits_beyond_the_attempt_limit() {
+        // R2 中转首次搬运可能要几分钟，服务器先回 503 + Retry-After 表示「准备中」。
+        const PREPARING: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let (url, server) = scripted_server(vec![PREPARING, PREPARING, PREPARING, PREPARING, PREPARING,
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo"]);
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp = dir.path().join("video.mp4.part");
+        let meta = dir.path().join("video.mp4.part.json");
+        let (_tx, rx) = watch::channel(false);
+        download(&reqwest::Client::new(), &url, &HashMap::new(), &temp, &meta, rx, |_| {}).await.unwrap();
+        assert_eq!(server.join().unwrap().len(), 6);
+        assert_eq!(tokio::fs::read(temp).await.unwrap(), b"video");
     }
 
     #[tokio::test]

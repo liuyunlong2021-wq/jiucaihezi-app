@@ -81,6 +81,7 @@ type VideoRelay struct {
 	Objects  ResultObjects
 	TempDir  string
 	MaxSize  int64
+	Wait     time.Duration // stay below Cloudflare's 100 s origin limit
 	HasSpace func(dir string, required int64) bool
 
 	mu       sync.Mutex
@@ -131,11 +132,17 @@ func (v *VideoRelay) Serve(w http.ResponseWriter, r *http.Request, owner int, ta
 		return
 	}
 	key := fmt.Sprintf("video-results/%d/%s.mp4", owner, task)
-	// The copy outlives a disconnecting first caller; waiters share its result.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
-	defer cancel()
-	if err := v.once(key, func() error { return v.copy(ctx, key, task, auth) }); err != nil {
-		fail(err)
+	// The copy runs in the background and outlives callers; a slow one answers "preparing".
+	call := v.start(key, func(ctx context.Context) error { return v.copy(ctx, key, task, auth) })
+	select {
+	case <-call.done:
+		if call.err != nil {
+			fail(call.err)
+			return
+		}
+	case <-time.After(v.Wait):
+		w.Header().Set("Retry-After", "15")
+		fail(&relayError{503, "result_preparing"})
 		return
 	}
 	location, err := v.Objects.ReadURL(r.Context(), key)
@@ -147,25 +154,29 @@ func (v *VideoRelay) Serve(w http.ResponseWriter, r *http.Request, owner int, ta
 	w.WriteHeader(http.StatusFound)
 }
 
-func (v *VideoRelay) once(key string, run func() error) error {
+// start joins the copy already running for key or begins one; a finished call is
+// forgotten so a failed copy is retried by the next request.
+func (v *VideoRelay) start(key string, run func(context.Context) error) *relayCall {
 	v.mu.Lock()
+	defer v.mu.Unlock()
 	if call, ok := v.inflight[key]; ok {
-		v.mu.Unlock()
-		<-call.done
-		return call.err
+		return call
 	}
 	if v.inflight == nil {
 		v.inflight = map[string]*relayCall{}
 	}
 	call := &relayCall{done: make(chan struct{})}
 	v.inflight[key] = call
-	v.mu.Unlock()
-	call.err = run()
-	v.mu.Lock()
-	delete(v.inflight, key)
-	v.mu.Unlock()
-	close(call.done)
-	return call.err
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		call.err = run(ctx)
+		v.mu.Lock()
+		delete(v.inflight, key)
+		v.mu.Unlock()
+		close(call.done)
+	}()
+	return call
 }
 
 func (v *VideoRelay) copy(ctx context.Context, key, task, auth string) error {

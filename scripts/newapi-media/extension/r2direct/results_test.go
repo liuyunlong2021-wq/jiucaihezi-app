@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type memoryObjects struct {
@@ -70,7 +71,7 @@ func newRelayFixture(t *testing.T, content func(w http.ResponseWriter)) *relayFi
 	}))
 	t.Cleanup(origin.Close)
 	f.relay = &VideoRelay{Origin: origin.URL, Client: origin.Client(), Objects: f.objects, TempDir: f.temp, MaxSize: 16,
-		HasSpace: func(string, int64) bool { return true }}
+		Wait: 5 * time.Second, HasSpace: func(string, int64) bool { return true }}
 	return f
 }
 
@@ -155,6 +156,32 @@ func TestVideoRelayConcurrentRequestsCopyOnce(t *testing.T) {
 	if f.contents.Load() != 1 {
 		t.Fatalf("content fetched %d times", f.contents.Load())
 	}
+}
+
+// The server uploads to R2 at ~315 KB/s; Cloudflare drops an origin silent for 100 s.
+func TestVideoRelaySlowCopyAnswersPreparingAndFinishesInBackground(t *testing.T) {
+	release := make(chan struct{})
+	f := newRelayFixture(t, func(w http.ResponseWriter) { <-release; video(w) })
+	f.relay.Wait = 50 * time.Millisecond
+	rec := f.get(17, "task_a", "Bearer owner")
+	if rec.Code != 503 || rec.Header().Get("Retry-After") == "" || !strings.Contains(rec.Body.String(), "result_preparing") {
+		t.Fatalf("got %d %q %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if exists, _ := f.objects.Exists(context.Background(), "video-results/17/task_a.mp4"); exists {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background copy did not finish after the caller left")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rec := f.get(17, "task_a", "Bearer owner"); rec.Code != 302 || f.contents.Load() != 1 {
+		t.Fatalf("got %d, content fetched %d times", rec.Code, f.contents.Load())
+	}
+	assertNoTempFiles(t, f.temp)
 }
 
 func TestVideoRelayRejectsUnusableContentWithoutStoring(t *testing.T) {
