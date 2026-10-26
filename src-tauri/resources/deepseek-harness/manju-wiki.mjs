@@ -1072,8 +1072,11 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
   }
   for (const [path, hash] of Object.entries(sources)) if ((await adaptationFile(ctx, exec, path, agent)).hash !== hash) throw new Error('原作已改变，请重新规划')
   const files = Object.fromEntries(Object.entries(state.files || {}).filter(([name]) => adaptationStages.indexOf(name) < stage))
-  for (const group of Object.values(files)) for (const [path, hash] of Object.entries(group))
-    if ((await adaptationFile(ctx, exec, path, agent)).hash !== hash) throw new Error(`前置产物已改变，请重新规划：${path}`)
+  // 逐集改编可补写改编版资料，须在本次writing产物中重新登记；原作、切分和总纲仍不可变。
+  const latest = Object.assign({}, ...adaptationStages.slice(0, stage).map(name => files[name] || {}))
+  const refreshed = path => stage === 4 && path.startsWith(`${root}/项目资料/改编版/`) && input.outputs.includes(path)
+  for (const [path, hash] of Object.entries(latest))
+    if (!refreshed(path) && (await adaptationFile(ctx, exec, path, agent)).hash !== hash) throw new Error(`前置产物已改变，请重新规划：${path}`)
   const outputs = {}
   for (const path of input.outputs) {
     if (typeof path !== 'string' || !path.startsWith(`${root}/`) || path.split('/').some(part => ['.', '..'].includes(part))) throw new Error('产物必须在当前Wiki')

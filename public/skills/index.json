@@ -117,7 +117,7 @@
     "id": "jc-duanju-pipeline",
     "name": "jc-duanju-pipeline",
     "displayName": "jc-duanju-pipeline",
-    "description": "按用户原文附件或路径及基本改编思路，连续执行原作读取、共用项目资料、改编方案、逐章切分与逐集改编，自检后保存并支持续做；不跨章拼集或挪用邻集内容。",
+    "description": "按用户原文附件或路径及基本改编思路，连续执行原作读取、共用项目资料、改编方案、逐章切分与逐集改编，产出供漫剧制作直接使用、每集不超过3分钟的说明书式剧本并逐集补写改编版资料，自检后保存并支持续做；不跨章拼集或挪用邻集内容。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -138,11 +138,12 @@
     "id": "jc-duanju-xiezuo",
     "name": "jc-duanju-xiezuo",
     "displayName": "jc-duanju-xiezuo",
-    "description": "对照每集真实原文切分和改编方案，在切分边界内按动作、对话、OS优先级完成短剧改编，落实关系动机、因果表演与首次登场，自检后逐集保存。",
+    "description": "对照每集真实原文切分和改编方案，在切分边界内写成供漫剧制作直接使用的小说化电影剧本：写清角色、场景、道具三要素与逐招动作，台词电影化，每集不超过3分钟；自检后逐集保存，并补写本集新出现的改编版资料。",
     "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",
+      "references/动作与法术戏写法.md",
       "references/独立写作旧规则.md"
     ],
     "package": {
@@ -152,6 +153,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/动作与法术戏写法.md",
+          "kind": "reference"
         },
         {
           "path": "references/独立写作旧规则.md",

@@ -125,6 +125,9 @@ test('short drama route resources are packaged and all delegated links resolve i
   const skills = JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8'))['short-drama'] as string[]
   const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
   const allowed = new Set([...skills, 'wiki-memory'])
+  // 借用的设计Skill只取设计方法，其原有漫剧交接链接（如角色格式）可指向漫剧范围。
+  const borrowed = new Set(['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt'])
+  const manju = new Set(JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8')).manju as string[])
   for (const name of skills) {
     const entry = index.find((item: { name: string }) => item.name === name)
     assert.ok(entry?.package.files.some((file: { path: string }) => file.path === 'SKILL.md'), name)
@@ -132,7 +135,8 @@ test('short drama route resources are packaged and all delegated links resolve i
     for (const match of readFileSync(path, 'utf8').matchAll(/\]\(([^)]+\.md)\)/g)) {
       const target = resolve(dirname(path), match[1]!)
       assert.ok(existsSync(target), target)
-      assert.ok(allowed.has(relative(resolve('public/skills'), target).split(/[\\/]/)[0]), target)
+      const owner = relative(resolve('public/skills'), target).split(/[\\/]/)[0]!
+      assert.ok(allowed.has(owner) || borrowed.has(name) && manju.has(owner), target)
     }
   }
 })

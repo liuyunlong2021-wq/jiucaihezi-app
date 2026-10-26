@@ -22,7 +22,11 @@
     "jc-duanju-cehua",
     "jc-duanju-fenji",
     "jc-duanju-xiezuo",
-    "jc-duanju-pipeline"
+    "jc-duanju-pipeline",
+    "jc-juese-sheji",
+    "jc-fuzhuang-prompt",
+    "jc-scene-prompt",
+    "jc-prop-prompt"
   ],
   "novel": [
     "jc-novel"
