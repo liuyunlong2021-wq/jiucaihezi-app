@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,8 +17,10 @@ import (
 )
 
 type memoryObjects struct {
-	mu      sync.Mutex
-	objects map[string][]byte
+	mu       sync.Mutex
+	objects  map[string][]byte
+	putDelay time.Duration
+	putErr   error
 }
 
 func (m *memoryObjects) Exists(_ context.Context, key string) (bool, error) {
@@ -27,7 +30,15 @@ func (m *memoryObjects) Exists(_ context.Context, key string) (bool, error) {
 	return ok, nil
 }
 
-func (m *memoryObjects) Put(_ context.Context, key string, body io.Reader, size int64) error {
+func (m *memoryObjects) Put(ctx context.Context, key string, body io.Reader, size int64) error {
+	select {
+	case <-time.After(m.putDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if m.putErr != nil {
+		return m.putErr
+	}
 	data, err := io.ReadAll(body)
 	if err != nil || int64(len(data)) != size {
 		return io.ErrUnexpectedEOF
@@ -71,7 +82,7 @@ func newRelayFixture(t *testing.T, content func(w http.ResponseWriter)) *relayFi
 	}))
 	t.Cleanup(origin.Close)
 	f.relay = &VideoRelay{Origin: origin.URL, Client: origin.Client(), Objects: f.objects, TempDir: f.temp, MaxSize: 16,
-		Wait: 5 * time.Second, HasSpace: func(string, int64) bool { return true }}
+		Wait: 5 * time.Second, UploadTimeout: 5 * time.Second, HasSpace: func(string, int64) bool { return true }}
 	return f
 }
 
@@ -232,5 +243,48 @@ func TestResultReadURLIsScopedToResultPrefix(t *testing.T) {
 	u, _ := url.Parse(address)
 	if u.Path != "/jiucaihezi-media-test/video-results/17/task_a.mp4" || u.Query().Get("X-Amz-Expires") != "21600" || strings.Contains(address, "fixture-secret") {
 		t.Fatalf("unexpected read URL %s", address)
+	}
+}
+
+// 2026-10-26：两条成片从上游拉了近 6 分钟，旧的整体 10 分钟时限留给上传的时间不够，
+// 而失败原因没有任何记录。上传时限从上传开始计，失败写日志且不含签名地址。
+func TestVideoRelayUploadDeadlineStartsAfterSlowFetch(t *testing.T) {
+	f := newRelayFixture(t, func(w http.ResponseWriter) { time.Sleep(150 * time.Millisecond); video(w) })
+	f.relay.UploadTimeout = 100 * time.Millisecond
+	f.objects.putDelay = 20 * time.Millisecond
+	if rec := f.get(17, "task_a", "Bearer owner"); rec.Code != 302 {
+		t.Fatalf("slow fetch must not eat the upload deadline, got %d", rec.Code)
+	}
+}
+
+func TestVideoRelayLogsFailedCopyWithoutSignedURL(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	for _, tc := range []struct {
+		name  string
+		setup func(*relayFixture)
+		want  string
+	}{
+		{"upload error", func(f *relayFixture) {
+			f.objects.putErr = &url.Error{Op: "Put", URL: "https://acct.r2.cloudflarestorage.com/b/k?X-Amz-Signature=secret", Err: io.ErrUnexpectedEOF}
+		}, "unexpected EOF"},
+		{"upload timeout", func(f *relayFixture) {
+			f.relay.UploadTimeout = 20 * time.Millisecond
+			f.objects.putDelay = time.Second
+		}, "deadline exceeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs.Reset()
+			f := newRelayFixture(t, video)
+			tc.setup(f)
+			if rec := f.get(17, "task_a", "Bearer owner"); rec.Code != 502 {
+				t.Fatalf("got %d", rec.Code)
+			}
+			line := logs.String()
+			if !strings.Contains(line, "video-results/17/task_a.mp4") || !strings.Contains(line, tc.want) || strings.Contains(line, "Signature") || strings.Contains(line, "secret") {
+				t.Fatalf("unexpected log %q", line)
+			}
+		})
 	}
 }

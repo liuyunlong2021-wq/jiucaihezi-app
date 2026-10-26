@@ -67,6 +67,8 @@ pub(crate) async fn download(
     }
     let started = std::time::Instant::now();
     let mut attempt = 0;
+    // Once the relay said "preparing", a dropped connection is part of that wait, not a hard failure.
+    let mut seen_preparing = false;
     loop {
         if *cancel.borrow() { return Err("下载已暂停".into()); }
         let offset = if saved.validator.is_some() { tokio::fs::metadata(temp).await.map(|m| m.len()).unwrap_or(0) } else { 0 };
@@ -83,7 +85,10 @@ pub(crate) async fn download(
         let mut retry_delay = Duration::from_secs(1 << attempt);
         let mut preparing = false;
         let mut retry_error = match response {
-            Err(error) => Some(format!("下载连接失败：{}", super::http::download_error_detail(error))),
+            Err(error) => {
+                preparing = seen_preparing;
+                Some(format!("下载连接失败：{}", super::http::download_error_detail(error)))
+            },
             Ok(response) => {
                 let status = response.status().as_u16();
                 if matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 520..=524) {
@@ -159,6 +164,7 @@ pub(crate) async fn download(
             }
         };
         // 503 + Retry-After means the result is still being prepared (R2 relay); wait on time, not attempts.
+        seen_preparing |= preparing;
         if !(preparing && started.elapsed() < PREPARING_BUDGET) {
             if attempt == 3 { return Err(retry_error.take().unwrap_or_else(|| "下载失败".into())); }
             attempt += 1;
@@ -369,6 +375,22 @@ mod tests {
         // R2 中转首次搬运可能要几分钟，服务器先回 503 + Retry-After 表示「准备中」。
         const PREPARING: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         let (url, server) = scripted_server(vec![PREPARING, PREPARING, PREPARING, PREPARING, PREPARING,
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo"]);
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp = dir.path().join("video.mp4.part");
+        let meta = dir.path().join("video.mp4.part.json");
+        let (_tx, rx) = watch::channel(false);
+        download(&reqwest::Client::new(), &url, &HashMap::new(), &temp, &meta, rx, |_| {}).await.unwrap();
+        assert_eq!(server.join().unwrap().len(), 6);
+        assert_eq!(tokio::fs::read(temp).await.unwrap(), b"video");
+    }
+
+    #[tokio::test]
+    async fn dropped_connections_after_preparing_keep_waiting() {
+        // 2026-10-26 实测：「准备中」之后连接被对端断开（TLS close_notify），4 次重试用尽就放弃了。
+        const PREPARING: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        const DROPPED: &[u8] = b"";
+        let (url, server) = scripted_server(vec![PREPARING, DROPPED, DROPPED, DROPPED, DROPPED,
             b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo"]);
         let dir = tempfile::TempDir::new().unwrap();
         let temp = dir.path().join("video.mp4.part");

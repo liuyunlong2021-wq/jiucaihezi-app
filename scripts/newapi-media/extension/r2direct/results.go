@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -20,7 +21,9 @@ const ResultMaxFile = 1 << 30
 const ResultFreeSpace = 2 << 30
 
 var resultTaskID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-var resultClient = &http.Client{Timeout: 10 * time.Minute}
+
+// Deadlines come from each call's context: HEAD is short, an upload gets VideoRelay.UploadTimeout.
+var resultClient = &http.Client{}
 
 // ResultObjects is the R2 side of the relay; Signer implements it.
 type ResultObjects interface {
@@ -76,13 +79,14 @@ func (s *Signer) ReadURL(ctx context.Context, key string) (string, error) {
 // redirects every download to R2. The host decides ownership and fetches the
 // upstream result, so vendor addresses never reach the client.
 type VideoRelay struct {
-	Origin   string // loopback NewAPI, e.g. http://127.0.0.1:3000
-	Client   *http.Client
-	Objects  ResultObjects
-	TempDir  string
-	MaxSize  int64
-	Wait     time.Duration // stay below Cloudflare's 100 s origin limit
-	HasSpace func(dir string, required int64) bool
+	Origin        string // loopback NewAPI, e.g. http://127.0.0.1:3000
+	Client        *http.Client
+	Objects       ResultObjects
+	TempDir       string
+	MaxSize       int64
+	Wait          time.Duration // stay below Cloudflare's 100 s origin limit
+	UploadTimeout time.Duration // counted from the start of the R2 upload, not from the request
+	HasSpace      func(dir string, required int64) bool
 
 	mu       sync.Mutex
 	inflight map[string]*relayCall
@@ -168,9 +172,11 @@ func (v *VideoRelay) start(key string, run func(context.Context) error) *relayCa
 	call := &relayCall{done: make(chan struct{})}
 	v.inflight[key] = call
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		call.err = run(ctx)
+		// The host fetch is bounded by v.Client's timeout; the upload by v.UploadTimeout.
+		call.err = run(context.Background())
+		if call.err != nil {
+			log.Printf("[Video relay] copy %s failed: %s", key, safeError(call.err))
+		}
 		v.mu.Lock()
 		delete(v.inflight, key)
 		v.mu.Unlock()
@@ -180,7 +186,10 @@ func (v *VideoRelay) start(key string, run func(context.Context) error) *relayCa
 }
 
 func (v *VideoRelay) copy(ctx context.Context, key, task, auth string) error {
-	if exists, err := v.Objects.Exists(ctx, key); err != nil || exists {
+	head, cancel := context.WithTimeout(ctx, time.Minute)
+	exists, err := v.Objects.Exists(head, key)
+	cancel()
+	if err != nil || exists {
 		return err
 	}
 	if !v.HasSpace(v.TempDir, v.MaxSize+ResultFreeSpace) {
@@ -207,8 +216,19 @@ func (v *VideoRelay) copy(ctx context.Context, key, task, auth string) error {
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		return v.Objects.Put(ctx, key, file, size)
+		upload, cancel := context.WithTimeout(ctx, v.UploadTimeout)
+		defer cancel()
+		return v.Objects.Put(upload, key, file, size)
 	})
+}
+
+// safeError drops the request URL: R2 errors would otherwise print the presigned address.
+func safeError(err error) string {
+	var request *url.Error
+	if errors.As(err, &request) {
+		return request.Op + ": " + request.Err.Error()
+	}
+	return err.Error()
 }
 
 // fetch calls the host as the caller; host 4xx (401/404/409…) pass through so the
