@@ -53,6 +53,21 @@ func SetCreationMediaRouter(router *gin.Engine) {
 		})
 	}
 	router.POST("/api/creations/r2/upload-url", middleware.TokenAuth(), func(c *gin.Context) { r2direct.ServeCreationUpload(c.Writer, c.Request, r2Signer, c.GetInt("id")) })
+	// Finished videos are copied from the host content channel into R2 once; downloads then go to R2.
+	var videoRelay *r2direct.VideoRelay
+	_ = os.RemoveAll("/data/video-relay") // only copies left by a crashed process live here
+	if r2Signer != nil && os.MkdirAll("/data/video-relay", 0o700) == nil {
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "3000"
+		}
+		videoRelay = &r2direct.VideoRelay{Origin: "http://127.0.0.1:" + port, Client: &http.Client{Timeout: 10 * time.Minute},
+			Objects: r2Signer, TempDir: "/data/video-relay", MaxSize: r2direct.ResultMaxFile, HasSpace: jcmedia.HasDiskSpace}
+	}
+	// Read-only auth keeps results retrievable after quota is exhausted, like /v1/creation/tasks.
+	router.GET("/api/creations/videos/:task_id/content", middleware.TokenAuthReadOnly(), func(c *gin.Context) {
+		videoRelay.Serve(c.Writer, c.Request, c.GetInt("id"), c.Param("task_id"))
+	})
 	ossSigner, ossErr := ossdirect.New(
 		os.Getenv("OSS_ENDPOINT"),
 		os.Getenv("OSS_BUCKET"),

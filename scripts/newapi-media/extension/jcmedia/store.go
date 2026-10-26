@@ -133,7 +133,7 @@ func (s *Store) Upload(w http.ResponseWriter, r *http.Request, owner int) {
 		fail(w, 503, "media_storage_unavailable", "素材存储暂时不可用")
 		return
 	}
-	if used+MaxFile+4096 > s.Limit || !hasDiskSpace(s.Root, MaxFile+(1<<30)) {
+	if used+MaxFile+4096 > s.Limit || !HasDiskSpace(s.Root, MaxFile+(1<<30)) {
 		fail(w, 507, "media_storage_full", "素材空间不足，请联系管理员")
 		return
 	}

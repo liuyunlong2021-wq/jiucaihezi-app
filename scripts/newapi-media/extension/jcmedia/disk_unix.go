@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-func hasDiskSpace(path string, required int64) bool {
+func HasDiskSpace(path string, required int64) bool {
 	var st syscall.Statfs_t
 	if syscall.Statfs(path, &st) != nil {
 		return false
