@@ -175,3 +175,15 @@ test('costume looks keep the character silhouette anchors from the identity desi
   assert.match(costume, /身份或性格转变/)
   assert.match(readFileSync('public/skills/jc-juese-sheji/references/silhouette-shape.md', 'utf8'), /换装保留剪影锚点/)
 })
+
+test('short-drama episode writing carries scene and dialogue craft rules with an on-demand polish reference', () => {
+  const main = readFileSync('public/skills/jc-duanju-xiezuo/SKILL.md', 'utf8')
+  assert.match(main, /\[场景与对白打磨\]\(references\/场景与对白打磨\.md\)/)
+  assert.match(main, /场景转向/)
+  assert.match(main, /晚进早出/)
+  assert.match(main, /台词字面与真实情绪不一致时/)
+  assert.match(main, /影像顺序/)
+  assert.match(main, /一行一个画面/)
+  const polish = readFileSync('public/skills/jc-duanju-xiezuo/references/场景与对白打磨.md', 'utf8')
+  for (const rule of [/问答式/, /潜台词/, /说话方式/, /意识到/, /弱词/, /句尾/, /有名字的人物开口/, /只写看得见的/]) assert.match(polish, rule)
+})

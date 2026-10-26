@@ -144,6 +144,7 @@
     "files": [
       "SKILL.md",
       "references/动作与法术戏写法.md",
+      "references/场景与对白打磨.md",
       "references/独立写作旧规则.md"
     ],
     "package": {
@@ -156,6 +157,10 @@
         },
         {
           "path": "references/动作与法术戏写法.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/场景与对白打磨.md",
           "kind": "reference"
         },
         {
