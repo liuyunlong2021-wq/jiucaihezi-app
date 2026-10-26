@@ -266,8 +266,8 @@ test('calibrated yihong, yuanliu and FK official routes match exact public chann
     ['newapi/yihong/yh-seedance2.5 Ultra', 'yh-seedance2.5 Ultra'],
     ['newapi/yihong/yh-wan3.0-video', 'yh-wan3.0-video'],
     ['newapi/yuanliu/yl_seedance-2-5_6caffaca7390', 'Seedance 2.5(HD)'],
-    ['newapi/yuanliu/yl_pp_sz_sd25_30010', 'Seedance 2.5 480p (QN-10)'],
-    ['newapi/yuanliu/yl_g7zy_seedance_v2_5_full_s', 'Seedance2.5full (LJ-04)'],
+    ['newapi/yuanliu/yl_pp_mj_sd25_30010', 'Seedance 2.5 720p (QN-12)'],
+    ['newapi/yuanliu/yl_g7zy_seedance_v2_5_s', 'Seedance 2.5 (LJ-02)'],
     ['官方渠道-Seedance 2.5 满血 720p', '官方渠道-Seedance 2.5 满血 720p'],
   ]
   for (const [id, model] of cases) {
@@ -327,4 +327,24 @@ test('目录型号随可用性下发规格，价格以 NewAPI 实际表达式为
   assert.equal(byId.get(official).spec.price, '¥1/秒 · 视频参考 ¥31.5/百万Token')
   assert.ok(byId.get('newapi/yihong/yh-minimax H3'), '非目录渠道保持原静态路由')
   assert.deepEqual(buildCreationModelAvailability(channels).map(model => model.id), CREATION_MODEL_ROUTES.map(route => route.id))
+})
+
+test('按画质分档的条件表达式也换算为面板价格', async () => {
+  const { priceFromExpression } = await import('../server.mjs')
+  assert.equal(priceFromExpression('u("resolution") == "1080p" ? tier("1080p", u("seconds") * 1) : u("resolution") == "720p" ? tier("720p", u("seconds") * 0.6) : tier("480p", u("seconds") * 0.6)'), '480p/720p ¥0.6/秒 · 1080p ¥1/秒')
+  assert.equal(priceFromExpression('u("resolution") == "720p" ? tier("720p", u("seconds") * 0.8) : tier("480p", u("seconds") * 0.6)'), '480p ¥0.6/秒 · 720p ¥0.8/秒')
+  assert.equal(priceFromExpression('u("resolution") == "720p" ? tier("720p", u("seconds") * 0.8) : tier("base", u("calls") * 1)'), '')
+})
+
+test('源流目录随可用性下发', async () => {
+  const { buildCatalogModels } = await import('../server.mjs')
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../../../newapi-plugins/yuanliu.plugin.js', import.meta.url), 'utf8')
+  const models = buildCatalogModels([{ key: 'yuanliu', version: '0.3.0', catalog: source }], {})
+  assert.deepEqual(models.map(model => model.channel), Array(6).fill('yuanliu'))
+  assert.equal(models.find(model => model.name === 'Seedance 2.5 (RK-02)').price, '480p ¥0.6/秒 · 720p ¥0.8/秒')
+  const channels = [{ id: 9, name: '源流', status: 1, baseUrl: '', models: ['Seedance 2.5 (RK-02)'] }]
+  const ids = buildCreationModelAvailability(channels, new Date(), models).map(model => model.id)
+  assert.ok(ids.includes('Seedance 2.5 (RK-02)'))
+  assert.ok(!ids.includes('newapi/yuanliu/yl_cm_73'), '目录已覆盖的静态路由不重复下发')
 })

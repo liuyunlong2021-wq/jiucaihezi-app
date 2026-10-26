@@ -1,8 +1,9 @@
 import { catalog as fkCatalog } from '../../../newapi-plugins/fk.plugin.js'
+import { catalog as yuanliuCatalog } from '../../../newapi-plugins/yuanliu.plugin.js'
 
 // NewAPI 插件 `catalog` 导出的面板目录（jc-catalog-v1）。内置条目来自打包时的插件，
 // 运行时可被可用性服务下发的同渠道目录整体替换。只接已有 App 适配的渠道。
-export const CATALOG_CHANNELS = ['fk'] as const
+export const CATALOG_CHANNELS = ['fk', 'yuanliu'] as const
 export type CatalogChannel = (typeof CATALOG_CHANNELS)[number]
 
 export interface PluginCatalogModel {
@@ -84,6 +85,7 @@ export function parsePluginCatalogModel(value: unknown): PluginCatalogModel | un
 
 const BUILT_IN: Record<CatalogChannel, PluginCatalogModel[]> = {
   fk: fkCatalog.models.flatMap(model => parsePluginCatalogModel({ ...model, channel: 'fk' }) || []),
+  yuanliu: yuanliuCatalog.models.flatMap(model => parsePluginCatalogModel({ ...model, channel: 'yuanliu' }) || []),
 }
 
 const current = new Map<CatalogChannel, PluginCatalogModel[]>(Object.entries(BUILT_IN) as Array<[CatalogChannel, PluginCatalogModel[]]>)

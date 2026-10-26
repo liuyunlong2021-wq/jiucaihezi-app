@@ -180,91 +180,6 @@ const LINGDONG_IMAGE_RATIOS = ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', 
 
 // 源流 AI OpenAPI：六个型号的素材上限、时长档位与售价来自用户 2026-10-24 的型号清单。
 // Wan 3.0 两型号按分辨率分档计费；其余型号沿用上游默认画幅 16:9，面板暂不开放画幅。
-const YUANLIU_RESOLUTIONS = ['480p', '720p', '1080p']
-const YUANLIU_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
-type YuanliuVideoModel = {
-  model: string
-  publicName: string
-  price: string
-  maxImages: number
-  maxVideos: number
-  maxAudios: number
-  duration: { min: number; max: number }
-  defaultDuration: number
-  resolutions: string[]
-}
-const YUANLIU_VIDEO_MODELS: readonly YuanliuVideoModel[] = [
-  {
-    model: 'yl_seedance-2-5_6caffaca7390',
-    publicName: 'Seedance 2.5(HD)',
-    price: '6元/次',
-    maxImages: 30,
-    maxVideos: 0,
-    maxAudios: 0,
-    duration: { min: 30, max: 30 },
-    defaultDuration: 30,
-    resolutions: [],
-  },
-  {
-    model: 'yl_pp_sz_sd25_30010',
-    publicName: 'Seedance 2.5 480p (QN-10)',
-    price: '9元/次',
-    maxImages: 30,
-    maxVideos: 0,
-    maxAudios: 10,
-    duration: { min: 4, max: 30 },
-    defaultDuration: 5,
-    resolutions: [],
-  },
-  {
-    model: 'yl_seedance-2-0_ba0687ff09f2',
-    publicName: 'Seedance2.0(HD)',
-    price: '4元/次',
-    maxImages: 9,
-    maxVideos: 0,
-    maxAudios: 0,
-    duration: { min: 10, max: 15 },
-    defaultDuration: 10,
-    resolutions: [],
-  },
-  {
-    model: 'yl_g7zy_seedance_v2_5_full_s',
-    publicName: 'Seedance2.5full (LJ-04)',
-    price: '0.5元/秒',
-    maxImages: 30,
-    maxVideos: 10,
-    maxAudios: 10,
-    duration: { min: 5, max: 30 },
-    defaultDuration: 5,
-    resolutions: [],
-  },
-  {
-    model: 'yl_fy_wan3_0_video_prime',
-    publicName: 'Wan3.0视频Prime官渠稳定(WP-01)',
-    price: '480p ¥0.4/秒 · 720p ¥0.5/秒 · 1080p ¥0.7/秒',
-    maxImages: 10,
-    maxVideos: 5,
-    maxAudios: 5,
-    duration: { min: 2, max: 30 },
-    defaultDuration: 5,
-    resolutions: [...YUANLIU_RESOLUTIONS],
-  },
-  {
-    model: 'yl_fy_wan3_0_video',
-    publicName: 'Wan3.0官渠(WP-02)',
-    price: '480p ¥0.4/秒 · 720p ¥0.5/秒 · 1080p ¥0.6/秒',
-    maxImages: 10,
-    maxVideos: 5,
-    maxAudios: 5,
-    duration: { min: 2, max: 30 },
-    defaultDuration: 5,
-    resolutions: [...YUANLIU_RESOLUTIONS],
-  },
-]
-const YUANLIU_VIDEO_CONTRACT_ISSUES = [
-  '源流 API `/models` 的 allowed_aspect_ratios、allowed_resolutions 与时长档位是动态配置；面板按用户清单限定时长，画幅给常用六档（默认 16:9），非 Wan 型号不发送分辨率，由上游默认 480p。',
-  '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数（按次 6/9/4，按秒 0.5，Wan 0.4/0.5/0.7 与 0.4/0.5/0.6）；NewAPI 模型/分组倍率及最终扣费尚未验收。',
-]
 // 易红0.2.0只开放六个yh-视频型号；旧记录保留注册并隐藏，不改绑历史任务。
 const YIHONG_VIDEO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
 const LEGACY_YIHONG_VIDEO_MODELS: Array<{
@@ -1527,40 +1442,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ]),
     notes: LINGDONG_NOTES,
   })),
-  // ── 源流 AI Seedance：NewAPI Task Plugin 直连源流 OpenAPI ──
-  ...YUANLIU_VIDEO_MODELS.map(model => directVideo({
-    id: `newapi/yuanliu/${model.model}`,
-    model: model.publicName,
-    label: model.publicName,
-    aliases: [model.model],
-    price: model.price,
-    upstreamFamily: 'openai-compatible',
-    apiStyle: 'newapi-task',
-    mode: 'text-to-video',
-    endpoint: '/v1/videos',
-    assetFlow: 'newapi-upload',
-    contractStatus: 'partial',
-    contractIssues: YUANLIU_VIDEO_CONTRACT_ISSUES,
-    ratios: [...YUANLIU_RATIOS],
-    resolutions: [...model.resolutions],
-    duration: { ...model.duration },
-    files: {
-      images: { min: 0, max: model.maxImages },
-      ...(model.maxVideos ? { videos: { min: 0, max: model.maxVideos } } : {}),
-      ...(model.maxAudios ? { audios: { min: 0, max: model.maxAudios } } : {}),
-    },
-    fields: promptFields([
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options([...YUANLIU_RATIOS]) },
-      ...(model.resolutions.length
-        ? [{ key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: '480p', options: options([...model.resolutions]) }]
-        : []),
-      { key: 'duration', label: '时长(秒)', kind: 'number', required: true, defaultValue: model.defaultDuration, min: model.duration.min, max: model.duration.max, step: 1 },
-      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
-      ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
-      ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
-    ]),
-    notes: ['https://test.yuanliuai.tsyzai.com/openapi/docs.md', 'NewAPI Task Usage 与真实扣费尚未验收。'],
-  })),
+  // ── 源流 AI：全部由插件面板目录生成，运行时可被可用性服务下发的目录替换 ──
+  ...catalogModels('yuanliu').map(catalogVideoSpec),
   // ── 易红 API Seedance：模型名逐字匹配 yihong Task Plugin 的 meta.models ──
   ...[...YIHONG_VIDEO_MODELS, ...LEGACY_YIHONG_VIDEO_MODELS.map(model => ({ ...model, hidden: true }))].map(model => directVideo({
     id: `newapi/yihong/${model.model}`,
@@ -2874,6 +2757,7 @@ export function catalogVideoSpec(model: PluginCatalogModel): CreationModelSpec {
         ...(model.refs.audios ? [{ key: 'audios', label: `参考音频 (0-${model.refs.audios}段)`, kind: 'audio' as const }] : []),
       ], model.promptMax),
       notes: [`newapi-plugins/${model.channel}.plugin.js 面板目录`],
+      aliases: [model.upstream],
     }),
     group: model.group,
   }

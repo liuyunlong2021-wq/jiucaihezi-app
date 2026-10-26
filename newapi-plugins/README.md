@@ -28,7 +28,7 @@
 | `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.1` 新增原生异步提交/查询，覆盖五个 `xy-` 图片模型；本地通过，尚未上传，宿主容量与真实出图待验收 |
 | `t8-mj.plugin.js` | `t8-mj` | 直接取代 T8 的 MJ 代理（无需适配器） | `0.3.0` 只接 `mj_relax_imagine`（T8 的 `mj-relax` 模式），插件直连 `https://ai.t8star.org` 的 `/mj/submit/imagine` 与 `/mj/task/{id}/fetch`；固定打 T8（忽略渠道 Base URL）、接受 JSON 与面板的 multipart，把面板比例拼成 `--ar`，仅文生图（垫图待接入）；待上传激活与真实验收 |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
-| `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |
+| `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 0.3.0 六型号（2026-10-26），`catalog` 面板目录；映射 `yuanliu-model-mapping.json`、售价 `yuanliu-pricing.json`。待上传激活与真实验收 |
 | `yihong.plugin.js` | `yihong` | 易红视频 API | 0.2.0仅六个yh-视频型号，无图片/fast Zeus；配套 `yihong-pricing.json`。宿主R2已激活；用户确认插件、六模型和计费已配置。画布待发布，真实生成/保存/账单未验收；见统一手册E节 |
 | `lingdong.plugin.js` | `lingdong` | 灵动图片与视频 API | 0.4.0 仅四个 `灵动-` 公开名；画布v0.20.7与R2配套已部署，用户确认该次图生图显示成功，其他型号/视频/读回/账单待验收 |
 

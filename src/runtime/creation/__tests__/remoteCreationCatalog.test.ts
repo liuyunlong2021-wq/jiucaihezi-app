@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { catalog as fkCatalog } from '../../../../newapi-plugins/fk.plugin.js'
+import { catalog as yuanliuCatalog } from '../../../../newapi-plugins/yuanliu.plugin.js'
 import { buildCreationRunPlan, usesNewApiContentEndpoint } from '../creationMediaPlan'
 import { creationModelFamily, displayModelPrice, getCreationModelSpec, listCreationModels } from '../creationModelRegistry'
 import { applyRemoteCatalog, parsePluginCatalogModel, restoreRemoteCatalog } from '../remoteCreationCatalog'
@@ -119,4 +120,24 @@ test('无有效目录时保留现状，冲突名不覆盖非目录模型，可�
 test('可用性响应保留目录规格', () => {
   const [item] = normalizeCreationModelAvailability({ data: { models: [{ id: NEW_NAME, status: 'enabled', spec: NEW_MODEL }] } })
   assert.deepEqual(item!.spec, NEW_MODEL)
+})
+
+test('源流视频条目同样由插件目录生成并可被下发目录替换', () => {
+  restoreRemoteCatalog(null)
+  const ids = () => listCreationModels({ task: 'video' }).filter(model => model.id.startsWith('newapi/yuanliu/')).map(model => model.id)
+  assert.deepEqual(ids(), yuanliuCatalog.models.map(model => `newapi/yuanliu/${model.upstream}`))
+  for (const model of yuanliuCatalog.models) {
+    const spec = getCreationModelSpec(`newapi/yuanliu/${model.upstream}`)!
+    assert.equal(spec.model, model.name)
+    assert.equal(creationModelFamily(spec), '源流 AI')
+    assert.equal(getCreationModelSpec(model.upstream)?.id, spec.id, '上游 ID 仍可查到条目')
+    assert.equal(getMediaModel(model.upstream)!.model, model.name)
+    assert.equal(usesNewApiContentEndpoint({ model: model.name }), true)
+  }
+  const only = { ...yuanliuCatalog.models[3], channel: 'yuanliu', price: '¥1/秒' }
+  applyRemoteCatalog([{ spec: only }], null)
+  assert.deepEqual(ids(), [`newapi/yuanliu/${only.upstream}`])
+  assert.equal(getCreationModelSpec(`newapi/yuanliu/${only.upstream}`)!.price, '¥1/秒')
+  assert.deepEqual(fkVideoIds(), fkCatalog.models.map(model => `newapi/fk/${model.upstream}`), '其他渠道不受影响')
+  restoreRemoteCatalog(null)
 })

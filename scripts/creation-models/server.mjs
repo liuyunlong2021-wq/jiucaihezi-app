@@ -18,11 +18,11 @@ const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 // 源流公开模型名 → 上游 model ID；与 newapi-plugins/yuanliu-model-mapping.json 一致。
 const YUANLIU_MODEL_MAPPING = {
   'Seedance 2.5(HD)': 'yl_seedance-2-5_6caffaca7390',
-  'Seedance 2.5 480p (QN-10)': 'yl_pp_sz_sd25_30010',
+  'Seedance 2.5 (LJ-02)': 'yl_g7zy_seedance_v2_5_s',
+  'Seedance 2.5 720p (QN-12)': 'yl_pp_mj_sd25_30010',
+  'Seedance 2.5 (RK-02)': 'yl_cm_73',
+  'Seedance2.0 720P (YC-02)': 'yl_zh_tt_sedanco_2_0_720',
   'Seedance2.0(HD)': 'yl_seedance-2-0_ba0687ff09f2',
-  'Seedance2.5full (LJ-04)': 'yl_g7zy_seedance_v2_5_full_s',
-  'Wan3.0视频Prime官渠稳定(WP-01)': 'yl_fy_wan3_0_video_prime',
-  'Wan3.0官渠(WP-02)': 'yl_fy_wan3_0_video',
 }
 
 export const CREATION_MODEL_ROUTES = [
@@ -130,15 +130,37 @@ export function extractPluginCatalog(text) {
 
 const PRICE_UNITS = { calls: '次', seconds: '秒', image_count: '张' }
 
-// 只换算 tier("base", u(key) * 系数 + ...) 的线性表达式；其他形状返回空，由目录 price 兜底。
+const SECONDS_TIER = String.raw`tier\("(\w+)",\s*u\("seconds"\)\s*\*\s*(\d+(?:\.\d+)?)\)`
+
+// 按画质条件分档：u("resolution") == "720p" ? tier("720p", u("seconds") * 0.8) : ... : tier("480p", ...)
+function resolutionTiers(expression) {
+  const branch = new RegExp(String.raw`^u\("resolution"\)\s*==\s*"(\w+)"\s*\?\s*` + SECONDS_TIER + String.raw`\s*:\s*`)
+  const last = new RegExp('^' + SECONDS_TIER + '$')
+  const tiers = []
+  let rest = expression.trim()
+  for (let match = branch.exec(rest); match; match = branch.exec(rest)) {
+    if (match[1] !== match[2]) return null
+    tiers.unshift({ resolution: match[1], price: Number(match[3]) })
+    rest = rest.slice(match[0].length)
+  }
+  const tail = last.exec(rest)
+  if (!tail || !tiers.length) return null
+  return [{ resolution: tail[1], price: Number(tail[2]) }, ...tiers]
+}
+
+// 换算 tier("base", u(key) * 系数 + ...) 的线性表达式与按画质条件分档；其他形状返回空，由目录 price 兜底。
 export function priceFromExpression(expression) {
-  const body = /^\s*tier\(\s*"base"\s*,\s*(.+)\)\s*$/.exec(String(expression || ''))?.[1]
-  if (!body) return ''
-  const terms = body.split('+').map(term => /^\s*u\("([a-z0-9_]+)"\)\s*\*\s*(\d+(?:\.\d+)?)\s*$/.exec(term))
-  if (terms.some(term => !term)) return ''
-  if (terms.length === 1 && PRICE_UNITS[terms[0][1]]) return `¥${Number(terms[0][2])}/${PRICE_UNITS[terms[0][1]]}`
-  const tiers = terms.map(term => ({ resolution: /^seconds_(\w+)$/.exec(term[1])?.[1], price: Number(term[2]) }))
-  if (tiers.some(tier => !tier.resolution)) return ''
+  const text = String(expression || '')
+  const body = /^\s*tier\(\s*"base"\s*,\s*(.+)\)\s*$/.exec(text)?.[1]
+  let tiers = resolutionTiers(text)
+  if (!tiers) {
+    if (!body) return ''
+    const terms = body.split('+').map(term => /^\s*u\("([a-z0-9_]+)"\)\s*\*\s*(\d+(?:\.\d+)?)\s*$/.exec(term))
+    if (terms.some(term => !term)) return ''
+    if (terms.length === 1 && PRICE_UNITS[terms[0][1]]) return `¥${Number(terms[0][2])}/${PRICE_UNITS[terms[0][1]]}`
+    tiers = terms.map(term => ({ resolution: /^seconds_(\w+)$/.exec(term[1])?.[1], price: Number(term[2]) }))
+    if (tiers.some(tier => !tier.resolution)) return ''
+  }
   const groups = []
   for (const tier of tiers) {
     const group = groups.find(item => item.price === tier.price)
@@ -179,7 +201,7 @@ export function buildCreationModelAvailability(channels, now = new Date(), catal
   const catalogIds = new Set(catalogModels.map(model => model.name))
   const routes = [
     ...catalogModels.map(spec => ({ id: spec.name, aliases: [spec.name, spec.upstream], spec })),
-    ...CREATION_MODEL_ROUTES.filter(route => !catalogIds.has(route.id)),
+    ...CREATION_MODEL_ROUTES.filter(route => !catalogIds.has(route.id) && !route.aliases.some(alias => catalogIds.has(alias))),
   ]
   return routes.map(route => withSpec(route, availabilityFor(route, channels, now)))
 }

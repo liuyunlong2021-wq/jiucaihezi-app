@@ -1,26 +1,42 @@
-// NewAPI Task Plugin v1 — 源流 AI OpenAPI 六个视频型号。
+// NewAPI Task Plugin v1 — 源流 AI OpenAPI 视频型号。
 // 上游协议为异步视频创建、查询和鉴权内容下载，直接由 NewAPI openai_video 宿主承载。
-// 素材上限、时长档位与画幅来自用户 2026-10-24 提供的型号清单；固定时长型号按 min=max 校验。
-// 计费：按次型号用 calls；按秒型号用 seconds，Wan 3.0 另按 resolution 分档（缺省 480p）。
-// 公开模型名（NewAPI 渠道内 UI 显示名）→ 源流上游 model ID。
-// 渠道模型映射即下表；插件也内置同一份别名，即使后台映射留空也能发上游 ID。
-const PUBLIC_NAMES = {
-  'Seedance 2.5(HD)': 'yl_seedance-2-5_6caffaca7390',
-  'Seedance 2.5 480p (QN-10)': 'yl_pp_sz_sd25_30010',
-  'Seedance2.0(HD)': 'yl_seedance-2-0_ba0687ff09f2',
-  'Seedance2.5full (LJ-04)': 'yl_g7zy_seedance_v2_5_full_s',
-  'Wan3.0视频Prime官渠稳定(WP-01)': 'yl_fy_wan3_0_video_prime',
-  'Wan3.0官渠(WP-02)': 'yl_fy_wan3_0_video',
-}
-const RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
-const MODEL_SPECS = {
-  'yl_seedance-2-5_6caffaca7390': { refs: [30, 0, 0], unit: 'call', min: 30, max: 30 },
-  'yl_pp_sz_sd25_30010': { refs: [30, 0, 10], unit: 'call', min: 4, max: 30 },
-  'yl_seedance-2-0_ba0687ff09f2': { refs: [9, 0, 0], unit: 'call', min: 10, max: 15 },
-  'yl_g7zy_seedance_v2_5_full_s': { refs: [30, 10, 10], unit: 'second', min: 5, max: 30 },
-  'yl_fy_wan3_0_video_prime': { refs: [10, 5, 5], unit: 'second', min: 2, max: 30, resolutions: ['480p', '720p', '1080p'] },
-  'yl_fy_wan3_0_video': { refs: [10, 5, 5], unit: 'second', min: 2, max: 30, resolutions: ['480p', '720p', '1080p'] },
-}
+// 型号、素材上限、时长与画幅来自用户 2026-10-26 提供的源流模型中心截图；售价见 yuanliu-pricing.json。
+// 计费：按次型号用 calls；按秒型号用 seconds，多画质型号再按 resolution 分档。
+// 面板目录：标记之间必须是纯 JSON，可用性服务按标记截取下发创作面板。改型号只改这里；
+// 公开名 → 上游 ID 与插件校验都由它推导，渠道后台映射留空也能发上游 ID。
+export const catalog = /*jc-catalog*/{
+  "schema": "jc-catalog-v1",
+  "models": [
+    { "name": "Seedance 2.5(HD)", "upstream": "yl_seedance-2-5_6caffaca7390", "task": "video", "group": "源流 AI",
+      "ratios": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "resolutions": ["720p"], "duration": { "min": 10, "max": 30, "default": 10 },
+      "refs": { "images": 10, "videos": 0, "audios": 0 }, "billing": "request", "price": "¥6/次" },
+    { "name": "Seedance 2.5 (LJ-02)", "upstream": "yl_g7zy_seedance_v2_5_s", "task": "video", "group": "源流 AI",
+      "ratios": ["auto", "1:1", "3:4", "4:3", "9:16", "16:9", "21:9"], "resolutions": ["720p"], "duration": { "min": 5, "max": 30, "default": 5 },
+      "refs": { "images": 30, "videos": 0, "audios": 0 }, "billing": "second", "price": "¥0.5/秒" },
+    { "name": "Seedance 2.5 720p (QN-12)", "upstream": "yl_pp_mj_sd25_30010", "task": "video", "group": "源流 AI",
+      "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], "resolutions": ["480p", "720p", "1080p"], "duration": { "min": 4, "max": 30, "default": 5 },
+      "refs": { "images": 30, "videos": 0, "audios": 10 }, "billing": "second", "price": "480p/720p ¥0.6/秒 · 1080p ¥1/秒" },
+    { "name": "Seedance 2.5 (RK-02)", "upstream": "yl_cm_73", "task": "video", "group": "源流 AI",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "resolutions": ["480p", "720p"], "duration": { "min": 4, "max": 30, "default": 5 },
+      "refs": { "images": 30, "videos": 10, "audios": 10 }, "billing": "second", "price": "480p ¥0.6/秒 · 720p ¥0.8/秒" },
+    { "name": "Seedance2.0 720P (YC-02)", "upstream": "yl_zh_tt_sedanco_2_0_720", "task": "video", "group": "源流 AI",
+      "ratios": ["16:9", "9:16", "1:1"], "resolutions": ["720p"], "duration": { "min": 5, "max": 15, "default": 5 },
+      "refs": { "images": 9, "videos": 3, "audios": 3 }, "billing": "second", "price": "¥0.4/秒" },
+    { "name": "Seedance2.0(HD)", "upstream": "yl_seedance-2-0_ba0687ff09f2", "task": "video", "group": "源流 AI",
+      "ratios": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "resolutions": ["720p"], "duration": { "values": [10, 15], "default": 10 },
+      "refs": { "images": 9, "videos": 0, "audios": 0 }, "billing": "request", "price": "¥4/次" }
+  ]
+}/*end-jc-catalog*/
+const PUBLIC_NAMES = Object.fromEntries(catalog.models.map(model => [model.name, model.upstream]))
+const MODEL_SPECS = Object.fromEntries(catalog.models.map(model => [model.upstream, {
+  refs: [model.refs.images, model.refs.videos, model.refs.audios],
+  unit: model.billing === 'request' ? 'call' : 'second',
+  min: model.duration.min,
+  max: model.duration.max,
+  durations: model.duration.values,
+  ratios: model.ratios,
+  resolutions: model.resolutions,
+}]))
 const DEFAULT_RESOLUTION = '480p'
 
 const UPSTREAM_STATUS = {
@@ -43,17 +59,17 @@ export const meta = {
   apiVersion: 1,
   key: 'yuanliu',
   name: '源流 AI',
-  version: '0.2.0',
+  version: '0.3.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Yuanliu AI Seedance and Wan video generation',
-    zh: '源流 AI Seedance / Wan 六个视频型号',
+    zh: '源流 AI Seedance 六个视频型号',
   },
   models: Object.keys(PUBLIC_NAMES),
   fetchMode: 'per_task',
   protocols: ['openai_video'],
   // Public docs expose /openapi/v1/videos; channel Base URL includes /openapi.
-  baseUrl: 'https://test.yuanliuai.tsyzai.com/openapi',
+  baseUrl: 'https://www.yuanliuai.com/openapi',
   usageSchema: {
     calls: {
       type: 'number',
@@ -146,15 +162,14 @@ export const protocols = {
       if (!spec) fail(`Unsupported model: ${model || '(missing)'}`)
       if (!promptOf(body)) fail('prompt is required')
       const duration = durationOf(body)
-      if (duration < spec.min || duration > spec.max) fail(`${model} duration must be ${spec.min}-${spec.max} seconds`)
+      if (spec.durations ? !spec.durations.includes(duration) : duration < spec.min || duration > spec.max) {
+        fail(`${model} duration must be ${spec.durations ? spec.durations.join(' or ') : spec.min + '-' + spec.max} seconds`)
+      }
       const ratio = firstDefined(body, ['aspect_ratio', 'aspectRatio', 'ratio'])
-      if (ratio !== undefined && ratio !== null && String(ratio).trim() && !RATIOS.includes(String(ratio).trim())) fail(`${model} aspect_ratio must be one of ${RATIOS.join(', ')}`)
-      if (spec.resolutions) {
-        const raw = firstDefined(body, ['resolution'])
-        if (raw !== undefined && raw !== null && String(raw).trim()) {
-          const resolution = String(raw).trim().toLowerCase()
-          if (!spec.resolutions.includes(resolution)) fail(`${model} resolution must be one of ${spec.resolutions.join(', ')}`)
-        }
+      if (ratio !== undefined && ratio !== null && String(ratio).trim() && !spec.ratios.includes(String(ratio).trim())) fail(`${model} aspect_ratio must be one of ${spec.ratios.join(', ')}`)
+      const raw = firstDefined(body, ['resolution'])
+      if (raw !== undefined && raw !== null && String(raw).trim() && !spec.resolutions.includes(String(raw).trim().toLowerCase())) {
+        fail(`${model} resolution must be one of ${spec.resolutions.join(', ')}`)
       }
 
       const inputs = requestInputs(body)
@@ -202,11 +217,7 @@ export function buildSubmitRequest(ctx) {
 
   const aspectRatio = firstDefined(source, ['aspect_ratio', 'aspectRatio', 'ratio'])
   if (typeof aspectRatio === 'string' && aspectRatio.trim()) body.aspect_ratio = aspectRatio.trim()
-  if (spec.resolutions) body.resolution = billedResolution(source, spec)
-  else {
-    const resolution = firstDefined(source, ['resolution'])
-    if (typeof resolution === 'string' && resolution.trim()) body.resolution = resolution.trim()
-  }
+  body.resolution = billedResolution(source, spec)
   for (const kind of ['images', 'videos', 'audios']) {
     if (inputs[kind].length) body[kind] = inputs[kind]
   }

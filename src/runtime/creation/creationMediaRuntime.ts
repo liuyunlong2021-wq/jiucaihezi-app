@@ -905,7 +905,7 @@ function buildDirectVideoBody(
     return body
   }
   if (request.plan.modelId.startsWith('newapi/yuanliu/')) {
-    return compact({ model: request.plan.model, prompt: params.prompt, duration: params.duration, client_request_id: crypto.randomUUID(), images: uploadedImages.length ? uploadedImages : undefined, videos: uploadedVideos.length ? uploadedVideos : undefined, audios: uploadedAudios.length ? uploadedAudios : undefined })
+    return compact({ model: request.plan.model, prompt: params.prompt, duration: params.duration, aspect_ratio: params.aspectRatio, resolution: params.resolution, client_request_id: crypto.randomUUID(), images: uploadedImages.length ? uploadedImages : undefined, videos: uploadedVideos.length ? uploadedVideos : undefined, audios: uploadedAudios.length ? uploadedAudios : undefined })
   }
   if (request.plan.modelId.startsWith('newapi/lingdong/')) {
     return compact({ model: request.plan.model, prompt: params.prompt, duration: params.duration, ratio: params.aspectRatio, resolution: params.resolution, images: uploadedImages.length ? uploadedImages : undefined, videos: uploadedVideos.length ? uploadedVideos : undefined, audios: uploadedAudios.length ? uploadedAudios : undefined })

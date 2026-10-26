@@ -1,7 +1,7 @@
 {
   "plugin": "yuanliu",
-  "version": "0.2.0",
-  "scope": "源流六个视频型号；公开名映射见 yuanliu-model-mapping.json",
+  "version": "0.3.0",
+  "scope": "源流六个视频型号（2026-10-26）；公开名映射见 yuanliu-model-mapping.json",
   "coefficientConvention": "用户确认人民币售价；沿用现有 Task Usage 系数同数值口径，实际分组倍率与扣费待验收",
   "models": [
     {
@@ -12,11 +12,39 @@
       "expression": "tier(\"base\", u(\"calls\") * 6)"
     },
     {
-      "model": "Seedance 2.5 480p (QN-10)",
-      "upstreamModel": "yl_pp_sz_sd25_30010",
-      "unit": "次",
-      "salePriceCny": 9,
-      "expression": "tier(\"base\", u(\"calls\") * 9)"
+      "model": "Seedance 2.5 (LJ-02)",
+      "upstreamModel": "yl_g7zy_seedance_v2_5_s",
+      "unit": "秒",
+      "salePriceCny": 0.5,
+      "expression": "tier(\"base\", u(\"seconds\") * 0.5)"
+    },
+    {
+      "model": "Seedance 2.5 720p (QN-12)",
+      "upstreamModel": "yl_pp_mj_sd25_30010",
+      "unit": "秒",
+      "salePriceCny": {
+        "480p": 0.6,
+        "720p": 0.6,
+        "1080p": 1
+      },
+      "expression": "u(\"resolution\") == \"1080p\" ? tier(\"1080p\", u(\"seconds\") * 1) : u(\"resolution\") == \"720p\" ? tier(\"720p\", u(\"seconds\") * 0.6) : tier(\"480p\", u(\"seconds\") * 0.6)"
+    },
+    {
+      "model": "Seedance 2.5 (RK-02)",
+      "upstreamModel": "yl_cm_73",
+      "unit": "秒",
+      "salePriceCny": {
+        "480p": 0.6,
+        "720p": 0.8
+      },
+      "expression": "u(\"resolution\") == \"720p\" ? tier(\"720p\", u(\"seconds\") * 0.8) : tier(\"480p\", u(\"seconds\") * 0.6)"
+    },
+    {
+      "model": "Seedance2.0 720P (YC-02)",
+      "upstreamModel": "yl_zh_tt_sedanco_2_0_720",
+      "unit": "秒",
+      "salePriceCny": 0.4,
+      "expression": "tier(\"base\", u(\"seconds\") * 0.4)"
     },
     {
       "model": "Seedance2.0(HD)",
@@ -24,35 +52,6 @@
       "unit": "次",
       "salePriceCny": 4,
       "expression": "tier(\"base\", u(\"calls\") * 4)"
-    },
-    {
-      "model": "Seedance2.5full (LJ-04)",
-      "upstreamModel": "yl_g7zy_seedance_v2_5_full_s",
-      "unit": "秒",
-      "salePriceCny": 0.5,
-      "expression": "tier(\"base\", u(\"seconds\") * 0.5)"
-    },
-    {
-      "model": "Wan3.0视频Prime官渠稳定(WP-01)",
-      "upstreamModel": "yl_fy_wan3_0_video_prime",
-      "unit": "秒",
-      "salePriceCny": {
-        "480p": 0.4,
-        "720p": 0.5,
-        "1080p": 0.7
-      },
-      "expression": "u(\"resolution\") == \"1080p\" ? tier(\"1080p\", u(\"seconds\") * 0.7) : u(\"resolution\") == \"720p\" ? tier(\"720p\", u(\"seconds\") * 0.5) : tier(\"480p\", u(\"seconds\") * 0.4)"
-    },
-    {
-      "model": "Wan3.0官渠(WP-02)",
-      "upstreamModel": "yl_fy_wan3_0_video",
-      "unit": "秒",
-      "salePriceCny": {
-        "480p": 0.4,
-        "720p": 0.5,
-        "1080p": 0.6
-      },
-      "expression": "u(\"resolution\") == \"1080p\" ? tier(\"1080p\", u(\"seconds\") * 0.6) : u(\"resolution\") == \"720p\" ? tier(\"720p\", u(\"seconds\") * 0.5) : tier(\"480p\", u(\"seconds\") * 0.4)"
     }
   ]
 }

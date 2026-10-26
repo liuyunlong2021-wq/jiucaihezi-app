@@ -1771,8 +1771,10 @@ test('calibrated four-channel video HTTP bodies pass their actual plugins, inclu
             }
             if (key === 'yuanliu') {
               assert.equal(vendorBody.model, spec.id.slice('newapi/yuanliu/'.length))
-              assert.equal(vendorBody.aspect_ratio, body.ratio)
-              assert.ok(body.resolution === undefined || ['480p', '720p', '1080p'].includes(body.resolution), spec.model)
+              assert.equal(body.aspect_ratio, spec.fields.find(field => field.key === 'ratio')?.defaultValue, spec.model)
+              assert.equal(vendorBody.aspect_ratio, body.aspect_ratio)
+              assert.equal(vendorBody.resolution, body.resolution)
+              assert.ok(spec.capabilities.resolutions?.includes(body.resolution), spec.model)
               if (refs) assert.equal(vendorBody.images.length, 1)
             }
             posts++
