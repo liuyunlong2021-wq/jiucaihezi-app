@@ -164,3 +164,13 @@ test('every scene is planned beat by beat with a rhythm curve before shot design
   const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
   assert.ok(index.find(skill => skill.name === 'jc-gongchengjuben').files.includes('references/scene-rhythm.md'))
 })
+
+test('costume looks keep the character silhouette anchors from the identity design', () => {
+  const costume = readFileSync('public/skills/jc-fuzhuang-prompt/SKILL.md', 'utf8')
+  assert.match(costume, /本轮应读[^\n]*角色生图提示词\.md[^\n]*剪影锚点/)
+  assert.match(costume, /### 5\. 保留角色的剪影锚点/)
+  assert.match(costume, /穿戴类锚点[\s\S]*保留/)
+  assert.match(costume, /不得遮挡/)
+  assert.match(costume, /身份或性格转变/)
+  assert.match(readFileSync('public/skills/jc-juese-sheji/references/silhouette-shape.md', 'utf8'), /换装保留剪影锚点/)
+})

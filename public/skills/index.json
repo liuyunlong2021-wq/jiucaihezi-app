@@ -346,6 +346,7 @@
       "references/portrait-beauty.md",
       "references/random-words.md",
       "references/shouxiang.md",
+      "references/silhouette-shape.md",
       "references/tixiang.md"
     ],
     "package": {
@@ -386,6 +387,10 @@
         },
         {
           "path": "references/shouxiang.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/silhouette-shape.md",
           "kind": "reference"
         },
         {

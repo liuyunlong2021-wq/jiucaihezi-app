@@ -53,3 +53,17 @@ test('both character format templates accept text without implying an attached i
     }
   }
 })
+
+test('character design checks a readable silhouette and shape language, keeping silhouette anchors across looks', () => {
+  const skill = readFileSync(join(root, 'SKILL.md'), 'utf8')
+  assert.match(skill, /\[剪影与形状语言\]\(references\/silhouette-shape\.md\)/)
+  assert.match(skill, /剪影可辨/)
+  const text = readFileSync(join(root, 'references', 'silhouette-shape.md'), 'utf8')
+  for (const section of ['剪影辨识', '形状语言', '五官的形状组合', '姿态轮廓', '换装保留剪影锚点', '写进提示词']) {
+    assert.match(text, new RegExp(`## .*${section}`), section)
+  }
+  assert.match(text, /圆[\s\S]*尖[\s\S]*方/)
+  assert.match(text, /填黑/)
+  assert.match(text, /不绑定善恶/)
+  assert.doesNotMatch(text, /《[^》]+》/)
+})
