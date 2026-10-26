@@ -386,7 +386,7 @@ pub async fn http_download_base64(
     }
     let _guard = DownloadGuard(target.clone());
     resolve_download_credential(&request.url, &mut request.headers, request.credential_ref.as_deref())?;
-    let (headers, _) = super::media_download::download(&media_download_client(&request)?, &request.url,
+    let (headers, _) = download_media(&media_download_client(&request)?, relay_content_url(&request.url), &request.url,
         &request.headers.unwrap_or_default(), &temp, &meta, cancel.clone(), |_| {}).await?;
     if *cancel.borrow() { return Err("下载已暂停".into()); }
     validate_download_video(Some(&app), &temp, &target).await?;
@@ -396,6 +396,33 @@ pub async fn http_download_base64(
     let _ = tokio::fs::remove_file(temp).await;
     let _ = tokio::fs::remove_file(meta).await;
     Ok(HttpDownloadResponse { status: 200, headers, data_base64: general_purpose::STANDARD.encode(bytes) })
+}
+
+/// NewAPI content results are fetched through the server's R2 relay, which copies the
+/// video once and redirects to R2. Callers keep storing the original content URL.
+fn relay_content_url(url: &str) -> Option<String> {
+    let mut parsed = reqwest::Url::parse(url).ok()?;
+    if parsed.scheme() != "https" || parsed.host_str() != Some("api.jiucaihezi.studio") { return None; }
+    let task = parsed.path().strip_prefix("/v1/videos/")?.strip_suffix("/content")?.to_owned();
+    if task.is_empty() || task.contains('/') { return None; }
+    parsed.set_path(&format!("/api/creations/videos/{task}/content"));
+    Some(parsed.into())
+}
+
+/// A server without the relay route answers 404; then the original content URL is used.
+#[allow(clippy::too_many_arguments)]
+async fn download_media(
+    client: &reqwest::Client, relay: Option<String>, url: &str, headers: &HashMap<String, String>,
+    temp: &std::path::Path, meta: &std::path::Path, cancel: tokio::sync::watch::Receiver<bool>,
+    progress: impl Fn(super::media_download::Progress),
+) -> Result<(HashMap<String, String>, u64), String> {
+    if let Some(relay) = relay {
+        match super::media_download::download(client, &relay, headers, temp, meta, cancel.clone(), &progress).await {
+            Err(error) if error == "HTTP 下载失败：404" => {}
+            result => return result,
+        }
+    }
+    super::media_download::download(client, url, headers, temp, meta, cancel, progress).await
 }
 
 fn cached_download_target(app: &tauri::AppHandle, url: &str) -> Result<std::path::PathBuf, String> {
@@ -546,7 +573,7 @@ async fn download_to_project(
     let client = media_download_client(&download_request)?;
     // Throttle IPC so video chunks do not flood the WebView.
     let last = std::sync::Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    let (headers, bytes_written) = super::media_download::download(&client, &request.url, &request.headers.unwrap_or_default(), &temp, &meta, cancel.clone(), |progress| {
+    let (headers, bytes_written) = download_media(&client, relay_content_url(&request.url), &request.url, &request.headers.unwrap_or_default(), &temp, &meta, cancel.clone(), |progress| {
         let mut time = last.lock().unwrap();
         if time.elapsed() >= std::time::Duration::from_millis(250) || progress.total == Some(progress.bytes) {
             if let Some(channel) = &on_progress { let _ = channel.send(progress); }
@@ -1050,5 +1077,66 @@ mod tests {
 
         assert!(matches!(result, Err(message) if message.contains("路径") || message.contains("目录")));
         assert!(!dir.path().parent().unwrap().join("escape.mp4").exists());
+    }
+
+    #[test]
+    fn newapi_content_results_prefer_the_r2_relay() {
+        assert_eq!(relay_content_url("https://api.jiucaihezi.studio/v1/videos/task_a1/content").as_deref(),
+            Some("https://api.jiucaihezi.studio/api/creations/videos/task_a1/content"));
+        for url in ["https://example.com/v1/videos/task_a1/content", "http://api.jiucaihezi.studio/v1/videos/task_a1/content",
+            "https://api.jiucaihezi.studio/v1/videos/task_a1", "https://api.jiucaihezi.studio/v1/videos//content",
+            "https://api.jiucaihezi.studio/v1/creation/tasks/t/outputs/o/content"] {
+            assert_eq!(relay_content_url(url), None, "{url}");
+        }
+    }
+
+    fn serve(responses: Vec<String>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || responses.into_iter().map(|response| {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut buffer = [0; 4096];
+            let n = socket.read(&mut buffer).unwrap();
+            socket.write_all(response.as_bytes()).unwrap();
+            String::from_utf8_lossy(&buffer[..n]).to_lowercase()
+        }).collect());
+        (format!("{port}"), server)
+    }
+
+    async fn relay_download(relay: String, original: String) -> (Result<u64, String>, Vec<u8>) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (temp, meta) = (dir.path().join("v.mp4.part"), dir.path().join("v.mp4.part.json"));
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let headers = HashMap::from([("Authorization".into(), "Bearer user-key".into())]);
+        let result = download_media(&reqwest::Client::new(), Some(relay), &original, &headers, &temp, &meta, rx, |_| {}).await;
+        (result.map(|(_, bytes)| bytes), tokio::fs::read(temp).await.unwrap_or_default())
+    }
+
+    #[tokio::test]
+    async fn relay_missing_on_older_server_falls_back_to_content_endpoint() {
+        let (port, server) = serve(vec![
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo".into(),
+        ]);
+        let (result, bytes) = relay_download(format!("http://127.0.0.1:{port}/api/creations/videos/t/content"),
+            format!("http://127.0.0.1:{port}/v1/videos/t/content")).await;
+        assert_eq!(result.unwrap(), 5);
+        assert_eq!(bytes, b"video");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("get /api/creations/videos/t/content "));
+        assert!(requests[1].starts_with("get /v1/videos/t/content "));
+    }
+
+    #[tokio::test]
+    async fn relay_redirect_reaches_r2_without_the_user_key() {
+        let (r2_port, r2) = serve(vec!["HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo".into()]);
+        // A different host name, as R2 is a different host from the API.
+        let (port, api) = serve(vec![format!("HTTP/1.1 302 Found\r\nLocation: http://localhost:{r2_port}/bucket/video-results/1/t.mp4?X-Amz-Signature=s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")]);
+        let (result, bytes) = relay_download(format!("http://127.0.0.1:{port}/api/creations/videos/t/content"),
+            format!("http://127.0.0.1:{port}/v1/videos/t/content")).await;
+        assert_eq!(result.unwrap(), 5);
+        assert_eq!(bytes, b"video");
+        assert!(api.join().unwrap()[0].contains("authorization: bearer user-key"));
+        assert!(!r2.join().unwrap()[0].contains("authorization"));
     }
 }
