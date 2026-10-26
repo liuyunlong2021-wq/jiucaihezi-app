@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindDesktopUpdater, desktopUpdateStatus, registerUpdateParticipant, updateWaiting, waitForUpdateInstall } from '../desktopUpdater'
+import { beginDesktopUpdateTask, bindDesktopUpdater, desktopUpdateStatus, describeUpdateTask, loadUpdateTasks, registerUpdateParticipant, updaterAction, updateTasks, updateWaiting, waitForUpdateInstall } from '../desktopUpdater'
 
 test('actual updater service revokes queued consent, has one timer owner, and reports preparation errors', async t => {
   const callbacks = new Map<number, (event: unknown) => unknown>()
@@ -60,5 +60,41 @@ test('actual updater service revokes queued consent, has one timer owner, and re
       if (descriptor) Object.defineProperty(globalThis, name, descriptor)
       else Reflect.deleteProperty(globalThis, name)
     }
+  }
+})
+
+test('blocking tasks are named for the user and stopping them is an explicit install option', async () => {
+  const calls: { command: string; args: any }[] = []
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const tasks = [{ owner: 'main', kind: 'AI 对话', startedAt: 1_000 }, { owner: 'native', kind: '媒体处理', startedAt: 61_000 }]
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    __TAURI_INTERNALS__: {
+      metadata: { currentWindow: { label: 'main' } },
+      async invoke(command: string, args: any) {
+        calls.push({ command, args })
+        if (command === 'desktop_update_task_begin') return 'lease-1'
+        if (command === 'desktop_update_tasks') return tasks
+        if (command === 'desktop_update_status') return { phase: 'ready', currentVersion: '2.2.40', version: '2.3.0', downloaded: 1 }
+        if (command === 'desktop_update_task_end' || command === 'desktop_update_install') return
+        throw new Error(`Unexpected command ${command}`)
+      },
+    },
+  } })
+  try {
+    const release = await beginDesktopUpdateTask('AI 对话')
+    assert.deepEqual(calls.at(-1), { command: 'desktop_update_task_begin', args: { kind: 'AI 对话' } })
+    await release()
+    await loadUpdateTasks()
+    assert.deepEqual(updateTasks.value, tasks)
+    assert.equal(describeUpdateTask(tasks[0], 'main', 181_000), 'AI 对话 · 当前窗口 · 已运行 3 分钟')
+    assert.equal(describeUpdateTask(tasks[1], 'main', 91_000), '媒体处理 · 后台 · 已运行不到 1 分钟')
+    assert.equal(describeUpdateTask({ owner: 'ws-1', kind: 'DeepSeek 运行', startedAt: 0 }, 'main', 0), 'DeepSeek 运行 · 其他窗口 · 已运行不到 1 分钟')
+    await updaterAction('install')
+    assert.deepEqual(calls.filter(call => call.command === 'desktop_update_install').at(-1)?.args, { force: false })
+    await updaterAction('install', true)
+    assert.deepEqual(calls.filter(call => call.command === 'desktop_update_install').at(-1)?.args, { force: true })
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+    else Reflect.deleteProperty(globalThis, 'window')
   }
 })

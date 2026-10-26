@@ -1343,7 +1343,7 @@ pub async fn media_process_file(
     input: MediaProcessFileInput,
 ) -> Result<MediaProcessFileOutput, String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _update_task = super::desktop_update::native_task(&app)?;
+    let _update_task = super::desktop_update::native_task(&app, "媒体处理")?;
     let source = resolve_media_input_path(&app, &jobs, &input.input_path).await?;
     let output_dir = app_media_dir(&app, "media-outputs")?;
     let output_filename = sanitize_media_filename(&input.output_filename, "media-output.mp4");
@@ -1498,7 +1498,7 @@ pub async fn media_burn_subtitles(
     input: MediaBurnSubtitlesInput,
 ) -> Result<MediaProcessFileOutput, String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _update_task = super::desktop_update::native_task(&app)?;
+    let _update_task = super::desktop_update::native_task(&app, "字幕烧录")?;
     let source = resolve_media_input_path(&app, &jobs, &input.input_path).await?;
     let subtitle_text = input.subtitle_text.trim();
     if subtitle_text.is_empty() {

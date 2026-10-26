@@ -15,6 +15,8 @@ export interface DesktopUpdateStatus {
 
 export const desktopUpdateStatus = shallowRef<DesktopUpdateStatus>({ phase: 'idle', currentVersion: '', downloaded: 0 })
 export const updateWaiting = shallowRef(false)
+export interface UpdateTask { owner: string; kind: string; startedAt: number }
+export const updateTasks = shallowRef<UpdateTask[]>([])
 const participants = new Set<UpdateParticipant>()
 let bound: Promise<void> | undefined
 let waitTimer: ReturnType<typeof setInterval> | undefined
@@ -30,19 +32,30 @@ export async function updateDraftKey(owner: string) {
   return `jc:update-resume:${getCurrentWindow().label}:${owner}`
 }
 
-export async function beginDesktopUpdateTask(): Promise<() => Promise<void>> {
+export async function beginDesktopUpdateTask(kind: string): Promise<() => Promise<void>> {
   if (!desktop()) return async () => {}
   const { invoke } = await import('@tauri-apps/api/core')
-  const id = await invoke<string>('desktop_update_task_begin')
+  const id = await invoke<string>('desktop_update_task_begin', { kind })
   return async () => {
     if (id) await invoke('desktop_update_task_end', { id }).catch(cause => console.warn('[updater] task release failed', cause))
   }
 }
 
-export async function updaterAction(action: 'check' | 'download' | 'install') {
+export async function loadUpdateTasks() {
+  const { invoke } = await import('@tauri-apps/api/core')
+  updateTasks.value = await invoke<UpdateTask[]>('desktop_update_tasks')
+}
+
+export function describeUpdateTask(task: UpdateTask, currentWindow: string, now = Date.now()) {
+  const where = task.owner === 'native' ? '后台' : task.owner === currentWindow ? '当前窗口' : '其他窗口'
+  const minutes = Math.floor((now - task.startedAt) / 60_000)
+  return `${task.kind} · ${where} · 已运行${minutes < 1 ? '不到 1' : ` ${minutes}`} 分钟`
+}
+
+export async function updaterAction(action: 'check' | 'download' | 'install', force = false) {
   const { invoke } = await import('@tauri-apps/api/core')
   let error: string | undefined
-  try { await invoke(`desktop_update_${action}`) }
+  try { await invoke(`desktop_update_${action}`, action === 'install' ? { force } : undefined) }
   catch (cause) { error = String(cause) }
   finally {
     const snapshot = await invoke<DesktopUpdateStatus>('desktop_update_status')

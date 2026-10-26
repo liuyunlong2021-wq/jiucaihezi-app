@@ -245,7 +245,7 @@ pub async fn screenshot_begin(
     begin(app, Some(window)).await
 }
 async fn begin(app: tauri::AppHandle, source: Option<tauri::WebviewWindow>) -> Result<(), String> {
-    let update_task = super::desktop_update::native_task(&app)?;
+    let update_task = super::desktop_update::native_task(&app, "截图")?;
     {
         let state = lock(&app);
         if let Some(active) = &state.active {

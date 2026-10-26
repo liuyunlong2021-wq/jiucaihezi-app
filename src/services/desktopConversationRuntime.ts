@@ -376,7 +376,7 @@ export function createDesktopConversationHost(execute: RemoteExecution = execute
     readSession: readDesktopConversationSession,
     sendMessage: async (text, sessionId) => {
       const { beginDesktopUpdateTask } = await import('./desktopUpdater')
-      const release = await beginDesktopUpdateTask()
+      const release = await beginDesktopUpdateTask('AI 对话')
       try { return startDesktopRemoteTextRun(text, execute, sessionId) }
       finally { await release() }
     },

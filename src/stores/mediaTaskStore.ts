@@ -1254,7 +1254,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function _resumePolling(task: MediaTask) {
     const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
-    const release = await beginDesktopUpdateTask()
+    const release = await beginDesktopUpdateTask('查询生成结果')
     try { return await resumePollingAllowed(task) }
     finally { await release() }
   }
@@ -1366,7 +1366,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   async function submitTask(params: MediaTaskSubmitParams): Promise<string> {
     const capturedProjectId = captureWebCreationProjectId(params)
     const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
-    const release = await beginDesktopUpdateTask()
+    const release = await beginDesktopUpdateTask('媒体生成')
     try { return await submitTaskAllowed(params, release, capturedProjectId) }
     catch (cause) { await release(); throw cause }
   }
@@ -1442,7 +1442,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (!task?.planSnapshot?.protocol || !plan.protocol || isTaskActive(taskId)) return
     if (task.planSnapshot.protocol.fingerprint !== plan.protocol.fingerprint) throw new Error('恢复内容与原请求不一致')
     const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
-    const release = await beginDesktopUpdateTask()
+    const release = await beginDesktopUpdateTask('媒体生成')
     void _executeTask(task.id, { type: task.type, model: task.model, modelLabel: task.modelLabel,
       prompt: task.prompt, source: 'creation', directory: task.directory, memory: task.memory,
       canvasTarget: task.canvasTarget, plan }).finally(release).catch(() => {})
@@ -1480,7 +1480,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function retryMediaPersistence(taskId: string): Promise<boolean> {
     const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
-    const release = await beginDesktopUpdateTask()
+    const release = await beginDesktopUpdateTask('保存生成结果')
     try { return await retryMediaPersistenceAllowed(taskId) }
     finally { await release() }
   }
@@ -1588,7 +1588,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function refreshTaskResult(taskId: string): Promise<boolean> {
     const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
-    const release = await beginDesktopUpdateTask()
+    const release = await beginDesktopUpdateTask('查询生成结果')
     try { return await refreshTaskResultAllowed(taskId) }
     finally { await release() }
   }
@@ -1665,7 +1665,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function addTaskResultToCanvas(taskId: string, target: CanvasTaskTarget): Promise<boolean> {
     const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
-    const release = await beginDesktopUpdateTask()
+    const release = await beginDesktopUpdateTask('写入画布')
     try { return await addTaskResultToCanvasAllowed(taskId, target) }
     finally { await release() }
   }

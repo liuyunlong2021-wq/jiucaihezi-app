@@ -212,7 +212,8 @@
           "desktop_update_install",
           "desktop_update_ack",
           "desktop_update_task_begin",
-          "desktop_update_task_end"
+          "desktop_update_task_end",
+          "desktop_update_tasks"
         ],
         "deny": []
       }

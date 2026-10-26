@@ -1347,7 +1347,7 @@ pub(crate) fn spawn_workbench_window(
     workspace: Option<&str>,
 ) -> Result<String, String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _update_task = commands::desktop_update::native_task(app)?;
+    let _update_task = commands::desktop_update::native_task(app, "打开窗口")?;
     let config = workbench_window_config(app, label, workspace)?;
     let window =
         build_workbench_window(app, &config, workspace).map_err(|error| error.to_string())?;
@@ -1755,6 +1755,7 @@ pub fn run() {
             commands::desktop_update::desktop_update_task_begin,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             commands::desktop_update::desktop_update_task_end,
+            commands::desktop_update::desktop_update_tasks,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             commands::screenshot::screenshot_check,
             #[cfg(any(target_os = "windows", target_os = "macos"))]

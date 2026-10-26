@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openExternal } from '@/utils/httpClient'
-import { bindDesktopUpdater, desktopUpdateStatus as status, updaterAction, updateWaiting, waitForUpdateInstall } from '@/services/desktopUpdater'
+import { bindDesktopUpdater, describeUpdateTask, desktopUpdateStatus as status, loadUpdateTasks, updaterAction, updateTasks, updateWaiting, waitForUpdateInstall } from '@/services/desktopUpdater'
 const busy = computed(() => ['checking', 'downloading', 'preparing', 'installing'].includes(status.value.phase))
 const progress = computed(() => status.value.total ? Math.min(100, Math.round(status.value.downloaded / status.value.total * 100)) : undefined)
 const labels: Record<string, string> = { idle: '尚未检查更新', current: '已是最新版本', checking: '正在检查更新…', available: '发现新版本', downloading: '正在下载更新…', ready: '更新已下载并验证', preparing: '正在保存并准备升级…', installing: '正在安装更新…', error: '检查更新失败', unavailable: '更新服务暂不可用' }
-onMounted(() => { void bindDesktopUpdater() })
+const confirmStop = ref(false)
+const currentWindow = getCurrentWindow().label
+const refreshTasks = () => { if (status.value.phase === 'ready') void loadUpdateTasks().catch(() => {}) }
+let timer: ReturnType<typeof setInterval> | undefined
+watch(status, refreshTasks, { immediate: true })
+watch(() => updateTasks.value.length, length => { if (!length) confirmStop.value = false })
+onMounted(() => { void bindDesktopUpdater(); timer = setInterval(refreshTasks, 5000) })
+onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
 
 <template>
@@ -21,6 +29,11 @@ onMounted(() => { void bindDesktopUpdater() })
     <p v-if="status.error" role="alert">{{ status.error }}</p>
     <p v-if="status.message" role="status">{{ status.message }}</p>
     <p v-if="updateWaiting">等待任务完成后安装；可随时取消。</p>
+    <template v-if="status.phase === 'ready' && updateTasks.length">
+      <p>正在占用升级的任务：</p>
+      <ul class="tasks"><li v-for="task in updateTasks" :key="task.owner + task.kind + task.startedAt">{{ describeUpdateTask(task, currentWindow) }}</li></ul>
+      <p v-if="confirmStop" role="alert">停止后会保存所有工作窗口并重启安装，进行中的任务将被中断。</p>
+    </template>
     <div class="actions">
       <button :disabled="busy || updateWaiting || status.phase === 'unavailable'" @click="updaterAction('check')">检查更新</button>
       <button v-if="status.phase === 'available'" @click="updaterAction('download')">下载更新</button>
@@ -28,6 +41,11 @@ onMounted(() => { void bindDesktopUpdater() })
       <button v-if="status.phase === 'ready' && !updateWaiting" @click="waitForUpdateInstall(true)">任务结束后安装</button>
       <button @click="openExternal('https://api.jiucaihezi.studio/download/')">手动下载安装包</button>
       <button v-if="updateWaiting" @click="waitForUpdateInstall(false)">取消等待</button>
+      <button v-if="status.phase === 'ready' && updateTasks.length && !confirmStop" @click="confirmStop = true">停止这些任务并安装</button>
+      <template v-if="status.phase === 'ready' && confirmStop">
+        <button @click="updaterAction('install', true)">确认停止并安装</button>
+        <button @click="confirmStop = false">取消</button>
+      </template>
     </div>
     <p>下载期间可以继续创作。安装前会检查所有工作窗口并保存内容。</p>
   </section>
@@ -37,6 +55,7 @@ onMounted(() => { void bindDesktopUpdater() })
 .update-settings { display: grid; gap: 12px; font-size: 13px; }
 .update-settings p { margin: 0; color: var(--ink2); overflow-wrap: anywhere; }
 .notes { white-space: pre-wrap; }
+.tasks { margin: 0; padding-left: 18px; color: var(--ink2); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink1); cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }

@@ -1822,7 +1822,7 @@ export async function updateDeepSeekHarnessQueue(
 
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
   const { beginDesktopUpdateTask } = await import('./desktopUpdater')
-  const release = await beginDesktopUpdateTask()
+  const release = await beginDesktopUpdateTask('AI 对话')
   try { return await runDeepSeekHarnessTask(input) }
   finally { await release() }
 }

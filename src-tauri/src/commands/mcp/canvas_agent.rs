@@ -218,7 +218,7 @@ pub async fn canvas_agent_connect(
     timeout_ms: u64,
 ) -> Result<CanvasStatus, String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _update_task = crate::commands::desktop_update::native_task(window.app_handle())?;
+    let _update_task = crate::commands::desktop_update::native_task(window.app_handle(), "连接画布")?;
     let _start = START.lock().await;
     if window.get_webview_window(window.label()).is_none() {
         return Err("画布连接已取消".into());

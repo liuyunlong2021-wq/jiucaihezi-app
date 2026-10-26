@@ -34,24 +34,36 @@ impl Preparation {
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Task {
+    owner: String,
+    kind: String,
+    started_at: u64,
+}
+
 #[derive(Default)]
 struct Inner {
     status: Status,
     update: Option<Update>,
     bytes: Option<Vec<u8>>,
     preparation: Preparation,
-    tasks: HashMap<String, String>,
+    tasks: HashMap<String, Task>,
 }
 
 impl Inner {
-    fn begin_task(&mut self, owner: &str) -> Result<String, String> {
+    fn begin_task(&mut self, owner: &str, kind: &str) -> Result<String, String> {
         if blocked(&self.status.phase) { return Err("正在准备应用升级，请稍后再试".into()); }
         let id = uuid::Uuid::new_v4().to_string();
-        self.tasks.insert(id.clone(), owner.into());
+        let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        self.tasks.insert(id.clone(), Task { owner: owner.into(), kind: kind.into(), started_at });
         Ok(id)
     }
-    fn begin_preparation(&mut self) -> Result<(), String> {
+    fn task_list(&self) -> Vec<Task> { self.tasks.values().cloned().collect() }
+    // force：用户明确选择停止占用任务。安装会重启应用，进行中的工作随之中断。
+    fn begin_preparation(&mut self, force: bool) -> Result<(), String> {
         if self.bytes.is_none() { return Err("请先下载并验证更新包".into()); }
+        if force { self.tasks.clear(); }
         if !self.tasks.is_empty() { return Err("还有任务正在运行，完成后再安装升级".into()); }
         self.status.phase = "preparing".into();
         self.status.error = None;
@@ -91,10 +103,10 @@ impl Drop for NativeTask {
     }
 }
 
-pub fn native_task(app: &AppHandle) -> Result<Option<NativeTask>, String> {
+pub fn native_task(app: &AppHandle, kind: &str) -> Result<Option<NativeTask>, String> {
     let Some(state) = app.try_state::<DesktopUpdateState>() else { return Ok(None); };
     let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-    let id = inner.begin_task("native")?;
+    let id = inner.begin_task("native", kind)?;
     Ok(Some(NativeTask { app: app.clone(), id }))
 }
 
@@ -132,24 +144,30 @@ pub fn desktop_update_status(window: WebviewWindow, state: State<DesktopUpdateSt
 }
 
 #[tauri::command]
-pub fn desktop_update_task_begin(window: WebviewWindow, state: State<DesktopUpdateState>) -> Result<String, String> {
+pub fn desktop_update_task_begin(window: WebviewWindow, state: State<DesktopUpdateState>, kind: Option<String>) -> Result<String, String> {
     allowed(&window)?;
     let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-    inner.begin_task(window.label())
+    inner.begin_task(window.label(), kind.as_deref().unwrap_or("其他任务"))
+}
+
+#[tauri::command]
+pub fn desktop_update_tasks(window: WebviewWindow, state: State<DesktopUpdateState>) -> Result<Vec<Task>, String> {
+    allowed(&window)?;
+    Ok(state.inner.lock().unwrap_or_else(|e| e.into_inner()).task_list())
 }
 
 #[tauri::command]
 pub fn desktop_update_task_end(window: WebviewWindow, state: State<DesktopUpdateState>, id: String) -> Result<(), String> {
     allowed(&window)?;
     let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-    if inner.tasks.get(&id).is_some_and(|owner| owner == window.label()) { inner.tasks.remove(&id); }
+    if inner.tasks.get(&id).is_some_and(|task| task.owner == window.label()) { inner.tasks.remove(&id); }
     Ok(())
 }
 
 pub fn window_closed(app: &AppHandle, label: &str) {
     let state = app.state::<DesktopUpdateState>();
     let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-    inner.tasks.retain(|_, owner| owner != label);
+    inner.tasks.retain(|_, task| task.owner != label);
     if inner.preparation.pending.contains(label) { inner.preparation.error = Some("工作窗口已关闭，请重新尝试升级".into()); }
     let _ = app.emit("desktop-update:waiting", Option::<String>::None);
 }
@@ -267,12 +285,12 @@ async fn prepare_windows(app: &AppHandle, state: &DesktopUpdateState, stage: &st
 }
 
 #[tauri::command]
-pub async fn desktop_update_install(window: WebviewWindow, app: AppHandle, state: State<'_, DesktopUpdateState>) -> Result<(), String> {
+pub async fn desktop_update_install(window: WebviewWindow, app: AppHandle, state: State<'_, DesktopUpdateState>, force: Option<bool>) -> Result<(), String> {
     allowed(&window)?;
     let _operation = state.operation.try_lock().map_err(|_| "正在处理升级，请稍后")?;
     {
         let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.begin_preparation()?;
+        inner.begin_preparation(force.unwrap_or(false))?;
     }
     publish(&app, &state);
     let result = async {
@@ -424,17 +442,34 @@ mod tests {
     #[test]
     fn admission_and_preparation_share_one_atomic_gate_across_windows() {
         let mut inner = Inner::default();
-        assert!(inner.begin_preparation().is_err());
+        assert!(inner.begin_preparation(false).is_err());
         inner.bytes = Some(vec![1]);
-        let task = inner.begin_task("ws-other").unwrap();
-        assert!(inner.begin_preparation().is_err());
+        let task = inner.begin_task("ws-other", "AI 对话").unwrap();
+        assert!(inner.begin_preparation(false).is_err());
         assert_eq!(inner.tasks.len(), 1);
         inner.tasks.remove(&task);
-        inner.begin_preparation().unwrap();
-        assert!(inner.begin_task("main").is_err());
-        assert!(inner.begin_task("native").is_err());
+        inner.begin_preparation(false).unwrap();
+        assert!(inner.begin_task("main", "AI 对话").is_err());
+        assert!(inner.begin_task("native", "媒体处理").is_err());
         inner.status.phase = "ready".into(); // 保存失败后恢复准入。
-        assert!(inner.begin_task("main").is_ok());
+        assert!(inner.begin_task("main", "AI 对话").is_ok());
+    }
+
+    #[test]
+    fn blocking_tasks_are_listed_and_only_explicit_stop_releases_them() {
+        let mut inner = Inner::default();
+        inner.bytes = Some(vec![1]);
+        inner.begin_task("main", "AI 对话").unwrap();
+        inner.begin_task("native", "媒体处理").unwrap();
+        let mut list = inner.task_list();
+        list.sort_by(|a, b| a.owner.cmp(&b.owner));
+        assert_eq!(list.iter().map(|t| (t.owner.as_str(), t.kind.as_str())).collect::<Vec<_>>(), [("main", "AI 对话"), ("native", "媒体处理")]);
+        assert!(list.iter().all(|t| t.started_at > 0));
+        assert!(inner.begin_preparation(false).is_err());
+        assert_eq!(inner.tasks.len(), 2);
+        inner.begin_preparation(true).unwrap();
+        assert!(inner.tasks.is_empty());
+        assert!(inner.begin_task("main", "AI 对话").is_err()); // 停止后到安装前不再接新任务。
     }
 
     #[test]

@@ -2226,7 +2226,7 @@ pub fn dev_get_diff(input: DevGetDiffInput) -> Result<DevGetDiffOutput, String> 
 #[tauri::command]
 pub async fn dev_run_command(app: tauri::AppHandle, input: DevRunCommandInput) -> Result<DevRunCommandOutput, String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _update_task = super::desktop_update::native_task(&app)?;
+    let _update_task = super::desktop_update::native_task(&app, "运行命令")?;
     let root = canonical_root(&input.root)?;
     let workdir = match input.external_workdir.as_deref() {
         Some(path) => canonical_external_existing_path(path)?,
@@ -2282,7 +2282,7 @@ pub async fn dev_export_scene_video(
     input: DevExportSceneVideoInput,
 ) -> Result<DevExportSceneVideoOutput, String> {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let _update_task = super::desktop_update::native_task(&app)?;
+    let _update_task = super::desktop_update::native_task(&app, "导出视频")?;
     let root = canonical_root(&input.root)?;
     let filename = Path::new(&input.output_filename)
         .file_name()
