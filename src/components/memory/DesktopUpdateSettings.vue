@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { openExternal } from '@/utils/httpClient'
 import { bindDesktopUpdater, describeUpdateTask, desktopUpdateStatus as status, loadUpdateTasks, updaterAction, updateTasks, updateWaiting, waitForUpdateInstall } from '@/services/desktopUpdater'
+const emit = defineEmits<{ showMediaTasks: [] }>()
 const busy = computed(() => ['checking', 'downloading', 'preparing', 'installing'].includes(status.value.phase))
 const progress = computed(() => status.value.total ? Math.min(100, Math.round(status.value.downloaded / status.value.total * 100)) : undefined)
 const labels: Record<string, string> = { idle: '尚未检查更新', current: '已是最新版本', checking: '正在检查更新…', available: '发现新版本', downloading: '正在下载更新…', ready: '更新已下载并验证', preparing: '正在保存并准备升级…', installing: '正在安装更新…', error: '检查更新失败', unavailable: '更新服务暂不可用' }
@@ -39,6 +40,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
       <button v-if="status.phase === 'available'" @click="updaterAction('download')">下载更新</button>
       <button v-if="status.phase === 'ready' && !updateWaiting" @click="updaterAction('install')">安装并重启</button>
       <button v-if="status.phase === 'ready' && !updateWaiting" @click="waitForUpdateInstall(true)">任务结束后安装</button>
+      <button v-if="status.phase === 'ready'" @click="emit('showMediaTasks')">查看媒体任务</button>
       <button @click="openExternal('https://api.jiucaihezi.studio/download/')">手动下载安装包</button>
       <button v-if="updateWaiting" @click="waitForUpdateInstall(false)">取消等待</button>
       <button v-if="status.phase === 'ready' && updateTasks.length && !confirmStop" @click="confirmStop = true">停止这些任务并安装</button>

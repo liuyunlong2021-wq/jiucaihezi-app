@@ -13,6 +13,28 @@ test('创作面板历史入口显示为任务记录文字按钮', () => {
   assert.match(source, /class="cp-toolbar-link"[\s\S]*提示词参考/)
 })
 
+test('task history exposes all media sources and separates live execution from recovery records', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const history = source.slice(source.indexOf('// ─── 任务列表'), source.indexOf('function pad('))
+  assert.doesNotMatch(history, /source === 'creation'/)
+  assert.match(history, /mediaTaskStore\.taskActivity\(task\)/)
+  for (const label of ['全部', '进行中', '待恢复']) assert.ok(source.includes(label), label)
+  assert.match(source, /watch\(\[taskFilter, taskPageSize\]/)
+  assert.match(source, /停止跟踪/)
+  assert.match(source, /task\.directory \|\| task\.projectId/)
+  const workbench = readFileSync(join(root, 'src/components/memory/MemoryWorkbench.vue'), 'utf8')
+  assert.match(workbench, /if \(mediaTaskStore\.updateBlockReason\) return mediaTaskStore\.updateBlockReason/)
+  assert.doesNotMatch(workbench, /mediaTaskStore\.hasRunning \|\| mediaTaskStore\.pendingTasks\.length/)
+  assert.match(workbench, /@show-media-tasks="openUpdateMediaTasks"/)
+  assert.match(workbench, /await openCreationHost\(\)[\s\S]*?emitEvent\('media-task-history:open-running'\)/)
+  assert.match(source, /onEvent\('media-task-history:open-running'/)
+  assert.match(source, /consumeLastEvent\('media-task-history:open-running'\)/)
+  const settings = readFileSync(join(root, 'src/components/memory/MemorySettings.vue'), 'utf8')
+  assert.match(settings, /@show-media-tasks="emit\('showMediaTasks'\)"/)
+  const update = readFileSync(join(root, 'src/components/memory/DesktopUpdateSettings.vue'), 'utf8')
+  assert.match(update, /查看媒体任务/)
+})
+
 test('固定时长作为只读参数显示，仍保留可调时长控件', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   assert.match(source, /v-if="durationRange.fixed"[^>]*>\{\{ durationRange.min \}\}s（固定）/)
@@ -1074,7 +1096,7 @@ test('creation history and chat task bubble share and await the media task cance
 
   assert.match(panel, /async function cancelTask\(task: MediaTask\)[\s\S]*await mediaTaskStore\.cancelTask\(task\.id\)/)
   assert.match(panel, /v-if="mediaTaskStore\.canCancelTask\(task\.id\)"/)
-  assert.match(panel, /@click="cancelTask\(task\)"[\s\S]{0,120}title="取消任务"/)
+  assert.match(panel, /@click="cancelTask\(task\)"[\s\S]{0,180}停止本机跟踪，上游可能继续生成/)
   assert.match(bubble, /async function cancel\(\)[\s\S]*await taskStore\.cancelTask\(props\.taskId\)/)
   assert.match(bubble, /v-if="taskStore\.canCancelTask\(task\.id\)"/)
   assert.match(bubble, /title="取消任务"/)

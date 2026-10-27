@@ -227,15 +227,23 @@ const creationProgress = computed(() => {
 
 // ─── 任务列表（分页） ───
 
-const creationTasks = computed(() =>
-  mediaTaskStore.tasks
-    .filter(t => t.source === 'creation')
+const taskFilter = ref<'all' | 'running' | 'recoverable'>('all')
+const historyTasks = computed(() => [...mediaTaskStore.tasks]
     .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt)),
 )
+const taskFilters = computed(() => [
+  { value: 'all' as const, label: '全部', count: historyTasks.value.length },
+  { value: 'running' as const, label: '进行中', count: historyTasks.value.filter(task => mediaTaskStore.taskActivity(task) === 'running').length },
+  { value: 'recoverable' as const, label: '待恢复', count: historyTasks.value.filter(task => mediaTaskStore.taskActivity(task) === 'recoverable').length },
+])
+const creationTasks = computed(() => historyTasks.value.filter(task =>
+  taskFilter.value === 'all' || mediaTaskStore.taskActivity(task) === taskFilter.value,
+))
 const creationTasksTotal = computed(() => creationTasks.value.length)
 
 const taskPageSize = ref(20)
 const taskPage = ref(1)
+watch([taskFilter, taskPageSize], () => { taskPage.value = 1 })
 const totalTaskPages = computed(() =>
   Math.max(1, Math.ceil(creationTasksTotal.value / taskPageSize.value)),
 )
@@ -274,6 +282,13 @@ function statusIcon(status: string): string {
   }
 }
 
+function taskStatusLabel(task: MediaTask): string {
+  const activity = mediaTaskStore.taskActivity(task)
+  if (activity === 'running') return task.downloadState === 'downloading' ? '下载中' : '进行中'
+  if (activity === 'recoverable') return task.downloadState === 'paused' ? '下载已暂停 · 待恢复' : '待恢复'
+  return task.status === 'success' ? '已完成' : task.status === 'failed' ? '失败' : '已停止'
+}
+
 function taskPromptLine(task: MediaTask): string {
   const prompt = (task.prompt || '无提示词').slice(0, 80)
   return `${prompt} · ${task.modelLabel || task.model}`
@@ -282,7 +297,7 @@ function taskPromptLine(task: MediaTask): string {
 function canPersistMediaResult(task: MediaTask): boolean {
   return (
     task.source === 'creation' &&
-    task.status === 'success' &&
+    (task.status === 'success' || (task.status === 'cancelled' && task.downloadState === 'paused')) &&
     !task.projectPath &&
     !task.assetUri &&
     (task.type === 'text' ? Boolean(task.resultText?.trim()) : Boolean(task.resultUrl)) &&
@@ -602,10 +617,17 @@ async function previewTask(task: MediaTask) {
 async function openTaskHistory() {
   try {
     await mediaTaskStore.init()
+    taskFilter.value = 'all'
+    taskPage.value = 1
     showTaskHistory.value = true
   } catch (error) {
     cpState.progressText = `历史记录加载失败: ${error instanceof Error ? error.message : String(error)}`
   }
+}
+
+async function openRunningTaskHistory() {
+  await openTaskHistory()
+  taskFilter.value = 'running'
 }
 
 async function addTaskResultToCanvas(task: MediaTask) {
@@ -1184,6 +1206,10 @@ const canvasPickerRef = ref<HTMLElement>()
 const canvasFiles = ref<CanvasFile[]>([])
 const canvasSearch = ref('')
 const showTaskHistory = ref(false)
+onBeforeUnmount(onEvent('media-task-history:open-running', () => { void openRunningTaskHistory() }))
+onMounted(() => {
+  if (consumeLastEvent('media-task-history:open-running')) void openRunningTaskHistory()
+})
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text' | 'pen' | 'number'>('arrow')
 const penWidths = [2, 3, 5, 8, 12] as const
@@ -4675,14 +4701,21 @@ const canSend = computed(
       <div v-if="showTaskHistory" class="cp-history-overlay" @click.self="showTaskHistory = false">
         <div class="cp-history-modal">
           <div class="cp-history-head">
-            <h3>任务历史</h3>
+            <h3>任务记录</h3>
             <button class="cp-history-close" @click="showTaskHistory = false">
               <JcIcon name="close" />
             </button>
           </div>
+          <div class="cp-task-filters" aria-label="任务状态筛选">
+            <button v-for="filter in taskFilters" :key="filter.value" type="button"
+              :aria-pressed="taskFilter === filter.value" @click="taskFilter = filter.value"
+            >{{ filter.label }}（{{ filter.count }}）</button>
+          </div>
+          <p class="cp-task-scope">当前窗口已加载的全部项目及来源。其他工作窗口中的任务请到对应窗口查看。</p>
+          <p v-if="taskFilter === 'recoverable'" class="cp-task-scope">这些任务当前未执行，不阻止升级；记录会保留，可重新查询结果或继续下载。</p>
           <div v-if="creationTasksTotal === 0" class="cp-task-empty">
             <JcIcon name="movie_filter" />
-            <span>暂无生成记录</span>
+            <span>{{ taskFilter === 'running' ? '当前窗口没有正在执行的媒体任务' : taskFilter === 'recoverable' ? '没有待恢复的媒体任务' : '暂无生成记录' }}</span>
           </div>
           <div v-else class="cp-task-list">
             <div
@@ -4692,15 +4725,16 @@ const canSend = computed(
               :class="task.status"
             >
               <div class="cp-task-head">
-                <span class="cp-task-status">{{ statusIcon(task.status) }}</span>
+                <span class="cp-task-status">{{ statusIcon(task.status) }} {{ taskStatusLabel(task) }}</span>
                 <span class="cp-task-time">{{
                   formatTaskTime(task.completedAt || task.createdAt)
                 }}</span>
               </div>
               <div class="cp-task-prompt">{{ taskPromptLine(task) }}</div>
-              <div v-if="task.status === 'running'" class="cp-task-progress">
-                <span>{{ task.progressText || '生成中...' }}</span>
-                <div class="cp-task-progress-bar">
+              <div class="cp-task-scope">{{ task.source === 'creation' ? '创作面板' : '对话' }} · {{ task.directory || task.projectId || '未记录项目' }} · {{ task.id }}</div>
+              <div v-if="mediaTaskStore.taskActivity(task) !== 'finished'" class="cp-task-progress">
+                <span>{{ task.progressText || taskStatusLabel(task) }}</span>
+                <div v-if="mediaTaskStore.isTaskActive(task.id)" class="cp-task-progress-bar">
                   <i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" />
                 </div>
               </div>
@@ -4720,10 +4754,9 @@ const canSend = computed(
                 <button
                   v-if="mediaTaskStore.canCancelTask(task.id)"
                   @click="cancelTask(task)"
-                  title="取消任务"
-                  aria-label="取消任务"
+                  :title="task.downloadState === 'downloading' ? '暂停下载，保留断点' : '停止本机跟踪，上游可能继续生成'"
                 >
-                  <JcIcon name="close" />
+                  {{ task.downloadState === 'downloading' ? '暂停下载' : '停止跟踪' }}
                 </button>
                 <button v-if="canRefreshTaskResult(task)" @click="refreshTaskResult(task)">重新查询结果</button>
                 <button v-if="canRegenerateTask(task)" @click="regenerateTask(task)">重新生成</button>
@@ -5719,6 +5752,11 @@ const canSend = computed(
 .cp-history-close:hover {
   background: var(--olive-pale);
 }
+.cp-task-filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 4px; }
+.cp-task-filters button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); cursor: pointer; }
+.cp-task-filters button[aria-pressed='true'] { background: var(--olive-pale); color: var(--ink); border-color: var(--olive); }
+.cp-task-scope { margin: 4px 0; font-size: 12px; color: var(--ink3); overflow-wrap: anywhere; }
+.cp-history-modal > .cp-task-scope { padding: 0 16px; }
 .cp-history-modal .cp-task-list {
   flex: 1;
   overflow-y: auto;

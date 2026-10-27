@@ -9,6 +9,7 @@ import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
 import { useProjectStore } from '@/stores/projectStore'
 import * as eventBus from '@/utils/eventBus'
 import { webProjectFiles } from '@/utils/webProjectFiles'
+import { prepareUpdateParticipants } from '@/services/desktopUpdatePreparation'
 import {
   __setCreationSubmitExecutorForTests,
   __setMediaTaskLoaderForTests,
@@ -2121,11 +2122,66 @@ test(
       assert.equal(store.isTaskActive(savedTask.id), false)
       assert.equal(store.runningCount, 0)
       assert.equal(store.hasRunning, false)
+      assert.equal(store.taskActivity(store.getTask(savedTask.id)!), 'recoverable')
+      assert.equal(store.updateBlockReason, '')
+      const participant = {
+        busy: () => store.updateBlockReason,
+        save: () => store.flushPersistence(),
+        close: async () => {},
+      }
+      await prepareUpdateParticipants([participant], 'save')
+      assert.equal(store.getTask(savedTask.id)?.status, 'pending', 'upgrading must preserve recovery records')
     } finally {
       storage.restore()
     }
   },
 )
+
+test('live media tasks block installation and remain visible regardless of source or saved status', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  setActivePinia(createPinia())
+  const environment = installWebCreationTestEnvironment()
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+  let submitting = false
+  __setCreationSubmitExecutorForTests(() => { submitting = true; return new Promise(() => {}) })
+  let taskId = ''
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'runninghub/api/rh-gpt2-image', params: { prompt: '升级占用测试', aspectRatio: '16:9', images: ['https://cdn.jiucaihezi.studio/input.png'] } })
+    taskId = await store.submitTask({ type: 'image', model: plan.model, modelLabel: plan.label, prompt: '升级占用测试', source: 'creation', plan })
+    await waitFor(() => submitting && store.isTaskActive(taskId))
+    const task = store.getTask(taskId)!
+    task.source = 'chat'
+    assert.equal(store.taskActivity(task), 'running')
+    assert.match(store.updateBlockReason, /升级占用测试/)
+    await assert.rejects(prepareUpdateParticipants([{
+      busy: () => store.updateBlockReason,
+      save: async () => { assert.fail('active task must prevent saving for installation') },
+      close: async () => {},
+    }], 'save'), /媒体任务正在运行/)
+    task.status = 'success' // 下载/保存阶段可能已拿到成功结果，但执行尚未结束。
+    assert.equal(store.taskActivity(task), 'running')
+    assert.notEqual(store.updateBlockReason, '')
+    task.status = 'running'
+    await store.cancelTask(taskId)
+    await waitFor(() => !store.isTaskActive(taskId))
+    assert.equal(store.taskActivity(task), 'finished')
+    assert.equal(store.updateBlockReason, '')
+    task.status = 'running'
+    assert.equal(store.taskActivity(task), 'recoverable', 'a historical running status is not a live execution')
+    assert.equal(store.updateBlockReason, '')
+    task.status = 'success'
+    task.downloadState = 'paused'
+    assert.equal(store.taskActivity(task), 'recoverable')
+    assert.equal(store.updateBlockReason, '')
+  } finally {
+    if (taskId) await store.cancelTask(taskId)
+    __setCreationSubmitExecutorForTests(null)
+    __resetApiKeyMemoryCacheForTests(null)
+    environment.restore()
+    storage.restore()
+  }
+})
 
 test(
   'mediaTaskStore waits for SQLite initialization before loading persisted tasks',
@@ -2363,7 +2419,7 @@ test('memory media task history has no OpenCode task recovery path', () => {
   const store = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
   assert.doesNotMatch(panel, /useOpenCodeSyncStore|isLegacyChatTask|bindLegacyChatTask|绑定当前会话/)
-  assert.match(panel, /\.filter\(t => t\.source === 'creation'\)/)
+  assert.match(panel, /task\.source === 'creation' \? '创作面板' : '对话'/)
   assert.doesNotMatch(store, /function chatTasksFor|function bindLegacyChatTask/)
   assert.match(store, /sessionId\?: string/)
   assert.match(store, /chatMessageId\?: string/)

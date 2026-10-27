@@ -617,6 +617,20 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     return activeTaskIds.value.has(taskId)
   }
 
+  function taskActivity(task: MediaTask): 'running' | 'recoverable' | 'finished' {
+    if (isTaskActive(task.id)) return 'running'
+    return task.status === 'pending' || task.status === 'running' || task.downloadState === 'paused'
+      ? 'recoverable' : 'finished'
+  }
+
+  // 持久化的待恢复记录没有执行者；保存记录即可升级，不能把历史状态当作进程占用。
+  const updateBlockReason = computed(() => {
+    const task = runningTasks.value[0]
+    if (!task) return ''
+    const title = (task.summary || task.prompt || task.modelLabel || task.id).slice(0, 60)
+    return `还有 ${runningTasks.value.length} 个媒体任务正在运行：${title}。请在各工作窗口的「任务记录 → 进行中」查看`
+  })
+
   function canCancelTask(taskId: string): boolean {
     const task = tasks.value.find(item => item.id === taskId)
     return Boolean(
@@ -1939,6 +1953,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     hasRunning,
     runningCount,
     isTaskActive,
+    taskActivity,
+    updateBlockReason,
     canCancelTask,
     canRefreshTaskResult,
     init,

@@ -26,6 +26,7 @@ import DesktopUpdateSettings from './DesktopUpdateSettings.vue'
 import { desktopUpdateStatus } from '@/services/desktopUpdater'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
+const emit = defineEmits<{ showMediaTasks: [] }>()
 type SettingsTab = 'account' | 'models' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot' | 'update'
 
 const tab = ref<SettingsTab>('account')
@@ -287,7 +288,7 @@ async function saveKey() {
       <button v-if="desktopRuntime" :class="{ active: tab === 'update' }" @click="tab = 'update'">更新<span v-if="desktopUpdateStatus.version"> ●</span></button>
     </nav>
     <div class="memory-settings-body">
-      <DesktopUpdateSettings v-if="desktopRuntime && tab === 'update'" />
+      <DesktopUpdateSettings v-if="desktopRuntime && tab === 'update'" @show-media-tasks="emit('showMediaTasks')" />
       <ScreenshotSettings v-if="screenshotRuntime && tab === 'screenshot'" />
       <div v-if="tab === 'account' || tab === 'models'" class="memory-account">
         <div v-if="tab === 'account'" class="memory-account-identity">

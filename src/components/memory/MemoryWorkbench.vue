@@ -191,7 +191,7 @@ const updateSaveErrors = { scene: '', projectMap: '' }
 const stopUpdateParticipant = registerUpdateParticipant({
   busy: () => {
     if ([...runs.values()].some(run => run.phase === 'running') || sendInFlight.value) return '还有对话任务正在运行'
-    if (mediaTaskStore.hasRunning || mediaTaskStore.pendingTasks.length) return '还有媒体任务正在运行或等待恢复'
+    if (mediaTaskStore.updateBlockReason) return mediaTaskStore.updateBlockReason
     if (recordingScene.value || sceneInstructionSending.value || fileWritePending.value || markdownSavePending.value || conversationSplitBusy.value || creationClosing.value) return '还有录制、文件写入或保存操作正在进行'
     return ''
   },
@@ -959,6 +959,16 @@ async function openCreationHost() {
   creationMounted.value = true
   creationOpen.value = true
   await nextTick()
+}
+
+async function openUpdateMediaTasks() {
+  try {
+    await openCreationHost()
+    emitEvent('media-task-history:open-running')
+    settingsOpen.value = false
+  } catch (cause) {
+    error.value = `任务记录打开失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
 }
 
 async function closeCreationHost(): Promise<boolean> {
@@ -5487,6 +5497,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       <MemorySettings
         :owner="projectOwner"
         :project-name="projectStore.projectName.value"
+        @show-media-tasks="openUpdateMediaTasks"
         @synced="refreshProjectView()"
       />
     </aside>
