@@ -141,7 +141,28 @@ function refsRule(limits: ModelLimits) {
 /** 用户明确要求优先（2026-10-26 用户确认）：Skill 只给默认值，只有超出模型硬限制才暂停。 */
 const USER_FIRST = '用户的明确制作要求优先于 Skill 默认路线（如要求不生图、纯文生、不用参考图），只有违反模型硬限制（时长、参考图上限）才以 blocked 说明'
 
-export function episodeInstruction(episode: number, wikiRoot: string, config: Pick<AutoRunConfig, 'videoModel' | 'limits'>, rewrite?: string, resumeFrom?: string): string {
+/**
+ * 扫描可用的分集剧本：漫剧入稿的「项目资料/分集剧本/第N集分集剧本.md」与短剧改编的「剧本/第NNN集/分集剧本.md」。
+ * 同一集两处都有时以入稿剧本为准，并列入 duplicates 供确认卡提示。
+ */
+export function scanEpisodeScripts(paths: string[]): { wikiRoot: string; episodes: number[]; scripts: Record<number, string>; duplicates: number[] } {
+  const found = paths.flatMap(path => {
+    const intake = path.match(/^(.*)\/项目资料\/分集剧本\/第(\d+)集分集剧本\.md$/)
+    if (intake) return [{ root: intake[1], episode: Number(intake[2]), path, intake: true }]
+    const adapted = path.match(/^(.*)\/剧本\/第(\d+)集\/分集剧本\.md$/)
+    return adapted ? [{ root: adapted[1], episode: Number(adapted[2]), path, intake: false }] : []
+  })
+  const wikiRoot = (found.find(item => item.intake) ?? found[0])?.root || (paths.some(path => path.startsWith('docs/wiki/')) ? 'docs/wiki' : 'wiki')
+  const scripts: Record<number, string> = {}, duplicates: number[] = []
+  for (const item of found.filter(item => item.root === wikiRoot).sort((a, b) => Number(b.intake) - Number(a.intake))) {
+    if (scripts[item.episode]) duplicates.push(item.episode)
+    else scripts[item.episode] = item.path
+  }
+  const episodes = Object.keys(scripts).map(Number).sort((a, b) => a - b)
+  return { wikiRoot, episodes, scripts, duplicates: [...new Set(duplicates)].sort((a, b) => a - b) }
+}
+
+export function episodeInstruction(episode: number, wikiRoot: string, config: Pick<AutoRunConfig, 'videoModel' | 'limits'>, rewrite?: string, resumeFrom?: string, scriptPath = `${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md`): string {
   const limits = config.limits ?? modelLimits(config.videoModel, {})
   const duration = limits.allowed_seconds?.length
     ? `所选视频模型只支持 ${limits.allowed_seconds.join('/')} 秒：每段尽量写满一档（优先 ${limits.max_seconds} 秒），每段不超过 ${limits.max_seconds} 秒`
@@ -149,7 +170,7 @@ export function episodeInstruction(episode: number, wikiRoot: string, config: Pi
   const plan = JSON.stringify(planLimits(limits))
   const redo = rewrite ? `本集已有提示词不符合所选视频模型（${rewrite}），请从 plan 重新执行，按新限制重写分段与视频提示词，已确认的项目资料与资产提示词可沿用。` : ''
   const resume = resumeFrom && !rewrite ? `本集已有进度到 ${resumeFrom} 阶段：按「输入与恢复」先用该阶段原 outputs 保存 running 进度，再续做之后的阶段，已完成阶段的产物不重写，` : '从 plan '
-  return `【全自动成片·第${episode}集】${redo}请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${config.videoModel}，剧本使用 ${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求（${USER_FIRST}），${resume}连续执行到 complete。${duration}${refsRule(limits)}；plan 进度写入 "limits":${plan}。`
+  return `【全自动成片·第${episode}集】${redo}请按 jc-manju-pipeline 执行第${episode}集，视频模型 ${config.videoModel}，剧本使用 ${scriptPath}，比例与风格沿用已确认的项目风格，并遵守本对话入稿时用户提出的制作要求（${USER_FIRST}），${resume}连续执行到 complete。${duration}${refsRule(limits)}；plan 进度写入 "limits":${plan}。`
 }
 
 /** 审片修改意见：index 为段号（从 1 起），0 表示整集意见。 */

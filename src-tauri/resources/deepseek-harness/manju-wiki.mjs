@@ -662,12 +662,17 @@ async function saveArtifact(ctx, args, exec, contract, route, sourceAgent) {
       spec = { ...legacySpec, precise: false }
     }
   }
+  const legacyPath = layout?.types[args.artifact_kind]?.legacy_path
+  if (legacyPath && await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${legacyPath}`, exec.signal, workspace), exec.signal)) {
+    if (await ctx.fs.stat(await projectTarget(ctx, cwd, `${wikiRoot}/${spec.path}`, exec.signal, workspace), exec.signal)) throw new Error('新旧产物同时存在，请明确当前版本，未覆盖任一文件')
+    spec = { ...spec, path: legacyPath, precise: false }
+  }
   let content = spec.mode === 'source_selection' ? args.content : normalizedMarkdown(args.content)
   if (route !== 'none' && ['manju', 'short-drama'].includes(route) && !['source_selection', 'pipeline', 'adaptation_cut', 'adaptation_pipeline'].includes(spec.mode)) content = normalizeWikiLinks(content, wikiRoot, spec.path)
   if (spec.mode === 'pipeline') content = await pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spec, content)
   if (spec.mode === 'adaptation_cut') content = await adaptationCut(ctx, args, exec, sourceAgent, content)
   if (spec.mode === 'adaptation_pipeline') content = await adaptationCheckpoint(ctx, args, exec, wikiRoot, content, sourceAgent)
-  spec.summary = indexSummary(args.summary || (spec.mode === 'adaptation_cut' ? '单章内真实原文切分，作为本集改编边界。' : undefined), content, spec.label)
+  spec.summary = indexSummary(args.summary || (spec.mode === 'adaptation_cut' ? '本集使用的真实原文片段，作为本集改编边界。' : undefined), content, spec.label)
 
   let saved
   if (spec.mode === 'chapter_source') {
@@ -969,36 +974,75 @@ function chapterRanges(text) {
   return headings.map((match, index) => ({ heading: match[0].trim().replace(/^#+\s*/, ''), start: match.index + match[0].length,
     end: headings[index + 1]?.index ?? text.length }))
 }
+// 无可识别章标题的短篇整篇作为一个单元，标题由程序如实记为“全文”。
+function adaptationUnits(text) {
+  const chapters = chapterRanges(text)
+  return chapters.length ? chapters : [{ heading: '全文', start: 0, end: text.length }]
+}
+// 行号与read一致：从1起，按\n计数；返回不含行尾换行的行范围。
+function lineSpan(text, line) {
+  let start = 0
+  for (let n = 1; n < line; n++) {
+    start = text.indexOf('\n', start) + 1
+    if (!start) return
+  }
+  if (start > text.length || (start === text.length && line > 1)) return
+  const newline = text.indexOf('\n', start), end = newline < 0 ? text.length : newline
+  return { start, end: text[end - 1] === '\r' ? end - 1 : end }
+}
 function cutRecord(text) {
   const match = /^---\njc_adaptation_cut: ([^\n]+)\n---\n/.exec(text)
-  if (!match) throw new Error('本集缺少真实切分记录，请先逐章切分')
-  return { ...JSON.parse(match[1]), body: text.slice(match[0].length) }
+  if (!match) throw new Error('本集缺少真实切分记录，请先按分集规划切分')
+  const record = JSON.parse(match[1])
+  // 旧切分为单段且正文不带出处标注，按原字符位置继续校验。
+  if (!record.segments) record.segments = [{ source_path: record.source_path, source_hash: record.source_hash, chapter_heading: record.chapter_heading, start: record.start, end: record.end, legacy: true }]
+  return { ...record, body: text.slice(match[0].length) }
+}
+function cutBody(segments, texts) {
+  if (segments.length === 1 && segments[0].legacy) return texts[0]
+  return segments.map((item, index) => `<!-- 出处：${item.chapter_heading} 第${item.start_line}–${item.end_line}行${item.flashback ? '（倒叙）' : ''} -->\n${texts[index]}`).join('\n\n')
 }
 async function verifiedCut(ctx, exec, text, agent) {
-  const cut = cutRecord(text)
-  const source = await adaptationFile(ctx, exec, cut.source_path, agent)
-  const chapter = chapterRanges(source.text).find(item => item.heading === cut.chapter_heading)
-  if (source.hash !== cut.source_hash || !chapter || !Number.isSafeInteger(cut.start) || !Number.isSafeInteger(cut.end)
-    || cut.start < chapter.start || cut.end > chapter.end || cut.end <= cut.start
-    || source.text.slice(cut.start, cut.end) !== cut.body) throw new Error('原作或本集切分已变化/越章，请重新核对逐章规划与切分')
+  const cut = cutRecord(text), texts = []
+  for (const item of cut.segments) {
+    const source = await adaptationFile(ctx, exec, item.source_path, agent)
+    const chapter = adaptationUnits(source.text).find(unit => unit.heading === item.chapter_heading)
+    if (source.hash !== item.source_hash || !chapter || !Number.isSafeInteger(item.start) || !Number.isSafeInteger(item.end)
+      || item.start < chapter.start || item.end > chapter.end || item.end <= item.start) throw new Error('原作或本集切分已变化/越章，请重新核对分集规划与切分')
+    texts.push(source.text.slice(item.start, item.end))
+  }
+  if (cutBody(cut.segments, texts) !== cut.body) throw new Error('原作或本集切分已变化，请重新核对分集规划与切分')
   return cut
+}
+async function cutSegment(ctx, exec, agent, input) {
+  const source = await adaptationFile(ctx, exec, input?.source_path, agent, true)
+  const heading = String(input.chapter_heading || '').replace(/^#+\s*/, '')
+  const units = adaptationUnits(source.text)
+  if (heading === '全文' && units[0].heading !== '全文') throw new Error('原文有章标题，不能按全文切分，请提供完整章标题')
+  const chapters = units.filter(item => item.heading === heading)
+  if (chapters.length !== 1) throw new Error('无法唯一定位真实章节，请提供原文件中完整章标题；无章标题的原文传“全文”，不虚构章节')
+  if (![input.start_line, input.end_line].every(Number.isSafeInteger) || input.start_line < 1 || input.end_line < input.start_line)
+    throw new Error('请用read显示的行号切分：start_line、end_line为正整数且起行不大于止行')
+  const chapter = chapters[0], first = lineSpan(source.text, input.start_line), last = lineSpan(source.text, input.end_line)
+  const headingLine = chapter.heading === '全文' ? 0 : source.text.lastIndexOf('\n', chapter.start - 1) + 1
+  if (!first || !last || first.start < headingLine || last.end > chapter.end) throw new Error('行号超出所属章节（跨章），未保存；跨章请分成多段')
+  const item = { source_path: source.path, source_hash: source.hash, chapter_heading: chapter.heading, start_line: input.start_line, end_line: input.end_line,
+    start: Math.max(first.start, chapter.start), end: last.end, ...(input.flashback === true ? { flashback: true } : {}) }
+  const text = source.text.slice(item.start, item.end)
+  if (item.end <= item.start || !text.trim()) throw new Error('所选行没有正文，未保存')
+  return { item, text }
 }
 async function adaptationCut(ctx, args, exec, agent, content) {
   const input = JSON.parse(content)
-  const source = await adaptationFile(ctx, exec, input.source_path, agent, true)
-  const chapters = chapterRanges(source.text).filter(item => item.heading === String(input.chapter_heading || '').replace(/^#+\s*/, ''))
-  if (chapters.length !== 1) throw new Error('无法唯一定位真实章节，请提供原文件中完整章标题，不虚构章节')
-  const chapter = chapters[0], body = source.text.slice(chapter.start, chapter.end)
-  const minimum = Math.min(12, body.trim().length)
-  if (!minimum || typeof input.cut_start !== 'string' || typeof input.cut_end !== 'string'
-    || input.cut_start.length < minimum || input.cut_end.length < minimum) throw new Error('切分首尾须提供当前章至少12字符的唯一原文；短章使用完整正文')
-  const a = body.indexOf(input.cut_start), b = body.indexOf(input.cut_end)
-  if (a < 0 || b < a || body.indexOf(input.cut_start, a + 1) >= 0 || body.indexOf(input.cut_end, b + 1) >= 0) throw new Error('当前章切分首尾缺失、不唯一或跨章，未保存')
-  const record = { source_path: source.path, source_hash: source.hash, chapter_heading: chapter.heading,
-    episode_number: args.episode_number, start: chapter.start + a, end: chapter.start + b + input.cut_end.length }
-  const selected = source.text.slice(record.start, record.end)
-  if (Buffer.byteLength(selected, 'utf8') > 1_000_000) throw new Error('本集原文切分超过1MB，请在当前章内选择自然切点拆分')
-  return `---\njc_adaptation_cut: ${JSON.stringify(record)}\n---\n${selected}`
+  if (!Array.isArray(input.segments) || !input.segments.length) throw new Error('adaptation_cut须传segments数组：每段{source_path, chapter_heading, start_line, end_line, flashback?}，行号即read显示的行号')
+  const segments = [], texts = []
+  for (const value of input.segments) {
+    const { item, text } = await cutSegment(ctx, exec, agent, value)
+    segments.push(item); texts.push(text)
+  }
+  const body = cutBody(segments, texts)
+  if (Buffer.byteLength(body, 'utf8') > 1_000_000) throw new Error('本集原文切分超过1MB，请拆成更多集')
+  return `---\njc_adaptation_cut: ${JSON.stringify({ episode_number: args.episode_number, segments })}\n---\n${body}`
 }
 
 async function requireAdaptationReads(ctx, args, exec, contract, agent) {
@@ -1047,7 +1091,7 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
   const cwd = exec.agent.session.header.cwd, target = await ctx.fs.resolve(`${root}/改编方案/执行进度.json`, { cwd, signal: exec.signal })
   const previous = await ctx.fs.stat(target, exec.signal) ? JSON.parse(await ctx.fs.readText(target, exec.signal)) : undefined
   if (stage && (!previous || ![stage - 1, stage].includes(adaptationStages.indexOf(previous.stage)))) throw new Error('短剧流水线不能跳过前置阶段')
-  if (input.status !== undefined && !['running', 'blocked', ...(stage === 5 ? ['completed'] : [])].includes(input.status)) throw new Error('短剧状态无效')
+  if (input.status !== undefined && !['running', 'blocked', ...(stage === 5 ? ['completed'] : []), ...(stage === 2 ? ['review'] : [])].includes(input.status)) throw new Error('短剧状态无效；review只用于方案阶段等待用户审阅规划书')
   if (input.status === 'blocked' && (!String(input.reason || '').trim() || stage === 5)) throw new Error('阻塞须说明原因，完成阶段不能阻塞')
   const state = stage ? previous : {}, sources = stage ? state.sources : {}
   let chapters = state.chapters
@@ -1056,9 +1100,18 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
     const available = []
     for (const path of input.source_paths) {
       const file = await adaptationFile(ctx, exec, path, agent, true); sources[file.path] = file.hash
-      for (const chapter of chapterRanges(file.text)) available.push({ source_path: file.path, chapter_heading: chapter.heading })
+      for (const chapter of adaptationUnits(file.text)) available.push({ source_path: file.path, chapter_heading: chapter.heading })
     }
-    chapters = input.chapters === undefined ? available : []
+    if (input.chapters !== undefined && input.chapter_range !== undefined) throw new Error('chapters与chapter_range只能传一个')
+    chapters = input.chapters === undefined && input.chapter_range === undefined ? available : []
+    if (input.chapter_range !== undefined) {
+      const range = input.chapter_range, file = await adaptationFile(ctx, exec, range?.source_path, agent, true)
+      const own = available.filter(item => item.source_path === file.path)
+      const find = heading => own.flatMap((item, index) => item.chapter_heading === heading ? [index] : [])
+      const from = find(range.from), to = find(range.to)
+      if (from.length !== 1 || to.length !== 1 || from[0] > to[0]) throw new Error('chapter_range的from/to须是原文中唯一存在的完整章标题，且from在to之前')
+      chapters.push(...own.slice(from[0], to[0] + 1))
+    }
     if (input.chapters !== undefined) {
       if (!Array.isArray(input.chapters)) throw new Error('chapters须为真实章范围数组')
       for (const selected of input.chapters) {
@@ -1085,17 +1138,32 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
   if (stage > 0 && stage < 5 && !Object.keys(outputs).length) throw new Error('阶段没有实际产物')
   if (stage === 1 && !input.outputs.some(path => /项目资料\/原作\/故事梗概\.md$/.test(path))) throw new Error('资料阶段缺少原作梗概')
   if (stage === 2 && !outputs[`${root}/改编方案/项目总纲.md`]) throw new Error('方案阶段缺少项目总纲')
+  if (stage === 2 && !input.outputs.some(path => /改编方案\/(?:分集规划|逐章规划)\.md$/.test(path))) throw new Error('方案阶段缺少分集规划')
+  // 分段规划时登记已规划到的章，供全自动判断这一段是否完成。
+  if (input.planned_through !== undefined && (stage !== 2 || !chapters.some(item => item.chapter_heading === input.planned_through)))
+    throw new Error('planned_through只用于方案阶段，且须是本次目标范围内的完整章标题')
+  const plannedThrough = stage === 2 ? input.planned_through : state.planned_through
   const episodes = stage === 3 ? input.episodes : state.episodes
+  let unused = state.unused
   if (stage >= 3) {
     if (!Array.isArray(episodes) || !episodes.length || episodes.some((number, index) => !Number.isSafeInteger(number) || number < 1 || number > 9999 || index && number !== episodes[index - 1] + 1)) throw new Error('需要连续且不重复的目标episodes集号')
-    const groups = new Map()
+    const order = new Map(chapters.map((item, index) => [`${item.source_path}\0${item.chapter_heading}`, index]))
+    const used = new Map()
+    let previous
     for (const number of episodes) {
       const path = `${root}/改编方案/分集切分/${episodeFolder(number)}原文.md`
       const cut = await verifiedCut(ctx, exec, (await adaptationFile(ctx, exec, path, agent)).text, agent)
-      if (cut.episode_number !== number || sources[cut.source_path] !== cut.source_hash) throw new Error('切分与原作或集号不一致')
-      const key = `${cut.source_path}\0${cut.chapter_heading}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key).push(cut)
+      if (cut.episode_number !== number) throw new Error('切分与集号不一致')
+      for (const item of cut.segments) {
+        const key = `${item.source_path}\0${item.chapter_heading}`
+        if (sources[item.source_path] !== item.source_hash || !order.has(key)) throw new Error('切分与原作不一致，或混入目标范围外的章节')
+        if (!used.has(key)) used.set(key, [])
+        used.get(key).push(item)
+        if (item.flashback) continue
+        const position = [order.get(key), item.start, item.end]
+        if (previous && (position[0] < previous[0] || position[0] === previous[0] && position[1] < previous[2])) throw new Error(`第${number}集原文顺序颠倒或与前文重叠；只有倒叙片段（flashback）可以引用后文`)
+        previous = position
+      }
       if (stage === 3 && !outputs[path]) throw new Error('切分阶段须登记每集真实原文切分')
       if (stage >= 4) {
         const script = `${root}/剧本/${episodeFolder(number)}/分集剧本.md`
@@ -1103,22 +1171,27 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
         if (stage === 4 && !outputs[script]) throw new Error('逐集阶段须登记所有目标剧本')
       }
     }
-    const expected = new Set(chapters.map(item => `${item.source_path}\0${item.chapter_heading}`))
-    if (groups.size !== expected.size || [...groups.keys()].some(key => !expected.has(key))) throw new Error('切分未覆盖目标章节，或混入范围外章节')
-    for (const cuts of groups.values()) {
-      const source = await adaptationFile(ctx, exec, cuts[0].source_path, agent)
-      const chapter = chapterRanges(source.text).find(item => item.heading === cuts[0].chapter_heading)
+    // 不要求全覆盖：列出目标章节中未被任何一集使用的原文行号，供删减清单核对。
+    unused = []
+    for (const target of chapters) {
+      const source = await adaptationFile(ctx, exec, target.source_path, agent)
+      const chapter = adaptationUnits(source.text).find(item => item.heading === target.chapter_heading)
+      const lineOf = offset => source.text.slice(0, offset).split('\n').length
       let cursor = chapter.start
-      for (const cut of cuts) {
-        if (cut.start < cursor || source.text.slice(cursor, cut.start).trim()) throw new Error('同章切分重叠、逆序或遗漏原文')
-        cursor = cut.end
+      const gaps = []
+      for (const item of [...(used.get(`${target.source_path}\0${target.chapter_heading}`) || [])].sort((a, b) => a.start - b.start)) {
+        if (item.start > cursor) gaps.push([cursor, item.start])
+        cursor = Math.max(cursor, item.end)
       }
-      if (source.text.slice(cursor, chapter.end).trim()) throw new Error('该章尚有未切分原文，不能完成切分')
+      gaps.push([cursor, chapter.end])
+      for (const [from, to] of gaps) {
+        const piece = source.text.slice(from, to), lead = piece.length - piece.trimStart().length, tail = piece.trimEnd().length
+        if (tail > lead) unused.push({ source_path: target.source_path, chapter_heading: target.chapter_heading, start_line: lineOf(from + lead), end_line: lineOf(from + tail - 1) })
+      }
     }
-    if (stage === 3 && !input.outputs.some(path => /改编方案\/(?:逐章规划|分集规划)\.md$/.test(path))) throw new Error('切分阶段缺少逐章规划')
   }
   files[input.stage] = outputs
-  return JSON.stringify({ stage: input.stage, status: stage === 5 ? 'completed' : input.status || 'running', reason: stage === 5 ? '' : input.reason || '', sources, chapters, files, episodes }, null, 2) + '\n'
+  return JSON.stringify({ stage: input.stage, status: stage === 5 ? 'completed' : input.status || 'running', reason: stage === 5 ? '' : input.reason || '', sources, chapters, files, episodes, ...(plannedThrough ? { planned_through: plannedThrough } : {}), ...(unused ? { unused } : {}) }, null, 2) + '\n'
 }
 
 export function setWikiSourceContent(agent, blocks) {

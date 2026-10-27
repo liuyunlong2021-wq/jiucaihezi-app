@@ -4,6 +4,7 @@
     <p v-if="!draft.episodes.length" class="manju-auto-warn">还没有分集剧本。请先在全自动模式下发送剧本（粘贴、附件或引用文件均可）。</p>
     <p v-else-if="!draft.ratio" class="manju-auto-warn">项目风格里还没有确认影片比例，请先确认比例与风格。</p>
     <template v-else>
+      <p v-if="draft.duplicates?.length" class="manju-auto-warn">第 {{ draft.duplicates.join('、') }} 集同时有入稿剧本和短剧改编剧本，使用入稿剧本。</p>
       <div class="manju-auto-row">
         <span>集数</span>
         <div class="manju-auto-episodes">

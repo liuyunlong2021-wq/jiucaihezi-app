@@ -65,11 +65,12 @@
     "id": "jc-duanju-cehua",
     "name": "jc-duanju-cehua",
     "displayName": "jc-duanju-cehua",
-    "description": "根据原作真实资料与用户改编思路，完善短剧改编方案、人物关系及设定对应，明确允许改变的边界，不写逐章切分或正文。",
+    "description": "根据原作真实资料与用户改编思路，写出改编规划书的项目总纲：主题、爽点与冲突发动机、人物性格与说话方式、必要设定清单、篇章大结构；人物性格写进改编版人物小传。不写分集表、切分或正文。",
     "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",
+      "references/人物塑造方法.md",
       "references/独立写作旧规则.md"
     ],
     "package": {
@@ -79,6 +80,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/人物塑造方法.md",
+          "kind": "reference"
         },
         {
           "path": "references/独立写作旧规则.md",
@@ -91,7 +96,7 @@
     "id": "jc-duanju-fenji",
     "name": "jc-duanju-fenji",
     "displayName": "jc-duanju-fenji",
-    "description": "对照原作每一章真实信息及改编方案，章内确定每集开头结尾并保存真实原文切分；不跨章拼集，不生成改编正文。",
+    "description": "依据项目总纲筛选原作事件，删掉设定与水文，把保留事件编成每集“开头—冲突/爽点—钩子”的分集表，写删减清单与倒叙说明，并按read行号保存每集多段真实原文切分；不生成改编正文。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -117,7 +122,7 @@
     "id": "jc-duanju-pipeline",
     "name": "jc-duanju-pipeline",
     "displayName": "jc-duanju-pipeline",
-    "description": "按用户原文附件或路径及基本改编思路，连续执行原作读取、共用项目资料、改编方案、逐章切分与逐集改编，产出供漫剧制作直接使用、每集不超过3分钟的说明书式剧本并逐集补写改编版资料，自检后保存并支持续做；不跨章拼集或挪用邻集内容。",
+    "description": "按用户原文附件或路径及基本改编思路，依次执行原作读取、项目资料、改编规划书（总纲与分集规划，完成后暂停给用户审阅）、多段原文切分与逐集改编，产出每集“开头—冲突/爽点—钩子”、不超过3分钟、供漫剧制作直接使用的剧本，并逐集补写改编版资料，支持续做。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -138,7 +143,7 @@
     "id": "jc-duanju-xiezuo",
     "name": "jc-duanju-xiezuo",
     "displayName": "jc-duanju-xiezuo",
-    "description": "对照每集真实原文切分和改编方案，在切分边界内写成供漫剧制作直接使用的小说化电影剧本：写清角色、场景、道具三要素与逐招动作，台词电影化，每集不超过3分钟；自检后逐集保存，并补写本集新出现的改编版资料。",
+    "description": "对照每集真实原文切分、项目总纲和分集规划，在切分边界内写成每集“开头—冲突/爽点—钩子”、供漫剧制作直接使用的小说化电影剧本：写清角色、场景、道具三要素与逐招动作，人物按各自性格说话，设定随用随给，每集不超过3分钟；自检后逐集保存，并补写本集新出现的改编版资料。",
     "triggers": [],
     "commands": [],
     "files": [

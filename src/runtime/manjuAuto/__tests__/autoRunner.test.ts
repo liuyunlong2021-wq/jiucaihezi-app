@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { adviceSummary, referenceAdvice } from '../autoRunner'
+import { adviceSummary, referenceAdvice, scanEpisodeScripts } from '../autoRunner'
 import { createAutoRun, deriveCheckpoint, episodeInstruction, episodeTextStatus, estimateUnitCost, handleCheckpointSaved, modelLimits, priceForResolution, resumeAutoRun, revisionInstruction, runAuto, type AutoRunConfig, type AutoRunnerDeps, type RunnerCheckpoint } from '../autoRunner'
 
 type Task = { status: string; localPath?: string; error?: string }
@@ -451,4 +451,23 @@ test('advice summary tells the user what will be drawn and roughly what it costs
   assert.equal(adviceSummary(advice, '按量计费'), '旁白宣传片 · 按段决定：1 张参考图（木塔）；文字带过：工匠、墨斗')
   assert.equal(adviceSummary(referenceAdvice('制作路线：旁白宣传片\n参考图方式：纯文生（广告）'), 0.2), '旁白宣传片 · 纯文生：不生图')
   assert.equal(adviceSummary(referenceAdvice('画面比例：9:16'), 0.2), undefined)
+})
+
+test('manju auto finds short-drama screenplays as episode scripts and prefers the intake script when both exist', () => {
+  const only = scanEpisodeScripts(['wiki/剧本/第001集/分集剧本.md', 'wiki/剧本/第002集/分集剧本.md', 'wiki/剧本/index.md'])
+  assert.equal(only.wikiRoot, 'wiki')
+  assert.deepEqual(only.episodes, [1, 2])
+  assert.equal(only.scripts[2], 'wiki/剧本/第002集/分集剧本.md')
+  assert.deepEqual(only.duplicates, [])
+  const both = scanEpisodeScripts(['docs/wiki/项目资料/分集剧本/第1集分集剧本.md', 'docs/wiki/剧本/第001集/分集剧本.md', 'docs/wiki/剧本/第003集/分集剧本.md'])
+  assert.equal(both.wikiRoot, 'docs/wiki')
+  assert.deepEqual(both.episodes, [1, 3])
+  assert.equal(both.scripts[1], 'docs/wiki/项目资料/分集剧本/第1集分集剧本.md')
+  assert.deepEqual(both.duplicates, [1])
+})
+
+test('episode instruction uses the actual script path of that episode', () => {
+  const text = episodeInstruction(2, 'wiki', { videoModel: 'H3', limits: { max_seconds: 30 } }, undefined, undefined, 'wiki/剧本/第002集/分集剧本.md')
+  assert.match(text, /剧本使用 wiki\/剧本\/第002集\/分集剧本\.md/)
+  assert.match(episodeInstruction(2, 'wiki', { videoModel: 'H3' }), /剧本使用 wiki\/项目资料\/分集剧本\/第2集分集剧本\.md/)
 })

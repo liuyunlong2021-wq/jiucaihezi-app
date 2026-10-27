@@ -640,7 +640,7 @@ test('all 45 artifact contracts have explicit routes and every allowed kind save
         resetWikiReads(sourceAgent)
         recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
         args.content = JSON.stringify(template.mode === 'adaptation_cut'
-          ? { source_path: '原文.md', chapter_heading: '第一章 原文', cut_start: body.slice(0, 12), cut_end: body.slice(-12) }
+          ? { segments: [{ source_path: '原文.md', chapter_heading: '第一章 原文', start_line: 2, end_line: 2 }] }
           : { stage: 'source', source_paths: ['原文.md'], outputs: [] })
       }
       if (template.mode === 'source_selection') {
@@ -709,13 +709,23 @@ test('short-drama cuts copy only the chosen real chapter range and reject cross-
   recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
   const imported = await tool.execute({ artifact_kind: 'source_material', work_name: '原作', content: JSON.stringify({ source_path: '小说.md' }) }, exec)
   assert.equal(files.get(join(root, imported.path)).content, files.get(path).content)
-  const args = { artifact_kind: 'adaptation_cut', episode_number: 1, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 山门', cut_start: first.slice(0, 12), cut_end: first.slice(-12) }) }
+  const cut = (episode_number, ...inputs) => tool.execute({ artifact_kind: 'adaptation_cut', episode_number, content: JSON.stringify({ segments: inputs.map(input => ({ source_path: '小说.md', ...input })) }) }, exec)
+  const args = { artifact_kind: 'adaptation_cut', episode_number: 1, content: JSON.stringify({ segments: [{ source_path: '小说.md', chapter_heading: '第一章 山门', start_line: 2, end_line: 2 }] }) }
   const result = await tool.execute(args, exec)
   const text = files.get(join(root, result.path)).content
   assert.equal(result.path, 'wiki/改编方案/分集切分/第001集原文.md')
-  assert.ok(text.endsWith(first))
+  assert.ok(text.endsWith(first + '\r\n') || text.endsWith(first), JSON.stringify(text.slice(-20)))
   assert.ok(!text.includes(second))
-  await assert.rejects(tool.execute({ ...args, episode_number: 2, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 山门', cut_start: first.slice(0, 12), cut_end: second.slice(-12) }) }, exec), /当前章|跨章/)
+  assert.match(text, /"start_line":2,"end_line":2/)
+  await assert.rejects(cut(2, { chapter_heading: '第一章 山门', start_line: 2, end_line: 4 }), /当前章|跨章/)
+  await assert.rejects(cut(2, { chapter_heading: '第一章 山门', start_line: 2, end_line: 1 }), /行号/)
+  await assert.rejects(cut(2, { chapter_heading: '第一章 山门', cut_start: first.slice(0, 12), cut_end: first.slice(-12) }), /行号/)
+  await assert.rejects(tool.execute({ artifact_kind: 'adaptation_cut', episode_number: 2, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 山门', start_line: 2, end_line: 2 }) }, exec), /segments/)
+  const multi = await cut(5, { chapter_heading: '第一章 山门', start_line: 2, end_line: 2 }, { chapter_heading: '第二章 石阶', start_line: 4, end_line: 4 })
+  const multiText = files.get(join(root, multi.path)).content
+  assert.ok(multiText.indexOf(first) < multiText.indexOf(second))
+  assert.match(multiText, /第一章 山门[\s\S]*第二章 石阶/)
+  await assert.rejects(cut(2, { chapter_heading: '全文', start_line: 2, end_line: 2 }), /全文/)
   files.set(path, { ...files.get(path), version: 2 })
   await assert.rejects(tool.execute(args, exec), /修改后重读/)
   recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 2 }, { ...exec, agent: sourceAgent, name: 'read' })
@@ -723,18 +733,25 @@ test('short-drama cuts copy only the chosen real chapter range and reject cross-
   const huge = '独特开头用于大章切分测试' + '字'.repeat(340000) + '独特结尾用于大章切分测试'
   files.set(path, { content: `第一章 大章\n${huge}`, version: 3 })
   recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 3 }, { ...exec, agent: sourceAgent, name: 'read' })
-  await assert.rejects(tool.execute({ ...args, episode_number: 3, content: JSON.stringify({ source_path: '小说.md', chapter_heading: '第一章 大章', cut_start: huge.slice(0, 12), cut_end: huge.slice(-12) }) }, exec), /超过1MB/)
+  await assert.rejects(cut(3, { chapter_heading: '第一章 大章', start_line: 2, end_line: 2 }), /超过1MB/)
+  const story = ['短篇开头，林晚推开雨夜的店门。', '店主抬头，认出了她手里的旧照片。', '她把照片拍在柜台上，问他要一个答案。']
+  files.set(path, { content: story.join('\n') + '\n', version: 4 })
+  recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 4 }, { ...exec, agent: sourceAgent, name: 'read' })
+  const whole = await cut(4, { chapter_heading: '全文', start_line: 2, end_line: 3 })
+  const wholeText = files.get(join(root, whole.path)).content
+  assert.match(wholeText, /"chapter_heading":"全文"/)
+  assert.ok(wholeText.includes(story[1]) && wholeText.includes(story[2]) && !wholeText.includes(story[0]))
 })
 
-test('short-drama uses chapter planning but preserves an existing legacy episode plan', async t => {
+test('short-drama saves the episode plan as 分集规划 but keeps an existing 逐章规划 in place', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-chapter-plan-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const first = createHarness(join(root, 'new'), { route: 'short-drama' })
-  const result = await first.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 逐章规划' }, first.exec)
-  assert.equal(result.path, 'wiki/改编方案/逐章规划.md')
+  const result = await first.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 分集规划' }, first.exec)
+  assert.equal(result.path, 'wiki/改编方案/分集规划.md')
   const old = createHarness(join(root, 'old'), { route: 'short-drama' })
   old.files.set(join(root, 'old/wiki/index.md'), { content: '# Wiki', version: 1 })
-  old.files.set(join(root, 'old/wiki/改编方案/分集规划.md'), { content: '# 旧规划', version: 2 })
-  const kept = await old.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 逐章修订' }, old.exec)
-  assert.equal(kept.path, 'wiki/改编方案/分集规划.md')
+  old.files.set(join(root, 'old/wiki/改编方案/逐章规划.md'), { content: '# 旧规划', version: 2 })
+  const kept = await old.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 修订' }, old.exec)
+  assert.equal(kept.path, 'wiki/改编方案/逐章规划.md')
 })

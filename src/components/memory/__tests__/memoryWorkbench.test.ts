@@ -438,7 +438,7 @@ test('窄对话 Dock 保留模型与对话名称，创作与 Skill 入口常驻'
   assert.match(workbench, /\.memory-workbench\.chat-dock-narrow \.memory-model-picker \{[^}]*min-width: 0; flex: 1 1 120px/)
   assert.match(workbench, /'chat-dock-minimal': viewportWidth >= 940[\s\S]*chatDockWidth < 360/)
   assert.match(workbench, /class="memory-manju-button"[^>]*@click="toggleManjuMenu\(\$event\)"/)
-  assert.match(workbench, /class="memory-short-drama-button"[^>]*@click="toggleShortDramaProduction\(\)"/)
+  assert.match(workbench, /class="memory-short-drama-button"[^>]*@click="toggleDuanjuMenu\(\$event\)"/)
   assert.match(workbench, /class="memory-novel-button"[^>]*@click="toggleNovelProduction\(\)"/)
   assert.match(workbench, /data-command-id="skill"[^>]*@click="insertCommand\(skillCommand\)"/)
   assert.doesNotMatch(workbench, /quickCommandMenu/)

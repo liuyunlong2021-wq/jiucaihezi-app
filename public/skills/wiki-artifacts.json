@@ -667,7 +667,8 @@
   "short_drama_layout": {
     "types": {
       "adaptation_episode_plan": {
-        "path": "改编方案/逐章规划.md",
+        "path": "改编方案/分集规划.md",
+        "legacy_path": "改编方案/逐章规划.md",
         "index": "改编方案/index.md"
       },
       "screenplay": {

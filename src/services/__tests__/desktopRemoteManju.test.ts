@@ -16,6 +16,8 @@ const owner = '/Users/someone/擦边'
 const draft: ManjuAutoDraft = {
   wikiRoot: 'wiki',
   episodes: [1, 2, 3],
+  scripts: {},
+  duplicates: [],
   ratio: '9:16',
   advice: { needed: [], skipped: [] },
   imageModels: [{ id: 'img-a', label: '生图 A', price: '0.2元/张' }, { id: 'img-b', label: '生图 B' }],

@@ -187,3 +187,27 @@ test('short-drama episode writing carries scene and dialogue craft rules with an
   const polish = readFileSync('public/skills/jc-duanju-xiezuo/references/场景与对白打磨.md', 'utf8')
   for (const rule of [/问答式/, /潜台词/, /说话方式/, /意识到/, /弱词/, /句尾/, /有名字的人物开口/, /只写看得见的/]) assert.match(polish, rule)
 })
+
+test('short-drama planning keeps user examples as examples and covers batching, review and deletion checks', () => {
+  const read = path => readFileSync(`public/skills/${path}`, 'utf8')
+  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), xiezuo = read('jc-duanju-xiezuo/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md')
+  // 本我、自我、超我是可选的人物设计手法，放在参考文件，不作为必填项或写作必读。
+  assert.doesNotMatch(cehua, /\*\*本我、超我、自我\*\*/)
+  assert.doesNotMatch(xiezuo, /本我/)
+  assert.match(cehua, /\[人物塑造方法\]\(references\/人物塑造方法\.md\)/)
+  assert.match(read('jc-duanju-cehua/references/人物塑造方法.md'), /本我[\s\S]*可选/)
+  assert.match(cehua, /说得通原作里他做过的事/)
+  // 题材举例不进入规则正文，“前15秒”不是硬性要求。
+  assert.doesNotMatch(fenji, /最好两者互相推动（为了活下去/)
+  assert.doesNotMatch(cehua, /能力、装备、阵地按集数/)
+  assert.doesNotMatch(xiezuo + fenji, /前15秒直接出现/)
+  assert.doesNotMatch(xiezuo, /爽点要给到看得见的效果（新能力/)
+  assert.doesNotMatch(fenji, /强度（1–5）。然后决定/)
+  assert.doesNotMatch(fenji, /并入相邻集或删掉/)
+  // 缺口：分批读、每批都审、删减查伏笔、跨批接续、倒叙回到正片。
+  assert.match(fenji, /每次读10–20章/)
+  assert.match(fenji, /后文是否用到/)
+  assert.match(pipeline, /每一批[\s\S]*review/)
+  assert.match(pipeline, /集号接着上一批/)
+  assert.match(xiezuo, /正片演到倒叙/)
+})

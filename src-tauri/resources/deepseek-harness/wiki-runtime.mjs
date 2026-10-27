@@ -59,7 +59,8 @@ export async function attachWikiRuntime(rec, directory = process.env.DSH_BUNDLED
         const shortDrama = route === 'short-drama'
         const state = checkpointSeen ? (shortDrama ? adaptationStateFor(agent) : pipelineStateFor(agent)) : undefined
         const skill = shortDrama ? 'jc-duanju-pipeline' : 'jc-manju-pipeline'
-        if (state?.stage === 'complete' || state?.status === 'blocked') return
+        // review：方案阶段等待用户审阅规划书，不自动催促。
+        if (state?.stage === 'complete' || ['blocked', 'review'].includes(state?.status)) return
         const revision = JSON.stringify(state)
         if (revision !== progress) { progress = revision; nudges = 0 }
         if (++nudges > 3) throw new Error('流水线连续停止但没有可验证进度，请检查缺失资料或模型执行能力后继续')

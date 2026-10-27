@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { ref, shallowRef } from 'vue'
 import { runCreationOperation } from '@/runtime/creation/creationMcpBridge'
 import { getCreationModelSpec, prioritizedCreationModelIds } from '@/runtime/creation/creationModelRegistry'
-import { createAutoRun, deriveCheckpoint, episodeInstruction, handleCheckpointSaved, referenceAdvice, resumeAutoRun, revisionInstruction, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type ReferenceAdvice, type ReviewNotes, type RunnerCheckpoint, type VideoRoute } from '@/runtime/manjuAuto/autoRunner'
+import { createAutoRun, deriveCheckpoint, scanEpisodeScripts, episodeInstruction, handleCheckpointSaved, referenceAdvice, resumeAutoRun, revisionInstruction, runAuto, AUTO_RUN_PATH, type AutoRunConfig, type AutoRunState, type ReferenceAdvice, type ReviewNotes, type RunnerCheckpoint, type VideoRoute } from '@/runtime/manjuAuto/autoRunner'
 import { createDesktopAssetDeps, createDesktopVideoDeps, loadMediaParamProfile } from '@/runtime/manjuAuto/desktopDeps'
 import { ASSET_REGISTRY_PATH, awaitAsset, awaitEpisodeAssets, promptBody, regenerateAsset, type AssetRegistryEntry } from '@/runtime/manjuAuto/assetScheduler'
 import { awaitSegment, checkEpisodeVideos, regenerateSegment as resubmitSegment, submitEpisodeVideos } from '@/runtime/manjuAuto/videoScheduler'
@@ -25,6 +25,10 @@ export interface ManjuAutoModelOption {
 export interface ManjuAutoDraft {
   wikiRoot: string
   episodes: number[]
+  /** 每集实际剧本路径（漫剧入稿或短剧改编）。 */
+  scripts: Record<number, string>
+  /** 两处都有剧本的集：使用入稿剧本。 */
+  duplicates: number[]
   ratio?: string
   /** 项目风格里的参考图建议：确认卡据此预选参考图方式并显示要生的图与费用。 */
   advice: ReferenceAdvice
@@ -119,9 +123,7 @@ export function useManjuAuto(options: {
     error.value = ''
     try {
       const paths = (await createRuntimeProjectFileService().list(owner)).filter(resource => !resource.isDirectory).map(resource => String(resource.path))
-      const matches = paths.map(path => path.match(/^(.*)\/项目资料\/分集剧本\/第(\d+)集分集剧本\.md$/)).filter(Boolean) as RegExpMatchArray[]
-      const wikiRoot = matches[0]?.[1] || (paths.some(path => path.startsWith('docs/wiki/')) ? 'docs/wiki' : 'wiki')
-      const episodes = [...new Set(matches.filter(match => match[1] === wikiRoot).map(match => Number(match[2])))].sort((a, b) => a - b)
+      const { wikiRoot, episodes, scripts, duplicates } = scanEpisodeScripts(paths)
       const stylePath = `${wikiRoot}/项目风格/影片比例与风格.md`
       const style = paths.includes(stylePath) ? await files(owner).readText(stylePath) : ''
       const ratio = style.match(/(\d+)\s*[:：]\s*(\d+)/)?.slice(1, 3).join(':')
@@ -141,7 +143,7 @@ export function useManjuAuto(options: {
         if (!cursor) break
       }
       draft.value = {
-        wikiRoot, episodes, ratio,
+        wikiRoot, episodes, scripts, duplicates, ratio,
         advice: referenceAdvice(style),
         imageModels: normalizeModels(models, 'image'),
         videoModels: normalizeModels(models, 'video'),
@@ -167,7 +169,7 @@ export function useManjuAuto(options: {
       return
     }
     const state = { ...(resume && current.saved ? resumeAutoRun(current.saved, config) : createAutoRun(config)), runId: crypto.randomUUID() }
-    const { wikiRoot } = current
+    const { wikiRoot, scripts } = current
     const mine = { stopped: false, wakers: new Set<() => void>() }
     // 运行器的 30 分钟等待和生图的 30 秒轮询都要能被“停止”立即唤醒。
     const sleep = (ms: number) => new Promise<void>(resolve => {
@@ -191,7 +193,7 @@ export function useManjuAuto(options: {
       const projectFiles = files(owner)
       const deps: Parameters<typeof runAuto>[1] = {
         wikiRoot,
-        runEpisodeText: (episode, rewrite) => options.sendText(episodeInstruction(episode, wikiRoot, state.config, rewrite)),
+        runEpisodeText: (episode, rewrite) => options.sendText(episodeInstruction(episode, wikiRoot, state.config, rewrite, undefined, scripts[episode])),
         readCheckpoint: episode => readJson<RunnerCheckpoint>(owner, checkpointPath(wikiRoot, state.config.videoModel, episode)),
         asset: { ...createDesktopAssetDeps(owner, { imageModelId: state.config.imageModelId, ratio: state.config.ratio }, imageProfile), sleep },
         video: createDesktopVideoDeps(owner, { videoModelId: state.config.videoModelId, ratio: state.config.ratio, resolution: state.config.videoResolution }, videoProfile),

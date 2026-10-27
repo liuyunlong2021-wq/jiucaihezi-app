@@ -22,7 +22,10 @@ import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import ManjuAutoPanel from './ManjuAutoPanel.vue'
+import DuanjuAutoPanel from './DuanjuAutoPanel.vue'
 import { AUTO_INTAKE_PREFIX, useManjuAuto } from '@/composables/useManjuAuto'
+import { useDuanjuAuto } from '@/composables/useDuanjuAuto'
+import { DUANJU_INTAKE_PREFIX } from '@/runtime/duanjuAuto/autoRunner'
 import { setDesktopManjuAuto } from '@/services/desktopRemoteManju'
 import { findCustomProvider, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
@@ -1103,6 +1106,55 @@ function openFormalVersion(episodes: number[]) {
   manjuMode.value = 'film'
   void manjuAuto.prepare({ route: 'Seedance', select: episodes })
 }
+/**
+ * 短剧改编的两种用法（2026-10-27 用户确认）：自由改编（默认）、全自动·改编。
+ * 全自动先入稿识别章节，确认卡点“开始”后由程序按批次逐步发指令，每批规划书可暂停审阅；只产出文字。
+ */
+const duanjuMode = ref<'free' | 'auto'>('free')
+const duanjuMenu = ref<{ left: number; bottom: number } | null>(null)
+let pendingDuanjuIntake = false
+const duanjuAuto = useDuanjuAuto({
+  owner: () => projectOwner.value,
+  async sendText(text) {
+    await waitUntilIdle()
+    if (!shortDramaSelected.value) toggleShortDramaProduction()
+    await send(text)
+  },
+})
+watch(sending, busy => {
+  if (busy || !pendingDuanjuIntake) return
+  pendingDuanjuIntake = false
+  if (activeRun.value?.phase === 'done') void duanjuAuto.prepare()
+})
+watch(shortDramaSelected, on => { if (!on) duanjuMode.value = 'free' })
+function toggleDuanjuMenu(event: MouseEvent) {
+  if (duanjuMenu.value) {
+    duanjuMenu.value = null
+    return
+  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  duanjuMenu.value = { left: rect.left, bottom: window.innerHeight - rect.top + 8 }
+}
+function chooseDuanjuMode(mode: 'free' | 'auto' | 'off') {
+  duanjuMenu.value = null
+  if (mode === 'off') {
+    if (shortDramaSelected.value) toggleShortDramaProduction()
+    duanjuAuto.cancelDraft()
+    return
+  }
+  if (!shortDramaSelected.value) toggleShortDramaProduction()
+  duanjuMode.value = mode
+  if (mode === 'free') {
+    duanjuAuto.cancelDraft()
+    return
+  }
+  contextNotice.value = '已切换到全自动·改编：发送原文路径或全文后先入库识别章节，再弹出确认卡；确认后按批次自动规划、审阅、切分、写剧本。'
+  void duanjuAuto.prepare({ onlyIfReady: true })
+}
+const duanjuModeItems = [
+  { mode: 'free', label: '自由改编', note: '在对话里按需改编，想做哪步做哪步' },
+  { mode: 'auto', label: '全自动·改编', note: '按批次自动规划、审阅、切分并逐集写剧本，只产出文字' },
+] as const
 const manjuModeLabels = { free: '漫剧·自由', prompts: '全自动·到提示词', film: '全自动·到成片' } as const
 const manjuModeItems = [
   { mode: 'free', label: '自由创作', note: '按你的话自动选 Skill，想做哪步做哪步，不产生媒体费用' },
@@ -1946,6 +1998,7 @@ function isInternalMediaModel(modelId: string): boolean {
 
 function closeModelPicker(event: PointerEvent) {
   if (manjuMenu.value && !(event.target as Element | null)?.closest?.('.memory-manju-menu, .memory-manju-button')) manjuMenu.value = null
+  if (duanjuMenu.value && !(event.target as Element | null)?.closest?.('.memory-duanju-menu, .memory-short-drama-button')) duanjuMenu.value = null
   if (modelPickerOpen.value && !modelPickerRef.value?.contains(event.target as Node)) modelPickerOpen.value = false
   if (conversationPickerOpen.value && !conversationPickerRef.value?.contains(event.target as Node)) conversationPickerOpen.value = false
   if (mentionOpen.value
@@ -2886,7 +2939,11 @@ async function send(remoteText?: string) {
   // 全自动成片：用户发来的剧本先走入稿拆集，回合结束后弹出启动确认卡。
   const autoIntake = !remote && manjuMode.value !== 'free' && manjuSelected.value && manjuAuto.run.value?.status !== 'running'
     && Boolean(rawMessage || activeAttachments.length || activeReferencedFiles.length)
-  const message = autoIntake ? `${AUTO_INTAKE_PREFIX}${rawMessage || '请按集拆分附件或引用文件中的剧本。'}` : rawMessage
+  // 全自动改编：用户发来的原文先走入稿回合（只入库、识别章节），回合结束后弹出确认卡。
+  const duanjuIntake = !remote && duanjuMode.value === 'auto' && shortDramaSelected.value && !['running', 'review'].includes(duanjuAuto.run.value?.status ?? '')
+    && Boolean(rawMessage || activeAttachments.length || activeReferencedFiles.length)
+  const message = autoIntake ? `${AUTO_INTAKE_PREFIX}${rawMessage || '请按集拆分附件或引用文件中的剧本。'}`
+    : duanjuIntake ? `${DUANJU_INTAKE_PREFIX}${rawMessage || '请入库附件或引用文件中的原文。'}` : rawMessage
   if (!active || (!message && !activeAttachments.length && !activeReferencedFiles.length
     && !activeReferencedSessions.length && !selectedSkillNames.value.length) || sendInFlight.value) return
   sendInFlight.value = true
@@ -2965,6 +3022,7 @@ async function send(remoteText?: string) {
   }
 
   if (autoIntake) pendingAutoIntake = true
+  if (duanjuIntake) pendingDuanjuIntake = true
   beginRunStatus(run)
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
@@ -5233,6 +5291,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @stop="manjuAuto.stop"
           @approve="manjuAuto.approveReview"
         />
+        <DuanjuAutoPanel
+          v-if="desktopOnlyRuntime"
+          :draft="duanjuAuto.draft.value"
+          :run="duanjuAuto.run.value"
+          :stopping="duanjuAuto.stopping.value"
+          :reviewing="duanjuAuto.reviewing.value"
+          :error="duanjuAuto.error.value"
+          @start="(config, resume) => duanjuAuto.start(config, resume)"
+          @cancel="duanjuAuto.cancelDraft"
+          @stop="duanjuAuto.stop"
+          @approve="duanjuAuto.approveReview"
+        />
         <div
           class="memory-input-row"
           data-project-drop-target="chat"
@@ -5297,7 +5367,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 </button>
               </div>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected, auto: manjuSelected && manjuMode === 'film' }" aria-haspopup="menu" :aria-expanded="manjuMenu ? true : undefined" @click="toggleManjuMenu($event)"><JcIcon name="movie" /><span>{{ manjuSelected ? manjuModeLabels[manjuMode] : '漫剧制作' }}</span><JcIcon name="expand_more" /></button>
-              <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" :aria-pressed="shortDramaSelected" @click="toggleShortDramaProduction()"><JcIcon name="edit-note" /><span>短剧改编</span></button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" aria-haspopup="menu" :aria-expanded="duanjuMenu ? true : undefined" @click="toggleDuanjuMenu($event)"><JcIcon name="edit-note" /><span>{{ shortDramaSelected ? (duanjuMode === 'auto' ? '全自动·改编' : '短剧·自由') : '短剧改编' }}</span><JcIcon name="expand_more" /></button>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="auto_stories" /><span>小说创作</span></button>
               <button type="button" data-command-id="skill" :title="skillCommand.description" @click="insertCommand(skillCommand)"><JcIcon name="psychology" /><span>@Skill</span></button>
             </div>
@@ -5333,6 +5403,21 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <button v-if="manjuSelected" type="button" role="menuitem" @click="chooseManjuMode('off')">
             <JcIcon name="close" />
             <span>退出漫剧制作</span>
+          </button>
+        </div>
+        <div
+          v-if="duanjuMenu"
+          class="memory-permission-menu memory-duanju-menu"
+          role="menu"
+          :style="{ left: `${duanjuMenu.left}px`, bottom: `${duanjuMenu.bottom}px` }"
+        >
+          <button v-for="item in duanjuModeItems" :key="item.mode" type="button" role="menuitemradio" :aria-checked="shortDramaSelected && duanjuMode === item.mode" @click="chooseDuanjuMode(item.mode)">
+            <JcIcon :name="shortDramaSelected && duanjuMode === item.mode ? 'check_circle' : 'circle'" />
+            <span>{{ item.label }}<small class="memory-permission-note">{{ item.note }}</small></span>
+          </button>
+          <button v-if="shortDramaSelected" type="button" role="menuitem" @click="chooseDuanjuMode('off')">
+            <JcIcon name="close" />
+            <span>退出短剧改编</span>
           </button>
         </div>
         <div

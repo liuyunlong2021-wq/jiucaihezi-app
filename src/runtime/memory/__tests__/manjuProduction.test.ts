@@ -242,7 +242,7 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(panel, /limits: limits\.value/)
   // 回归（2026-10-25 实测）：有未完成运行时路线下拉被锁，无法改用 H3 重新开始。
   assert.doesNotMatch(panel, /v-model="route" :disabled/)
-  assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config, rewrite\)/)
+  assert.match(controller, /episodeInstruction\(episode, wikiRoot, state\.config, rewrite, undefined, scripts\[episode\]\)/)
   assert.match(controller, /checkpointPath\(wikiRoot, state\.config\.videoModel, episode\)/)
   // 每次运行独立停止开关 + runId 落盘守卫：旧运行（含热更新遗留）发现记录属于新运行就退出（2026-10-25 实测两个运行互相覆盖）。
   assert.doesNotMatch(controller, /stopRequested/)
@@ -256,4 +256,33 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   // 设计系统没有 --danger，警示色必须用 --jc-error。
   assert.doesNotMatch(panel, /var\(--danger\)/)
   assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)
+})
+
+test('short-drama full-auto adaptation is opt-in from the short-drama menu and drives batches from the confirmation card', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  const panel = readFileSync('src/components/memory/DuanjuAutoPanel.vue', 'utf8')
+  const controller = readFileSync('src/composables/useDuanjuAuto.ts', 'utf8')
+  // 2026-10-27：自由改编（默认）/ 全自动·改编 / 退出。
+  assert.match(workbench, /const duanjuMode = ref<'free' \| 'auto'>\('free'\)/)
+  assert.match(workbench, /mode: 'free', label: '自由改编'[\s\S]*mode: 'auto', label: '全自动·改编'/)
+  assert.match(workbench, /退出短剧改编/)
+  // 全自动模式下发送的原文先走入稿回合，回合结束后弹确认卡。
+  assert.match(workbench, /DUANJU_INTAKE_PREFIX/)
+  assert.match(workbench, /<DuanjuAutoPanel/)
+  assert.match(controller, /runDuanjuAuto/)
+  assert.match(controller, /改编方案\/执行进度\.json/)
+  // 确认卡：章节范围、每批章数（默认100）、每次读章数（默认20）、审阅开关（默认开）、续做。
+  assert.match(panel, /每批章数/)
+  assert.match(panel, /每次读章数/)
+  assert.match(panel, /batchSize = ref\(100\)/)
+  assert.match(panel, /readSize = ref\(20\)/)
+  assert.match(panel, /review = ref\(true\)/)
+  assert.match(panel, /续做/)
+  // 审阅卡与进度条。
+  assert.match(panel, /规划书已完成/)
+  assert.match(panel, /emit\('approve'\)/)
+  assert.match(panel, /emit\('stop'\)/)
+  const pipeline = readFileSync('public/skills/jc-duanju-pipeline/SKILL.md', 'utf8')
+  assert.match(pipeline, /## 全自动改编/)
+  assert.match(pipeline, /【全自动改编·入稿】/)
 })
