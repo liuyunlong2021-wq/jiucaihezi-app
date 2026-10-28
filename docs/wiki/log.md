@@ -6,6 +6,14 @@
 
 # Wiki 操作日志
 
+## 2026-10-28 短剧收尾收敛与漫剧风格交接
+
+- 用户实测两处停点：短剧全自动·改编第 1 批收尾时「已出20集」却被判暂停（产物写完了，进度被标 `blocked`）；切到全自动成片时卡在「项目风格里还没有确认影片比例」，卡上无补救入口。
+- 根因：`adaptationCheckpoint` 只允许逐级推进，而删减式改编的 `scheme/cuts/writing` 由程序组装、模型无产物可登记，`complete` 永远到不了；运行器把 `blocked` 判在 `done()` 之前，命中即暂停；`项目风格/影片比例与风格.md` 的唯一生产者 `jc-film-style` 只在漫剧白名单，短剧路线既无权限也无指令。
+- 修正：完成时若分集清单已组装出集且每集都改编完，允许从 `materials` 及之后直接完成（并跳过沿用 `cuts` 阶段 `state.episodes` 的切分账目）；收尾改为 `done()` 优先、未达标才因 `blocked` 暂停；确认卡缺比例时给出「去确认比例与风格」按钮，发一条 `jc-film-style` 指令保存 `film_style` 后重扫确认卡，不填默认比例。见 [[开发/短剧改编收尾收敛与漫剧风格交接TDD-2026-10-28]]。
+- 证据：先红后绿三条用例；`vue-tsc -b` 通过；全量 focused 2411 项、2377 通过、19 失败、15 跳过，19 项均为既有失败（`production-capabilities` 13、`memoryWorkbench` 的 iOS `Info.plist` 1、harness 补丁/生命周期/原生工具/release-r2/creation-mcp 各若干），已用 `git stash` 对照确认与本次改动无关。真实模型回合与真实界面点击未验。
+- 同日第二轮实测：确认卡仍误报「还没有分集剧本」。探针复刻 `dev_list_files` 语义后取证——真实项目 1010 个文件，而该命令 `max_entries` 上限 1000 且**目录也占额度**、按目录名深度优先，列表止于 `wiki/资产/*`，`项目资料`／`项目风格`／`制作流水线` 全部丢失（匹配到 0 集剧本，风格文档不在列表）。同一条上限还让 `readJson` 误判「没有进度」、让短剧 `readText` 读不到分集梗概（收尾恒判未完成）、让 `removeStale` 删不掉旧集。修正：`prepare` 按关键字 `searchPaths(owner, query, 2000)` 补扫；`readJson`／`readText` 直接读、失败即当不存在；`removeStale` 改按父目录 `listDirectory`；确认卡显示扫描根与命中集数。回归 `manjuProduction` 13/13、`duanjuAuto autoRunner` 13/13、`manjuAuto autoRunner` 36/36、`mobileControllerUi` 21/21、`memoryWorkbench` 121/122（既有 iOS plist）。真实 app 重新弹卡与续做未验。
+
 ## 2026-10-25 Mobile 控制器完善计划
 
 - 用户从 `main` 开支线 `1025shouji`，确认目标是手机控制电脑上的韭菜盒子 Desktop 对话（不是外部编程工具）。

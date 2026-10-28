@@ -5300,6 +5300,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           :target="manjuMode === 'prompts' ? 'prompts' : 'film'"
           @start="(config, resume) => manjuAuto.start(config, resume)"
           @cancel="manjuAuto.cancelDraft"
+          @confirm-style="manjuAuto.confirmStyle"
           @stop="manjuAuto.stop"
           @approve="manjuAuto.approveReview"
         />

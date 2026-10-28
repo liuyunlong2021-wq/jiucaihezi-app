@@ -247,9 +247,10 @@ export async function runDuanjuAuto(initial: DuanjuRunState, deps: DuanjuAutoDep
     let done = false, blocked = ''
     for (let attempt = 0; attempt < 2 && !done && !blocked; attempt += 1) {
       await deps.send(step.text)
-      const progress = await deps.readProgress()
+      // 产物达标就算完成：模型可能按状态机规则顺手保存 blocked，不能因此丢掉已写好的收尾产物。
+      done = await step.done()
+      const progress = done ? undefined : await deps.readProgress()
       if (progress?.status === 'blocked') blocked = `${step.label}：${progress.reason || '模型保存了 blocked'}`
-      else done = await step.done()
     }
     if (!done) {
       Object.assign(state, { status: 'blocked', reason: blocked || `${step.label}未完成：重发一次后仍没有保存对应标注、改编或分集梗概` })

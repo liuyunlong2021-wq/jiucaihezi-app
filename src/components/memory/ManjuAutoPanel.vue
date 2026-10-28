@@ -2,7 +2,9 @@
   <div v-if="draft" class="manju-auto-card" role="dialog" :aria-label="title">
     <strong>{{ title }}</strong>
     <p v-if="!draft.episodes.length" class="manju-auto-warn">还没有分集剧本。请先在全自动模式下发送剧本（粘贴、附件或引用文件均可）。</p>
+    <p v-if="!draft.episodes.length" class="manju-auto-note">项目根：{{ draft.owner }}；扫描到 {{ draft.episodes.length }} 集剧本（期望 项目资料/分集剧本/第N集分集剧本.md 或 剧本/第N集/分集剧本.md）。</p>
     <p v-else-if="!draft.ratio" class="manju-auto-warn">项目风格里还没有确认影片比例，请先确认比例与风格。</p>
+    <p v-if="!draft.ratio" class="manju-auto-note">比例决定后面所有生图与生视频，必须你自己确认；短剧改编不会自动写这份文档。</p>
     <template v-else>
       <p v-if="draft.duplicates?.length" class="manju-auto-warn">第 {{ draft.duplicates.join('、') }} 集同时有入稿剧本和短剧改编剧本，使用入稿剧本。</p>
       <div class="manju-auto-row">
@@ -57,6 +59,7 @@
     </template>
     <div class="manju-auto-actions">
       <button type="button" @click="emit('cancel')">取消</button>
+      <button v-if="!draft.ratio" type="button" @click="emit('confirmStyle')">去确认比例与风格</button>
       <button v-if="resumable" type="button" :disabled="!canStart" title="沿用已完成的文字与已生成的资产，按上面新的模型与预算继续" @click="startNew(true)">从第 {{ resumeEpisode }} 集续做</button>
       <button type="button" class="primary" :disabled="!canStart" @click="startNew()">{{ film ? '开始全自动' : '开始写提示词' }}</button>
     </div>
@@ -157,7 +160,7 @@ const props = defineProps<{
   /** prompts：全自动·到提示词；film：全自动·到成片。 */
   target: 'prompts' | 'film'
 }>()
-const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; stop: []; approve: []; regenerate: [id: string, prompt?: string]; regenerateSegment: [index: number, prompt?: string]; reviseEpisode: [notes: ReviewNotes]; approveCut: []; formal: [episodes: number[]] }>()
+const emit = defineEmits<{ start: [config: AutoRunConfig, resume: boolean]; cancel: []; confirmStyle: []; stop: []; approve: []; regenerate: [id: string, prompt?: string]; regenerateSegment: [index: number, prompt?: string]; reviseEpisode: [notes: ReviewNotes]; approveCut: []; formal: [episodes: number[]] }>()
 
 const editingId = ref('')
 const editingText = ref('')

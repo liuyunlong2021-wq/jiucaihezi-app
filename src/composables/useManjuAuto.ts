@@ -23,6 +23,8 @@ export interface ManjuAutoModelOption {
 }
 
 export interface ManjuAutoDraft {
+  /** 扫描用的项目根（绝对路径）：卡片直接显示，避免「扫不到剧本」时只能猜。 */
+  owner: string
   wikiRoot: string
   episodes: number[]
   /** 每集实际剧本路径（漫剧入稿或短剧改编）。 */
@@ -106,10 +108,14 @@ export function useManjuAuto(options: {
   const files = (owner: string) => createSkillDraftFiles(createRuntimeProjectFileService(), owner)
   const checkpointPath = (wikiRoot: string, route: string, episode: number) => `${wikiRoot}/制作流水线/${route}/第${episode}集进度.json`
 
+  // 直接读，不用 list() 预判存在：dev_list_files 最多 1000 条，
+  // 20 集以上的项目里 制作流水线/ 与 改编方案/ 会被截掉，续做会误判成「没有进度」并重做已完成集。
   async function readJson<T>(owner: string, path: string): Promise<T | undefined> {
-    const list = await createRuntimeProjectFileService().list(owner)
-    if (!list.some(resource => !resource.isDirectory && String(resource.path) === path)) return undefined
-    return JSON.parse(await files(owner).readText(path)) as T
+    try {
+      return JSON.parse(await files(owner).readText(path)) as T
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -122,7 +128,19 @@ export function useManjuAuto(options: {
     preparing.value = true
     error.value = ''
     try {
-      const paths = (await createRuntimeProjectFileService().list(owner)).filter(resource => !resource.isDirectory).map(resource => String(resource.path))
+      const service = createRuntimeProjectFileService()
+      // dev_list_files 只回最多 1000 条（按目录名深度优先）：20 集以上的项目里
+      // 项目资料/分集剧本 与 项目风格 会被截掉，启动卡就误报「还没有分集剧本」。
+      // 这三类路径是启动前置，按关键字整树搜一遍补齐，衔接只认真实文件。
+      const listed = (await service.list(owner)).filter(resource => !resource.isDirectory).map(resource => String(resource.path))
+      let searched: string[] = []
+      try {
+        const found = await Promise.all(['分集剧本', '影片比例与风格', '集进度.json'].map(query => service.searchPaths(owner, query, 2000)))
+        searched = found.flat().filter(resource => !resource.isDirectory).map(resource => String(resource.path))
+      } catch {
+        searched = []
+      }
+      const paths = [...new Set([...listed, ...searched])]
       const { wikiRoot, episodes, scripts, duplicates } = scanEpisodeScripts(paths)
       const stylePath = `${wikiRoot}/项目风格/影片比例与风格.md`
       const style = paths.includes(stylePath) ? await files(owner).readText(stylePath) : ''
@@ -143,7 +161,7 @@ export function useManjuAuto(options: {
         if (!cursor) break
       }
       draft.value = {
-        wikiRoot, episodes, scripts, duplicates, ratio,
+        owner, wikiRoot, episodes, scripts, duplicates, ratio,
         advice: referenceAdvice(style),
         imageModels: normalizeModels(models, 'image'),
         videoModels: normalizeModels(models, 'video'),
@@ -157,6 +175,25 @@ export function useManjuAuto(options: {
       error.value = `无法准备全自动成片：${cause instanceof Error ? cause.message : String(cause)}`
     } finally {
       preparing.value = false
+    }
+  }
+
+  /**
+   * 缺比例与风格时确认卡上的唯一出路：发一条 jc-film-style 指令把 film_style 落到
+   * 项目风格/影片比例与风格.md，回合结束后重扫一遍再弹确认卡。
+   * 不猜默认比例：比例决定后面所有生图与生视频，必须用户确认。
+   * 指令前缀不能带「全自动成片」字样：模型会当成流水线步骤，转去保存 pipeline_checkpoint。
+   */
+  async function confirmStyle() {
+    const current = draft.value
+    if (!current || preparing.value) return
+    draft.value = null
+    error.value = ''
+    try {
+      await options.sendText(`【项目风格】只执行 jc-film-style 这一步：确认本项目的影片比例与风格，比例必须写成 9:16 或 16:9 这类数字写法，然后用 wiki_save_artifact 以 film_style 保存到 ${current.wikiRoot}/项目风格/影片比例与风格.md。这是独立任务：不读分集剧本，不保存 pipeline_checkpoint 或任何流水线进度，不生成资产，不开始成片；保存后立即结束本回合。`)
+      await prepare()
+    } catch (cause) {
+      error.value = `无法确认比例与风格：${cause instanceof Error ? cause.message : String(cause)}`
     }
   }
 
@@ -416,5 +453,5 @@ export function useManjuAuto(options: {
     }
   }
 
-  return { run, stopping, draft, review, cutReview, loadSegmentPrompt, regenerateSegment, reviseEpisode, approveCut, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, cancelDraft: () => { draft.value = null } }
+  return { run, stopping, draft, review, cutReview, loadSegmentPrompt, regenerateSegment, reviseEpisode, approveCut, reviewBusy, reviewErrors, loadPrompt, regenerate, error, preparing, prepare, start, stop, approveReview, handleArtifactSaved, confirmStyle, cancelDraft: () => { draft.value = null } }
 }

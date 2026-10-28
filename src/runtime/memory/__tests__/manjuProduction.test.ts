@@ -308,3 +308,44 @@ test('short-drama full-auto adaptation is opt-in from the short-drama menu and d
   assert.match(pipeline, /## 全自动改编/)
   assert.match(pipeline, /【全自动改编·入稿】/)
 })
+
+test('缺比例与风格时确认卡给出确认入口，不猜默认比例', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  const panel = readFileSync('src/components/memory/ManjuAutoPanel.vue', 'utf8')
+  const controller = readFileSync('src/composables/useManjuAuto.ts', 'utf8')
+  // 2026-10-28 实测：短剧路线不产 项目风格/影片比例与风格.md，漫剧全自动却要求它已确认，卡上没有补救入口。
+  assert.match(panel, /项目风格里还没有确认影片比例/)
+  assert.match(panel, /去确认比例与风格/)
+  assert.match(panel, /emit\('confirmStyle'\)/)
+  assert.match(controller, /async function confirmStyle/)
+  assert.match(controller, /jc-film-style/)
+  assert.match(controller, /项目风格\/影片比例与风格\.md/)
+  // 指令开头不能带「全自动成片」：模型会当成流水线步骤，转去保存 pipeline_checkpoint（2026-10-28 实测）。
+  assert.match(controller, /【项目风格】/)
+  assert.match(controller, /不保存 pipeline_checkpoint/)
+  assert.doesNotMatch(controller, /【全自动成片·风格】/)
+  // 扫不到剧本时把扫描根与命中集数写出来，避免只看到一句「还没有分集剧本」。
+  assert.match(panel, /第N集分集剧本\.md/)
+  assert.match(panel, /draft\.owner/)
+  // dev_list_files 上限 1000 条，大项目的剧本／风格／进度会被截断；prepare 必须按关键字补扫（2026-10-28 E:\1028全自动教程 实测）。
+  assert.match(controller, /service\.searchPaths\(owner, query, 2000\)/)
+  assert.match(controller, /1000 条/)
+  assert.match(workbench, /@confirm-style="manjuAuto\.confirmStyle"/)
+  // 比例决定后续所有生图与生视频，必须用户确认，不填默认值。
+  assert.doesNotMatch(controller, /ratio \?\?/)
+  assert.doesNotMatch(panel, /ratio \?\?/)
+})
+
+test('项目文件超过 1000 条时，判定存在不能再依赖整树列表', () => {
+  const manju = readFileSync('src/composables/useManjuAuto.ts', 'utf8')
+  const duanju = readFileSync('src/composables/useDuanjuAuto.ts', 'utf8')
+  // dev_list_files 每条目录也占额度、按目录名深度优先：1010 个文件的项目里
+  // 列表止于 wiki/资产/*，项目资料、项目风格全部丢失（2026-10-28 E:\1028全自动教程 实测）。
+  assert.match(manju, /service\.searchPaths\(owner, query, 2000\)/)
+  assert.doesNotMatch(manju, /const list = await createRuntimeProjectFileService\(\)\.list\(owner\)/)
+  // 梗概读不到就会把「收尾已完成」误判成未完成；进度读不到就会重做已完成集。
+  assert.doesNotMatch(duanju, /if \(!\(paths \?\? await filePaths\(owner\)\)\.includes\(path\)\) return undefined/)
+  assert.doesNotMatch(duanju, /return \(await filePaths\(owner\)\)\.includes\(path\) \? await files\(owner\)\.readText\(path\) : undefined/)
+  // 删 stale 集时按父目录列，绕开整树上限。
+  assert.match(duanju, /listDirectory\(owner, dir\)/)
+})

@@ -8,7 +8,7 @@ const chapters = Array.from({ length: 8 }, (_, i) => `第${i + 1}章 标题${i +
  * 假世界：规划回合读完指令里的章节、保存标注，程序组装体现在分集清单（planned_through、事件集号、切分卡计划）；
  * 样集/改编回合把指令里的集号记入 adapted；调速回合改 pace 并清空 adapted；收尾回合更新分集梗概。
  */
-function world(options: { fail?: RegExp; failTimes?: number; blocked?: RegExp; stopAfter?: number; heavyEvent?: number; unfinishedAt?: (batch: number) => string | undefined; summaryCovers?: (assembled: number) => number } = {}) {
+function world(options: { fail?: RegExp; failTimes?: number; blocked?: RegExp; blockedAfterWork?: RegExp; stopAfter?: number; heavyEvent?: number; unfinishedAt?: (batch: number) => string | undefined; summaryCovers?: (assembled: number) => number } = {}) {
   const sent: string[] = []
   let progress: DuanjuProgress = { stage: 'source' }
   let manifest: DuanjuManifest = { rhythm: { name: '大场面奇幻', min: 90, target: 120, max: 150, pace: 1 }, events: [], adapted: [] }
@@ -40,6 +40,8 @@ function world(options: { fail?: RegExp; failTimes?: number; blocked?: RegExp; s
         const covered = options.summaryCovers?.(assembled) ?? assembled
         summary = Array.from({ length: covered }, (_, i) => `第${i + 1}集：梗概`).join('\n')
       }
+      // 实测现场：收尾产物写完了，模型又按状态机规则把进度标成 blocked。
+      if (options.blockedAfterWork?.test(text)) progress = { ...progress, status: 'blocked', reason: '运行时拒绝推进至 complete' }
     },
     async readProgress() { return progress },
     async readManifest() { return manifest },
@@ -82,6 +84,21 @@ test('the finish round is judged by whether the synopsis covers every assembled 
   assert.equal(state.status, 'blocked')
   assert.match(state.reason ?? '', /收尾/)
   assert.equal(short.sent.filter(text => /^【全自动改编·收尾】/.test(text)).length, 2, '收尾重发一次')
+})
+
+test('产物达标时不被进度里的 blocked 拖住：收尾写满梗概就算完成', async () => {
+  // 实测现场：模型把梗概写完，又按状态机规则保存 blocked；运行器曾因此暂停整批。
+  const w = world({ blockedAfterWork: /^【全自动改编·收尾】/ })
+  const state = await runDuanjuAuto(createDuanjuRun({ ...config, chapters: chapters.slice(0, 4), adapt: false }), w.deps)
+  assert.equal(state.status, 'done')
+  assert.equal(w.sent.filter(text => /^【全自动改编·收尾】/.test(text)).length, 1, '产物达标就不再重发')
+})
+
+test('产物确实没达标时，blocked 仍然立即暂停', async () => {
+  const w = world({ blockedAfterWork: /^【全自动改编·收尾】/, summaryCovers: assembled => Math.max(0, assembled - 1) })
+  const state = await runDuanjuAuto(createDuanjuRun({ ...config, chapters: chapters.slice(0, 4), adapt: false }), w.deps)
+  assert.equal(state.status, 'blocked')
+  assert.match(state.reason ?? '', /收尾/)
 })
 
 test('adapt:false only cuts: no adaptation rounds', async () => {

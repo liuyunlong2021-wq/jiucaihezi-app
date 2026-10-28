@@ -41,12 +41,21 @@ export function useDuanjuAuto(options: {
   async function filePaths(owner: string) {
     return (await service().list(owner)).filter(resource => !resource.isDirectory).map(resource => String(resource.path))
   }
-  async function readJson<T>(owner: string, path: string, paths?: string[]): Promise<T | undefined> {
-    if (!(paths ?? await filePaths(owner)).includes(path)) return undefined
-    return JSON.parse(await files(owner).readText(path)) as T
+  // 直接读，不用 list() 预判存在：dev_list_files 最多 1000 条且按目录名深度优先，
+  // 20 集以上的项目里 项目资料/ 与 项目风格/ 会被截掉，读不到分集梗概就会误判「收尾未完成」。
+  async function readJson<T>(owner: string, path: string): Promise<T | undefined> {
+    try {
+      return JSON.parse(await files(owner).readText(path)) as T
+    } catch {
+      return undefined
+    }
   }
   async function readText(owner: string, path: string) {
-    return (await filePaths(owner)).includes(path) ? await files(owner).readText(path) : undefined
+    try {
+      return await files(owner).readText(path)
+    } catch {
+      return undefined
+    }
   }
   function wikiRootOf(paths: string[]) {
     const known = paths.find(path => path.endsWith(`/${PROGRESS_PATH}`) || path.endsWith(`/${MANIFEST_PATH}`))
@@ -61,12 +70,14 @@ export function useDuanjuAuto(options: {
     const resources = (await service().list(owner)).filter(resource => !resource.isDirectory)
     const paths = resources.map(resource => String(resource.path))
     const wikiRoot = wikiRootOf(paths)
-    const manifest = await readJson<DuanjuManifest>(owner, `${wikiRoot}/${MANIFEST_PATH}`, paths)
+    const manifest = await readJson<DuanjuManifest>(owner, `${wikiRoot}/${MANIFEST_PATH}`)
     if (!manifest?.stale?.length) return
     for (const episode of manifest.stale) {
       const folder = `第${String(episode).padStart(3, '0')}集`
       for (const path of [`${wikiRoot}/项目资料/分集剧本/第${episode}集分集剧本.md`, `${wikiRoot}/改编方案/分集切分/${folder}原文.md`, `${wikiRoot}/改编方案/切分卡/${folder}.md`]) {
-        const resource = resources.find(item => String(item.path) === path)
+        // 按父目录列，不用整树列表：1000 条上限会把 项目资料/ 截掉，导致 stale 集删不掉。
+        const dir = path.slice(0, path.lastIndexOf('/'))
+        const resource = (await service().listDirectory(owner, dir).catch(() => [])).find(item => !item.isDirectory && String(item.path) === path)
         if (resource) await service().remove(resource)
       }
     }
@@ -81,8 +92,8 @@ export function useDuanjuAuto(options: {
     try {
       const paths = await filePaths(owner)
       const wikiRoot = wikiRootOf(paths)
-      const progress = await readJson<DuanjuProgress & { chapters?: Array<{ source_path: string; chapter_heading: string }>; source_inputs?: string[] }>(owner, `${wikiRoot}/${PROGRESS_PATH}`, paths)
-      const saved = await readJson<DuanjuRunState>(owner, `${wikiRoot}/${DUANJU_AUTO_PATH}`, paths)
+      const progress = await readJson<DuanjuProgress & { chapters?: Array<{ source_path: string; chapter_heading: string }>; source_inputs?: string[] }>(owner, `${wikiRoot}/${PROGRESS_PATH}`)
+      const saved = await readJson<DuanjuRunState>(owner, `${wikiRoot}/${DUANJU_AUTO_PATH}`)
       // 早期版本（节拍数、没有时间账）的运行记录不提供续做，需要重新规划。
       const resumable = saved && saved.status !== 'done' && saved.version === 3 ? saved : undefined
       const chapters = progress?.chapters ?? []

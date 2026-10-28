@@ -1733,12 +1733,24 @@ async function requireAdaptationReads(ctx, args, exec, contract, agent) {
   if (record.episode_number !== args.episode_number) throw new Error('切分记录与当前集号不一致')
 }
 
+/** 删减式改编是否已把分集清单里的每一集都改编完；这些阶段由程序组装，模型没有产物可登记。 */
+async function annotationsComplete(ctx, exec, root) {
+  const manifest = await readJsonFile(ctx, exec, `${root}/${MANIFEST_PATH}`)
+  const total = Math.max(0, ...(manifest?.events ?? []).map(item => Array.isArray(item.episodes) ? item.episodes[1] : 0))
+  if (!total) return false
+  const adapted = new Set(manifest.adapted ?? [])
+  return Array.from({ length: total }, (_, index) => index + 1).every(episode => adapted.has(episode))
+}
+
 async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
   const input = JSON.parse(content), stage = adaptationStages.indexOf(input.stage)
   if (stage < 0 || !Array.isArray(input.outputs)) throw new Error('短剧进度需要有效stage与outputs')
   const cwd = exec.agent.session.header.cwd, target = await ctx.fs.resolve(`${root}/改编方案/执行进度.json`, { cwd, signal: exec.signal })
   const previous = await ctx.fs.stat(target, exec.signal) ? JSON.parse(await ctx.fs.readText(target, exec.signal)) : undefined
-  if (stage && (!previous || ![stage - 1, stage].includes(adaptationStages.indexOf(previous.stage)))) throw new Error('短剧流水线不能跳过前置阶段')
+  // 删减式改编的 scheme/cuts/writing 由程序按标注组装，模型没有这几个阶段可登记：
+  // 分集清单已组装出集且每集都改编完时，允许直接从 materials 及之后完成。
+  const assemblyJump = stage === adaptationStages.indexOf('complete') && Boolean(previous) && await annotationsComplete(ctx, exec, root)
+  if (stage && (!previous || (!assemblyJump && ![stage - 1, stage].includes(adaptationStages.indexOf(previous.stage))))) throw new Error('短剧流水线不能跳过前置阶段')
   if (input.status !== undefined && !['running', 'blocked', ...(stage === 5 ? ['completed'] : []), ...(stage === 2 ? ['review'] : [])].includes(input.status)) throw new Error('短剧状态无效；review只用于方案阶段等待用户审阅规划书')
   if (input.status === 'blocked' && (!String(input.reason || '').trim() || stage === 5)) throw new Error('阻塞须说明原因，完成阶段不能阻塞')
   const state = stage ? previous : {}, sources = stage ? state.sources : {}
@@ -1833,7 +1845,8 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
   const sourceInputs = stage ? state.source_inputs : input.source_paths
   const episodes = stage === 3 ? input.episodes : state.episodes
   let unused = state.unused
-  if (stage >= 3) {
+  // 完成时直接跳过切分账目：删减式改编的切分与剧本由程序组装，这里没有新的切分记录要对账。
+  if (stage >= 3 && !assemblyJump) {
     if (!Array.isArray(episodes) || !episodes.length || episodes.some((number, index) => !Number.isSafeInteger(number) || number < 1 || number > 9999 || index && number !== episodes[index - 1] + 1)) throw new Error('需要连续且不重复的目标episodes集号')
     const order = new Map(chapters.map((item, index) => [`${item.source_path}\0${item.chapter_heading}`, index]))
     const used = new Map()

@@ -927,6 +927,25 @@ test('short-drama time ledger: rounds are validated, episodes are planned by tim
   assert.ok((w.body(1) + w.body(2)).includes('乙跪地求饶') && (w.body(1) + w.body(2)).includes('甲站在树洞前'))
 })
 
+test('删减式改编没有 scheme/cuts/writing 可登记：分集清单全部改编完即可完成', async t => {
+  const w = await ledgerWorld(t)
+  const { save, annotate, rhythm, event } = w
+  await save('story_summary', '# 原作梗概\n甲追乙到悬崖。', { research_version: 'original' })
+  const materials = await save('adaptation_checkpoint', { stage: 'materials', outputs: ['wiki/项目资料/原作/故事梗概.md'] })
+  assert.ok(materials)
+  await annotate({ rhythm, planned_through: '第3章 余波', events: [event()] })
+  assert.deepEqual(w.manifest().adapted, [])
+  // 还没改编：不能直接完成，旧的逐级校验仍然生效。
+  await assert.rejects(save('adaptation_checkpoint', { stage: 'complete', outputs: [] }), /不能跳过前置阶段/)
+  // 程序按标注组装出3集并全部改编完。
+  const manifest = { ...w.manifest(), adapted: [1, 2, 3] }
+  w.files.set(join(w.root, 'wiki/改编方案/分集清单.json'), { content: JSON.stringify(manifest, null, 2) + '\n', version: 9 })
+  await save('adaptation_checkpoint', { stage: 'complete', outputs: [] })
+  const progress = JSON.parse(w.read('wiki/改编方案/执行进度.json'))
+  assert.equal(progress.stage, 'complete')
+  assert.equal(progress.status, 'completed')
+})
+
 test('short-drama adapted scripts carry scene times and sources; the program checks range, dialogue time and the platform cap', async t => {
   const w = await ledgerWorld(t)
   await w.annotate({ rhythm: w.rhythm, planned_through: '第3章 余波', events: [w.event()] })
