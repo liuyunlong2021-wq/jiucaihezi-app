@@ -75,6 +75,8 @@ tempfile = "3"
 tauri = { version = "2", features = ["test"] }
 
 [patch.crates-io]
+# Xcode 27 iOS Release Swift symbol visibility: tauri#16130.
+swift-rs = { path = "vendor/swift-rs" }
 # Temporary iOS compatibility patch. Remove once Tauri/Wry releases the upstream fix for #14675.
 tauri-runtime-wry = { path = "vendor/tauri-runtime-wry" }
 # Official Tao iOS fixes not yet available in the crates.io release used by Tauri 2.11.

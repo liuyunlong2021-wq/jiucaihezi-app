@@ -30,4 +30,12 @@ for (const file of ['project.yml', 'Podfile', 'jiucaihezi-app.xcodeproj/project.
   await writeFile(target, source.replaceAll('14.0', '15.0'))
 }
 
+// Tauri merges into the existing generated plist; removing a source key leaves its old value behind.
+const encryptionKey = 'ITSAppUsesNonExemptEncryption'
+if (!(await readFile(path.join(root, 'src-tauri/Info.ios.plist'), 'utf8')).includes(encryptionKey)) {
+  const plist = path.join(apple, 'jiucaihezi-app_iOS/Info.plist')
+  const source = await readFile(plist, 'utf8')
+  await writeFile(plist, source.replace(/\s*<key>ITSAppUsesNonExemptEncryption<\/key>\s*<(?:false|true)\s*\/>/g, ''))
+}
+
 console.log('[ios] applied launch screen and logo')

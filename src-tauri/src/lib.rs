@@ -1755,6 +1755,7 @@ pub fn run() {
             commands::desktop_update::desktop_update_task_begin,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             commands::desktop_update::desktop_update_task_end,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             commands::desktop_update::desktop_update_tasks,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             commands::screenshot::screenshot_check,

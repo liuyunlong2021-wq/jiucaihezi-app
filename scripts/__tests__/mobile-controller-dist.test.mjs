@@ -86,4 +86,27 @@ test('扫码权限只给 iOS，并且相机用途说明随包提交', () => {
   assert.doesNotMatch(JSON.stringify(capability), /fs:|shell:|sql:|dialog:/)
   // App Store 审核要求相机权限有用途说明，缺了会在真机上直接崩。
   assert.match(plist, /<key>NSCameraUsageDescription<\/key>\s*<string>[^<]+<\/string>/)
+  assert.match(plist, /<key>NSLocalNetworkUsageDescription<\/key>\s*<string>[^<]*连接你已配对的电脑[^<]*<\/string>/)
+  assert.doesNotMatch(plist, /开发期间连接此 Mac/)
+})
+
+test('桌面更新命令注册全部排除移动目标', () => {
+  const lib = source('src-tauri/src/lib.rs')
+  const registrations = [...lib.matchAll(/commands::desktop_update::\w+,/g)]
+  assert.ok(registrations.length > 0)
+  for (const match of registrations) {
+    const prefix = lib.slice(0, match.index).trimEnd()
+    assert.ok(prefix.endsWith('#[cfg(not(any(target_os = "ios", target_os = "android")))]'), match[0])
+  }
+})
+
+test('Noise 控制器在未核实加密豁免前不预填出口合规答案', () => {
+  assert.doesNotMatch(source('src-tauri/Info.ios.plist'), /<key>ITSAppUsesNonExemptEncryption<\/key>/)
+})
+
+test('Xcode 27 iOS Release 使用 native Swift 构建系统保留插件导出符号', () => {
+  const bridge = source('src-tauri/vendor/swift-rs/src-rs/build.rs')
+  assert.match(source('src-tauri/Cargo.toml'), /swift-rs = \{ path = "vendor\/swift-rs" \}/)
+  assert.match(bridge, /if use_triple && configuration == "release" && matches!\(rust_target.os, RustTargetOS::IOS\)/)
+  assert.match(bridge, /command.args\(\["--build-system", "native"\]\)/)
 })
