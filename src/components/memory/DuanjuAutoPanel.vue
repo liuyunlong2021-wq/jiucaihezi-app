@@ -16,10 +16,30 @@
       </div>
       <label class="duanju-auto-row"><span>每批章数</span><input v-model.number="batchSize" type="number" min="1"></label>
       <label class="duanju-auto-row"><span>每次读章数</span><input v-model.number="readSize" type="number" min="1"></label>
-      <label class="duanju-auto-check"><input v-model="review" type="checkbox">每批规划书完成后暂停，给我审阅</label>
-      <p>共 {{ selected.length }} 章，分 {{ batches }} 批。每批依次：整理资料 → 规划（每次读 {{ readSize }} 章）→ {{ review ? '暂停审阅 → ' : '' }}切分 → 逐集写剧本 → 收尾。只产出文字，不产生媒体费用。</p>
+      <div class="duanju-auto-row">
+        <span>短剧风格</span>
+        <div class="duanju-auto-presets" role="radiogroup" aria-label="短剧风格">
+          <label v-for="(item, index) in DUANJU_PRESETS" :key="item.name" :class="{ chosen: preset === index }">
+            <input v-model="preset" type="radio" :value="index">
+            <strong>{{ item.name }}</strong><small>{{ item.min }}–{{ item.max }}秒 · 目标 {{ item.target }}秒 · {{ item.suits }}</small>
+          </label>
+        </div>
+      </div>
+      <label class="duanju-auto-row"><span>目标秒数</span><input v-model.number="targetSeconds" type="number" :min="DUANJU_PRESETS[preset].min" :max="DUANJU_PRESETS[preset].max" aria-label="每集目标秒数（可微调）"></label>
+      <div class="duanju-auto-row">
+        <span>改编方式</span>
+        <div class="duanju-auto-presets" role="radiogroup" aria-label="改编方式">
+          <label :class="{ chosen: adapt }"><input v-model="adapt" type="radio" :value="true"><strong>切分并改编</strong><small>按切分卡的时间预算删减、压缩对白、影视化</small></label>
+          <label :class="{ chosen: !adapt }"><input v-model="adapt" type="radio" :value="false"><strong>只切分</strong><small>分集剧本保持原文直出，之后再改编</small></label>
+        </div>
+      </div>
+      <template v-if="adapt">
+        <label class="duanju-auto-row"><span>样集先行</span><input v-model="sample" type="checkbox" aria-label="样集先行"><small class="duanju-auto-hint">先改第1集和一个重大回合所在集，你确认节奏后再批量</small></label>
+        <label class="duanju-auto-row"><span>每轮改编集数</span><input v-model.number="adaptSize" type="number" min="1" aria-label="每轮改编集数"></label>
+      </template>
+      <p>共 {{ selected.length }} 章，分 {{ batches }} 批，章节已按章号排序。每轮只读 {{ readSize }} 章，同时整理角色、场景、道具和事件，并给事件划分回合；程序按“{{ DUANJU_PRESETS[preset].name }}”的时间账切集，写切分卡和原文直出的分集剧本，{{ adapt ? '再由模型按时间逐集改编，' : '' }}直接交给漫剧制作。之后哪个事件要多切或少切，在对话里说一句即可。不产生媒体费用。</p>
     </template>
-    <p v-if="draft.saved" class="duanju-auto-note">上次运行停在第 {{ draft.saved.batch + 1 }} 批的「{{ phaseLabel(draft.saved) }}」{{ draft.saved.reason ? `：${draft.saved.reason}` : '' }}。</p>
+    <p v-if="draft.saved" class="duanju-auto-note">上次运行停在「{{ duanjuRunLabel(draft.saved) }}」{{ draft.saved.reason ? `：${draft.saved.reason}` : '' }}。</p>
     <div class="duanju-auto-actions">
       <button type="button" @click="emit('cancel')">取消</button>
       <button v-if="draft.saved" type="button" class="primary" @click="emit('start', draft.saved.config, true)">从第 {{ draft.saved.batch + 1 }} 批续做</button>
@@ -27,49 +47,57 @@
     </div>
   </div>
 
-  <div v-if="run && reviewing" class="duanju-auto-card" role="dialog" aria-label="审阅规划书">
-    <strong>第 {{ run.batch + 1 }} 批规划书已完成，请审阅</strong>
-    <p>在文件树查看 <code>改编方案/项目总纲.md</code> 和 <code>改编方案/分集规划.md</code>：主题、两台发动机、篇章结构、分集表和删减清单。需要修改就直接在对话里说，改完后再点确认。</p>
+  <div v-if="run && run.status === 'review'" class="duanju-auto-card" role="dialog" aria-label="样集确认">
+    <strong>样集已出：第{{ (run.sampleEpisodes ?? []).join('、') }}集</strong>
+    <p>请在“项目资料/分集剧本”里看这几集：节奏、对白压缩、细写和开场策略是否合适（当前节奏系数 {{ run.pace ?? 1 }}）。确认后才会批量改编其余各集。</p>
     <div class="duanju-auto-actions">
-      <button type="button" @click="emit('stop')">停止</button>
-      <button type="button" class="primary" @click="emit('approve')">确认，继续切分和写剧本</button>
+      <button type="button" @click="emit('review', 'stop')">停止</button>
+      <button type="button" @click="emit('review', 'faster')">整体偏快</button>
+      <button type="button" @click="emit('review', 'slower')">整体偏慢</button>
+      <button type="button" class="primary" @click="emit('review', 'continue')">继续批量改编</button>
     </div>
   </div>
 
-  <div v-if="run" class="duanju-auto-progress" :class="run.status">
-    <JcIcon name="edit-note" />
-    <span class="duanju-auto-status">{{ statusLabel }}</span>
-    <span v-for="episode in run.episodes" :key="episode" class="duanju-auto-chip" :class="chipState(episode)">第{{ episode }}集</span>
-    <button v-if="run.status === 'running'" type="button" :disabled="stopping" @click="emit('stop')">{{ stopping ? '停止中…' : '停止' }}</button>
+  <div v-if="run && expanded && run.status !== 'review'" class="duanju-auto-card" role="status" aria-label="全自动改编详情">
+    <strong>{{ duanjuRunLabel(run) }}</strong>
     <p v-if="run.status === 'blocked' || run.status === 'stopped'" class="duanju-auto-reason">{{ run.reason ? `暂停原因：${run.reason}。` : '' }}处理后从「短剧改编」菜单重新选「全自动·改编」，点「续做」；已完成的步骤不会重做。</p>
+    <div v-if="run.status === 'blocked' || run.status === 'stopped' || run.status === 'done'" class="duanju-auto-actions">
+      <button type="button" @click="emit('dismiss')">关闭</button>
+    </div>
   </div>
   <p v-if="error" class="duanju-auto-error">{{ error }}</p>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { DuanjuAutoConfig, DuanjuRunState } from '@/runtime/duanjuAuto/autoRunner'
+import { DUANJU_PRESETS, duanjuRunLabel, type DuanjuAutoConfig, type DuanjuRunState, type SampleDecision } from '@/runtime/duanjuAuto/autoRunner'
 import type { DuanjuAutoDraft } from '@/composables/useDuanjuAuto'
 
 const props = defineProps<{
   draft: DuanjuAutoDraft | null
   run: DuanjuRunState | null
-  stopping: boolean
-  reviewing: boolean
+  /** 点进度芯片展开详情。 */
+  expanded: boolean
   error: string
 }>()
 const emit = defineEmits<{
   start: [config: DuanjuAutoConfig, resume: boolean]
   cancel: []
-  stop: []
-  approve: []
+  dismiss: []
+  review: [decision: SampleDecision]
 }>()
 
 const from = ref(0)
 const to = ref(0)
 const batchSize = ref(100)
 const readSize = ref(20)
-const review = ref(true)
+// 三种预设（调研依据见 DUANJU_PRESETS 注释）；目标秒数可在区间内微调，不新增风格。
+const preset = ref(2)
+const targetSeconds = ref<number>(DUANJU_PRESETS[2].target)
+watch(preset, index => { targetSeconds.value = DUANJU_PRESETS[index].target })
+const adapt = ref(true)
+const sample = ref(true)
+const adaptSize = ref(3)
 watch(() => props.draft, draft => {
   from.value = 0
   to.value = Math.max(0, (draft?.chapters.length ?? 1) - 1)
@@ -77,34 +105,18 @@ watch(() => props.draft, draft => {
 
 const selected = computed(() => props.draft?.chapters.slice(from.value, to.value + 1) ?? [])
 const batches = computed(() => Math.ceil(selected.value.length / Math.max(1, batchSize.value || 1)))
-const valid = computed(() => selected.value.length > 0 && batchSize.value >= 1 && readSize.value >= 1)
+const valid = computed(() => selected.value.length > 0 && batchSize.value >= 1 && readSize.value >= 1 && adaptSize.value >= 1 && targetSeconds.value >= DUANJU_PRESETS[preset.value].min && targetSeconds.value <= DUANJU_PRESETS[preset.value].max)
 const config = computed<DuanjuAutoConfig>(() => ({
-  sourcePath: props.draft?.sourcePath ?? '',
+  sourcePaths: props.draft?.sourcePaths ?? [],
   chapters: selected.value,
   batchSize: Math.floor(batchSize.value),
   readSize: Math.floor(readSize.value),
-  review: review.value,
+  rhythm: { name: DUANJU_PRESETS[preset.value].name, min: DUANJU_PRESETS[preset.value].min, target: targetSeconds.value, max: DUANJU_PRESETS[preset.value].max },
+  adapt: adapt.value,
+  sample: adapt.value && sample.value,
+  adaptSize: Math.max(1, Math.floor(adaptSize.value)),
 }))
 
-const phaseLabels = { materials: '整理资料', plan: '规划', review: '待审阅', cuts: '切分', write: '写剧本', finish: '收尾' } as const
-function phaseLabel(state: DuanjuRunState) {
-  if (state.phase === 'write') return `写第${state.episodes[state.index]}集`
-  return phaseLabels[state.phase]
-}
-const statusLabel = computed(() => {
-  const run = props.run
-  if (!run) return ''
-  if (run.status === 'done') return '全自动改编已完成'
-  const where = `第 ${run.batch + 1} 批 · ${phaseLabel(run)}`
-  return run.status === 'running' ? where : run.status === 'review' ? `${where}：等你审阅规划书` : `已暂停 · ${where}`
-})
-function chipState(episode: number) {
-  const run = props.run
-  if (!run) return ''
-  const position = run.episodes.indexOf(episode)
-  if (run.phase === 'finish' || run.phase === 'write' && position < run.index) return 'done'
-  return run.phase === 'write' && position === run.index ? 'active' : ''
-}
 </script>
 
 <style scoped>
@@ -116,17 +128,16 @@ function chipState(episode: number) {
 .duanju-auto-range select { min-width: 0; max-width: 100%; flex: 1 1 140px; }
 .duanju-auto-row select, .duanju-auto-row input[type="number"] { padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; }
 .duanju-auto-row input[type="number"] { width: 96px; }
-.duanju-auto-check { display: flex; align-items: center; gap: 6px; color: var(--ink2); }
+.duanju-auto-presets { display: grid; gap: 6px; min-width: 0; }
+.duanju-auto-presets label { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.duanju-auto-presets label.chosen { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 8%, transparent); }
+.duanju-auto-presets small { grid-column: 2; color: var(--ink3); line-height: 1.5; }
+.duanju-auto-hint { grid-column: 2; color: var(--ink3); }
 .duanju-auto-note { color: var(--ink3) !important; }
 .duanju-auto-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.duanju-auto-actions button, .duanju-auto-progress button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; }
+.duanju-auto-actions button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; }
 .duanju-auto-actions button.primary { border-color: transparent; background: var(--olive); color: #fff; }
-.duanju-auto-actions button:disabled, .duanju-auto-progress button:disabled { opacity: .45; cursor: default; }
-.duanju-auto-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 14px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink2); font-size: 12px; }
-.duanju-auto-status { color: var(--ink1); font-weight: 600; }
-.duanju-auto-chip { padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 12%, transparent); font-size: 11px; }
-.duanju-auto-chip.done { background: color-mix(in srgb, var(--olive) 16%, transparent); color: var(--olive); }
-.duanju-auto-chip.active { background: color-mix(in srgb, #d08a00 18%, transparent); color: #a86d00; }
+.duanju-auto-actions button:disabled { opacity: .45; cursor: default; }
 .duanju-auto-reason { flex-basis: 100%; margin: 0; color: var(--jc-error); }
 .duanju-auto-error { margin: 0 14px 8px; color: var(--jc-error); font-size: 12px; }
 </style>

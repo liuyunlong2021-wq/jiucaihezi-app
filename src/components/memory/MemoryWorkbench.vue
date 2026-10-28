@@ -25,7 +25,7 @@ import ManjuAutoPanel from './ManjuAutoPanel.vue'
 import DuanjuAutoPanel from './DuanjuAutoPanel.vue'
 import { AUTO_INTAKE_PREFIX, useManjuAuto } from '@/composables/useManjuAuto'
 import { useDuanjuAuto } from '@/composables/useDuanjuAuto'
-import { DUANJU_INTAKE_PREFIX } from '@/runtime/duanjuAuto/autoRunner'
+import { DUANJU_INTAKE_PREFIX, duanjuRunLabel } from '@/runtime/duanjuAuto/autoRunner'
 import { setDesktopManjuAuto } from '@/services/desktopRemoteManju'
 import { findCustomProvider, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
@@ -1127,6 +1127,10 @@ watch(sending, busy => {
   if (activeRun.value?.phase === 'done') void duanjuAuto.prepare()
 })
 watch(shortDramaSelected, on => { if (!on) duanjuMode.value = 'free' })
+// 全自动进度显示为输入框上方的芯片（同已选 Skill）；点芯片展开详情，停止统一用输入框右下角按钮。
+const duanjuActive = computed(() => duanjuAuto.run.value?.status === 'running')
+const duanjuDetails = ref(false)
+watch(() => duanjuAuto.run.value?.status, status => { if (status === 'blocked') duanjuDetails.value = true })
 function toggleDuanjuMenu(event: MouseEvent) {
   if (duanjuMenu.value) {
     duanjuMenu.value = null
@@ -1148,12 +1152,12 @@ function chooseDuanjuMode(mode: 'free' | 'auto' | 'off') {
     duanjuAuto.cancelDraft()
     return
   }
-  contextNotice.value = '已切换到全自动·改编：发送原文路径或全文后先入库识别章节，再弹出确认卡；确认后按批次自动规划、审阅、切分、写剧本。'
+  contextNotice.value = '已切换到全自动·改编：发送原文路径或全文后先入库识别章节，再弹出确认卡；确认后按批次自动规划、按时间切分，再逐集改编（先出样集等你确认）。'
   void duanjuAuto.prepare({ onlyIfReady: true })
 }
 const duanjuModeItems = [
   { mode: 'free', label: '自由改编', note: '在对话里按需改编，想做哪步做哪步' },
-  { mode: 'auto', label: '全自动·改编', note: '按批次自动规划、审阅、切分并逐集写剧本，只产出文字' },
+  { mode: 'auto', label: '全自动·改编', note: '按批次自动规划、按时间切分并逐集改编，先出样集，只产出文字' },
 ] as const
 const manjuModeLabels = { free: '漫剧·自由', prompts: '全自动·到提示词', film: '全自动·到成片' } as const
 const manjuModeItems = [
@@ -3091,6 +3095,8 @@ async function send(remoteText?: string) {
       onArtifactSaved(path) {
         // 进度 JSON 只交给全自动成片（资产阶段提前生图），不在编辑器里打开。
         if (path.endsWith('.json')) {
+          // 短剧标注保存后程序已组装分集剧本；重切让集数变少时删除多出来的旧集（自由改编时也生效）。
+          if (/改编方案\/标注\//.test(path)) void duanjuAuto.removeStale()
           void manjuAuto.handleArtifactSaved(path)
           return
         }
@@ -3345,6 +3351,7 @@ async function send(remoteText?: string) {
 function stop() {
   const run = activeRun.value
   if (run) stopRun(run)
+  if (duanjuActive.value) duanjuAuto.stop()
 }
 
 watch([
@@ -5154,14 +5161,19 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
         </div>
 
-      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer" :class="{ 'has-composer-context': visibleSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1 }">
-        <div v-if="visibleSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1" class="memory-composer-header">
+      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer" :class="{ 'has-composer-context': visibleSkillNames.length || selectedToolChips.length || duanjuAuto.run.value || conversationQuestionCount > 1 }">
+        <div v-if="visibleSkillNames.length || selectedToolChips.length || duanjuAuto.run.value || conversationQuestionCount > 1" class="memory-composer-header">
         <div v-if="conversationQuestionCount > 1" class="memory-round-nav" aria-label="对话轮次导航">
           <button type="button" aria-label="上一条问题" title="上一条问题" @click="navigateQuestion(-1)"><JcIcon name="arrow_upward" /></button>
           <span>{{ conversationQuestionCount }} 问</span>
           <button type="button" aria-label="下一条问题" title="下一条问题" @click="navigateQuestion(1)"><JcIcon name="arrow_downward" /></button>
         </div>
-        <div v-if="visibleSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
+        <div v-if="visibleSkillNames.length || selectedToolChips.length || duanjuAuto.run.value" class="memory-selected-tools" aria-label="已选能力">
+          <div v-if="duanjuAuto.run.value" class="memory-attachment-chip memory-duanju-chip" :class="duanjuAuto.run.value.status" :title="duanjuAuto.run.value.reason || '点此查看详情'">
+            <JcIcon name="edit-note" />
+            <button type="button" class="memory-attachment-name" :aria-expanded="duanjuDetails" @click="duanjuDetails = !duanjuDetails">{{ duanjuRunLabel(duanjuAuto.run.value) }}</button>
+            <button v-if="!duanjuActive" title="关闭" @click="duanjuAuto.dismiss(); duanjuDetails = false">×</button>
+          </div>
           <div v-for="name in visibleSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name === WIKI_MEMORY_SKILL ? 'Wiki Memory' : name">{{ name === WIKI_MEMORY_SKILL ? 'Wiki Memory' : name }}</span>
@@ -5295,13 +5307,13 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           v-if="desktopOnlyRuntime"
           :draft="duanjuAuto.draft.value"
           :run="duanjuAuto.run.value"
-          :stopping="duanjuAuto.stopping.value"
-          :reviewing="duanjuAuto.reviewing.value"
+          :expanded="duanjuDetails"
           :error="duanjuAuto.error.value"
           @start="(config, resume) => duanjuAuto.start(config, resume)"
           @cancel="duanjuAuto.cancelDraft"
           @stop="duanjuAuto.stop"
-          @approve="duanjuAuto.approveReview"
+          @dismiss="duanjuAuto.dismiss(); duanjuDetails = false"
+          @review="decision => duanjuAuto.decideSample(decision)"
         />
         <div
           class="memory-input-row"
@@ -5374,7 +5386,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button v-if="sending && (canQueueDraft || queueSubmitting)" class="send-button" :title="queueSubmitting ? '正在排入队列…' : '排入当前会话队列'" :disabled="queueSubmitting" @click="send()"><JcIcon name="playlist_add" /></button>
             <button v-else-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
             <button v-if="sending && (canQueueDraft || queueSubmitting)" type="button" class="memory-queue-stop" title="停止当前运行，保留队列" aria-label="停止当前运行，保留队列" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else-if="!sending" class="send-button" :title="sendInFlight ? '正在落盘本轮内容…' : attachmentImportsPending ? '正在本地处理附件…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || attachmentImportsPending > 0 || attachmentImportFailures.length > 0 || !composerHasPayload" @click="send()"><JcIcon name="arrow-upward" /></button>
+            <button v-if="!sending && duanjuActive" type="button" class="memory-queue-stop" :title="duanjuAuto.stopping.value ? '全自动改编正在停止' : '停止全自动改编'" aria-label="停止全自动改编" :disabled="duanjuAuto.stopping.value" @click="stop"><JcIcon name="stop" /></button>
+            <button v-if="!sending" class="send-button" :title="sendInFlight ? '正在落盘本轮内容…' : attachmentImportsPending ? '正在本地处理附件…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || attachmentImportsPending > 0 || attachmentImportFailures.length > 0 || !composerHasPayload" @click="send()"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
         <div
@@ -5867,6 +5880,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 0; order: -1; flex: 1; scrollbar-width: none; }
 .memory-selected-tools::-webkit-scrollbar { display: none; }
 .memory-selected-tools .memory-attachment-chip { height: 26px; flex: 0 0 auto; border: 0; border-radius: 7px; background: var(--olive-pale); color: var(--olive); }
+.memory-selected-tools .memory-duanju-chip > button.memory-attachment-name { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.memory-selected-tools .memory-duanju-chip.blocked, .memory-selected-tools .memory-duanju-chip.stopped { background: color-mix(in srgb, var(--jc-error) 12%, transparent); color: var(--jc-error); }
 .memory-round-nav { position: static; margin-left: auto; display: inline-flex; align-items: center; gap: 3px; padding: 1px 4px; flex: 0 0 auto; border-radius: 8px; background: transparent; color: var(--ink3); font-size: 12px; white-space: nowrap; }
 .memory-round-nav button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
 .memory-round-nav button:hover { background: color-mix(in srgb, var(--olive) 9%, transparent); color: var(--olive); }

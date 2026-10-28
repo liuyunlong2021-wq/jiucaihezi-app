@@ -40,10 +40,14 @@ export async function attachWikiRuntime(rec, directory = process.env.DSH_BUNDLED
     apply(ctx) {
       resetWikiReads(agent)
       ctx.on?.('fs/observed', (target, observation, exec) => recordWikiRead(agent, target, observation, exec))
-      let pipelineRequested = false, checkpointSeen = false, failed = false, nudges = 0, progress = ''
+      let pipelineRequested = false, checkpointSeen = false, failed = false, nudges = 0, progress = '', hostDriven = false
       ctx.on?.('session/event', (session, event) => {
         if (session !== agent.session) return
-        if (event.type === 'user/message' && event.data.source.kind === 'user') { resetWikiReads(agent); pipelineRequested = false; checkpointSeen = false; failed = false; nudges = 0 }
+        if (event.type === 'user/message' && event.data.source.kind === 'user') {
+          resetWikiReads(agent); pipelineRequested = false; checkpointSeen = false; failed = false; nudges = 0
+          // 全自动改编由宿主逐步发指令，模型只做指令里的一步；不再催促它继续后面的阶段。
+          hostDriven = (event.data.content || []).some(block => block.type === 'text' && /【全自动改编·/.test(block.text))
+        }
         if (event.type === 'tool/call') {
           let args
           try { args = JSON.parse(event.data.arguments) } catch { return }
@@ -55,7 +59,7 @@ export async function attachWikiRuntime(rec, directory = process.env.DSH_BUNDLED
       })
       ctx.on?.('agent/turn-stopping', ({ signal }) => {
         const route = scopes.get(agent)?.route
-        if (signal.aborted || !pipelineRequested || failed || !['manju', 'short-drama'].includes(route)) return
+        if (signal.aborted || hostDriven || !pipelineRequested || failed || !['manju', 'short-drama'].includes(route)) return
         const shortDrama = route === 'short-drama'
         const state = checkpointSeen ? (shortDrama ? adaptationStateFor(agent) : pipelineStateFor(agent)) : undefined
         const skill = shortDrama ? 'jc-duanju-pipeline' : 'jc-manju-pipeline'

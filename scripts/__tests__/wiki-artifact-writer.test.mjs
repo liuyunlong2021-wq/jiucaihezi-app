@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
+import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead, dialogueSeconds, unitSeconds, planEventEpisodes, TIME_UNITS, TIER_FACTORS } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
 function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const files = new Map()
@@ -607,11 +607,11 @@ test('long pasted source is sliced verbatim from the current turn, never from mo
 })
 
 
-test('all 45 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
+test('all 48 artifact contracts have explicit routes and every allowed kind saves with its restricted writer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-route-artifacts-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
-  assert.equal(Object.keys(contract.types).length, 45)
+  assert.equal(Object.keys(contract.types).length, 48)
   const counts = { manju: 0, 'short-drama': 0, novel: 0 }
   for (const [kind, template] of Object.entries(contract.types)) {
     assert.ok(Array.isArray(template.production_routes) && template.production_routes.length)
@@ -624,7 +624,7 @@ test('all 45 artifact contracts have explicit routes and every allowed kind save
       }
       counts[route]++
       const args = { artifact_kind: kind, content: '# 正式产物\n\n回读验证正文。' }
-      if (template.entity) args.entity_name = '角色甲'
+      if (template.entity) args.entity_name = kind === 'adaptation_event' ? 'E01_角色甲登场' : '角色甲'
       if (template.episode) args.episode_number = 1
       if (template.model) args.video_model = template.model[0]
       if (template.path.includes('{segment}')) args.segment = '001'
@@ -643,6 +643,26 @@ test('all 45 artifact contracts have explicit routes and every allowed kind save
           ? { segments: [{ source_path: '原文.md', chapter_heading: '第一章 原文', start_line: 2, end_line: 2 }] }
           : { stage: 'source', source_paths: ['原文.md'], outputs: [] })
       }
+      if (route === 'short-drama' && kind === 'adaptation_annotation') {
+        // 标注须有本批章节（source 进度）和已存在的事件文档；保存后程序组装分集剧本。
+        const cwd = exec.agent.session.header.cwd
+        files.set(join(cwd, '原文.md'), { content: '第一章 原文\n这是当前章完整的原文内容。\n', version: 1 })
+        await tool.execute({ artifact_kind: 'adaptation_checkpoint', content: JSON.stringify({ stage: 'source', source_paths: ['原文.md'], outputs: [] }) }, exec)
+        await tool.execute({ artifact_kind: 'adaptation_event', entity_name: 'E01_原文事件', content: '# 原文事件' }, exec)
+        const at = { chapter_heading: '第一章 原文', line: 2 }
+        args.entity_name = '第001-001章'
+        args.content = JSON.stringify({ rhythm: { name: '标准剧情', min: 75, target: 90, max: 120 }, events: [{ event: 'E01_原文事件', start: at, end: at, rounds: [{ ...at, desc: '一幕', result: '收束', units: { 停顿: 1 } }], skip: [] }] })
+      }
+      if (route === 'short-drama' && kind === 'episode_source_script') {
+        // 短剧的分集剧本只能由程序从已保存的切分生成。
+        const cwd = exec.agent.session.header.cwd, path = join(cwd, '原文.md')
+        files.set(path, { content: '第一章 原文\n这是当前章完整的原文内容，包含人物衣服五官与实际行动。', version: 1 })
+        sourceAgent.session = exec.agent.session
+        resetWikiReads(sourceAgent)
+        recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
+        await tool.execute({ artifact_kind: 'adaptation_cut', episode_number: 1, content: JSON.stringify({ segments: [{ source_path: '原文.md', chapter_heading: '第一章 原文', start_line: 2, end_line: 2 }] }) }, exec)
+        args.content = JSON.stringify({ from_cut: 1 })
+      }
       if (template.mode === 'source_selection') {
         const text = '这是当前用户明确交付的完整原文材料，用于归档回读和索引验证。'
         setWikiSourceContent(sourceAgent, [{ type: 'text', text }])
@@ -655,12 +675,17 @@ test('all 45 artifact contracts have explicit routes and every allowed kind save
           args.user_confirmed = true
         }
       }
+      if (kind === 'adaptation_card') {
+        // 切分卡只能由程序生成。
+        await assert.rejects(tool.execute(args, exec), /程序生成/)
+        continue
+      }
       const result = await tool.execute(args, exec)
       assert.equal(result.status, 'saved', `${route}/${kind}`)
       assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
     }
   }
-  assert.deepEqual(counts, { manju: 27, 'short-drama': 16, novel: 16 })
+  assert.deepEqual(counts, { manju: 27, 'short-drama': 20, novel: 16 })
 })
 
 test('source links use document-relative targets and summaries contain only readable labels', async t => {
@@ -754,4 +779,235 @@ test('short-drama saves the episode plan as 分集规划 but keeps an existing �
   old.files.set(join(root, 'old/wiki/改编方案/逐章规划.md'), { content: '# 旧规划', version: 2 })
   const kept = await old.tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 修订' }, old.exec)
   assert.equal(kept.path, 'wiki/改编方案/逐章规划.md')
+})
+
+test('short-drama event docs are numbered and episode scripts are generated only from verified cuts', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-event-script-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'short-drama' })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  await assert.rejects(tool.execute({ artifact_kind: 'adaptation_event', entity_name: '噗叽偷食被收服', content: '# 事件' }, exec), /E\+数字_|E数字_|序号/)
+  const event = await tool.execute({ artifact_kind: 'adaptation_event', entity_name: 'E03_噗叽偷食被收服', content: '# 噗叽偷食被收服' }, exec)
+  assert.equal(event.path, 'wiki/改编方案/事件/E03_噗叽偷食被收服.md')
+  const path = join(root, '小说.md')
+  const lines = ['第一章 树洞', '食物不见了，地上有细小的爪印。', '这是一大段关于种子的设定介绍。', '“谁偷了我的饭？”李长青握紧木棍。']
+  files.set(path, { content: lines.join('\n') + '\n', version: 1 })
+  recordWikiRead(sourceAgent, { targetKey: path }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
+  await tool.execute({ artifact_kind: 'adaptation_cut', episode_number: 1, content: JSON.stringify({ segments: [
+    { source_path: '小说.md', chapter_heading: '第一章 树洞', start_line: 2, end_line: 2 },
+    { source_path: '小说.md', chapter_heading: '第一章 树洞', start_line: 4, end_line: 4 }] }) }, exec)
+  const script = await tool.execute({ artifact_kind: 'episode_source_script', episode_number: 1, content: JSON.stringify({ from_cut: 1 }) }, exec)
+  assert.equal(script.path, 'wiki/项目资料/分集剧本/第1集分集剧本.md')
+  const body = files.get(join(root, script.path)).content
+  assert.ok(body.includes(lines[1]) && body.includes(lines[3]))
+  assert.ok(!body.includes(lines[2]), '删掉的行不出现')
+  assert.doesNotMatch(body, /出处|<!--|jc_adaptation_cut/, '正文只有原文')
+  await assert.rejects(tool.execute({ artifact_kind: 'episode_source_script', episode_number: 1, content: '# 模型自己写的正文' }, exec), /from_cut/)
+  await assert.rejects(tool.execute({ artifact_kind: 'episode_source_script', episode_number: 2, content: JSON.stringify({ from_cut: 1 }) }, exec), /集号/)
+  files.set(path, { content: lines.join('\n').replace('爪印', '脚印') + '\n', version: 2 })
+  await assert.rejects(tool.execute({ artifact_kind: 'episode_source_script', episode_number: 1, content: JSON.stringify({ from_cut: 1 }) }, exec), /已变化/)
+})
+
+// ---- 时间账：回合标注、按时间切集、切分卡、清单与逐集改编 ----
+test('time ledger: dialogue is 240 chars a minute plus half a second per line, actions are counted by unit', () => {
+  assert.equal(dialogueSeconds('他走了过去。'), 0)
+  assert.equal(dialogueSeconds('“你来了。”他说。“嗯。”'), (4 + 2) / 4 + 0.5 * 2)
+  assert.equal(dialogueSeconds('「快跑！」'), 3 / 4 + 0.5)
+  assert.equal(unitSeconds({ 快招: 3, 大招: 1 }), 3 * 2 + 15)
+  assert.equal(unitSeconds({ 快招: 3 }, 2), 12)
+  assert.throws(() => unitSeconds({ 乱来: 1 }), /单元/)
+  assert.deepEqual(TIME_UNITS, { 快招: 2, 攻防: 4, 技能: 8, 大招: 15, 走位: 3, 反应: 2, 全景: 3, 停顿: 3, 面板: 2.5, 闪回: 6 })
+  assert.deepEqual(TIER_FACTORS, { 压缩: 0.6, 如实: 1, 细写: 2, 决战: 3 })
+})
+
+test('episode count follows planned time; cuts land on round boundaries, prefer hooks, avoid fragments and honour overrides', () => {
+  const limits = { min: 90, target: 120, max: 150 }
+  const line = (round, planned) => ({ round, planned })
+  const covers = (plan, count) => plan[0].from === 0 && plan.at(-1).to === count - 1 && plan.every((item, index) => index === 0 || item.from === plan[index - 1].to + 1)
+  // 三个回合各60秒，共180：2集，第二个回合有钩子，切在它后面。
+  const even = [0, 0, 0, 1, 1, 1, 2, 2, 2].map(round => line(round, 20))
+  assert.deepEqual(planEventEpisodes(even, [{ hook: false }, { hook: true }, { hook: false }], limits).map(item => [item.from, item.to]), [[0, 5], [6, 8]])
+  // 第一个回合只有10秒且有钩子：切在它后面会得到碎片集，改为切在第二个回合后。
+  const fragment = [line(0, 10), ...Array(5).fill(line(1, 20)), ...Array(5).fill(line(2, 20))]
+  assert.deepEqual(planEventEpisodes(fragment, [{ hook: true }, { hook: false }, { hook: false }], limits).map(item => [item.from, item.to]), [[0, 5], [6, 10]])
+  // 一个回合计划600秒（12行×50秒）：回合内按行切开，每集不超过最长150秒，共5集。
+  const huge = Array(12).fill(line(0, 50))
+  const plan = planEventEpisodes(huge, [{ hook: false }], limits)
+  assert.equal(plan.length, 5)
+  assert.ok(covers(plan, 12) && plan.every(item => item.planned <= 150))
+  // 不足一集的事件就是一集。
+  assert.deepEqual(planEventEpisodes([line(0, 10), line(1, 30)], [{}, {}], limits).map(item => [item.from, item.to]), [[0, 1]])
+  // 用户指定集数：两个回合各100秒，要求4集。
+  const forced = [...Array(5).fill(line(0, 20)), ...Array(5).fill(line(1, 20))]
+  const four = planEventEpisodes(forced, [{}, {}], limits, 4)
+  assert.equal(four.length, 4)
+  assert.ok(covers(four, 10))
+})
+
+async function ledgerWorld(t) {
+  const novel = ['第1章 树洞', '甲站在树洞前，握紧木棍。', '这座森林的来历很长，作者写了很多设定。', '乙从树后窜出，偷走了饭。', '甲追出去。', '乙被逼到悬崖边。',
+    '第2章 悬崖', '乙跪地求饶。', '甲收下木棍，转身离去。', '第3章 余波', '风吹过山岗。']
+  const root = mkdtempSync(join(tmpdir(), 'jc-ledger-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'short-drama' })
+  files.set(join(root, '原文.md'), { content: novel.join('\n') + '\n', version: 1 })
+  const save = (artifact_kind, content, extra = {}) => tool.execute({ artifact_kind, content: typeof content === 'string' ? content : JSON.stringify(content), ...extra }, exec)
+  await save('adaptation_checkpoint', { stage: 'source', source_paths: ['原文.md'], outputs: [] })
+  await save('adaptation_event', '# E01', { entity_name: 'E01_甲追乙' })
+  const at = (chapter_heading, line) => ({ chapter_heading, line })
+  const event = (extra = {}) => ({ event: 'E01_甲追乙', start: at('第1章 树洞', 2), end: at('第2章 悬崖', 9),
+    rounds: [
+      { ...at('第1章 树洞', 2), desc: '甲守在树洞前', result: '局势平稳', units: { 大招: 2 } },
+      { ...at('第1章 树洞', 4), desc: '乙偷饭被追到悬崖', result: '甲占上风', units: { 大招: 3 }, tier: '细写', why: '主角首次追击，关系到后文', hook: true, peak: true },
+      { ...at('第2章 悬崖', 8), desc: '乙求饶', result: '收束', units: { 大招: 2 } }],
+    skip: [{ chapter_heading: '第1章 树洞', start_line: 3, end_line: 3, reason: '世界观设定，已写进世界规则' }], ...extra })
+  const read = path => files.get(join(root, path))?.content
+  return { root, tool, exec, files, save, at, event, read,
+    rhythm: { name: '快节奏爽剧', min: 60, target: 75, max: 90 },
+    annotate: (content, entity_name = '第001-003章') => save('adaptation_annotation', content, { entity_name }),
+    script: n => read(`wiki/项目资料/分集剧本/第${n}集分集剧本.md`),
+    body: n => read(`wiki/项目资料/分集剧本/第${n}集分集剧本.md`)?.replace(/^---\n[\s\S]*?\n---\n/, ''),
+    manifest: () => JSON.parse(read('wiki/改编方案/分集清单.json')) }
+}
+
+test('short-drama time ledger: rounds are validated, episodes are planned by time, cut cards, the manifest, gaps and warnings are written', async t => {
+  const w = await ledgerWorld(t)
+  const { annotate, event, rhythm, at } = w
+  const rounds = event().rounds
+  // 旧格式、节奏、回合的校验。
+  await assert.rejects(annotate({ rhythm, events: [{ ...event(), beats: [{ ...at('第1章 树洞', 2), weight: 1 }] }] }), /回合|rounds/)
+  await assert.rejects(annotate({ rhythm, events: [{ ...event(), delete: [] }] }), /回合|rounds/)
+  await assert.rejects(annotate({ events: [event()] }), /rhythm/)
+  await assert.rejects(annotate({ rhythm: { ...rhythm, max: 200 }, events: [event()] }), /180/)
+  await assert.rejects(annotate({ rhythm, events: [event({ rounds: [{ ...rounds[0], line: 4 }, ...rounds.slice(1)] })] }), /第一个回合/)
+  await assert.rejects(annotate({ rhythm, events: [event({ rounds: [{ ...rounds[0], units: { 乱来: 1 } }, ...rounds.slice(1)] })] }), /单元/)
+  await assert.rejects(annotate({ rhythm, events: [event({ rounds: [rounds[0], { ...rounds[1], why: undefined }, rounds[2]] })] }), /理由|why/)
+  await assert.rejects(annotate({ rhythm, events: [event({ skip: [{ chapter_heading: '第1章 树洞', start_line: 3, end_line: 3 }] })] }), /理由|reason/)
+  await assert.rejects(annotate({ rhythm, events: [event({ rounds: [{ ...rounds[0], units: { 大招: 13 } }, ...rounds.slice(1)] })] }), /180[\s\S]*拆|多次局势变化/)
+  // 道具汇总档会被提示。
+  w.files.set(join(w.root, 'wiki/项目资料/原作/道具/逆齿造物汇总.md'), { content: '# 汇总\n## 1\n## 2\n## 3\n## 4\n', version: 1 })
+  // 通过：一个事件，细写回合90秒，共150秒；快节奏爽剧每集最长90秒，只有3集装得下。
+  const saved = await annotate({ rhythm, planned_through: '第3章 余波', events: [event()] })
+  assert.match(saved.assembled, /共3集/)
+  assert.equal(w.body(1), '甲站在树洞前，握紧木棍。\n')
+  assert.equal(w.body(2), '乙从树后窜出，偷走了饭。\n甲追出去。\n乙被逼到悬崖边。\n')
+  assert.equal(w.body(3), '乙跪地求饶。\n甲收下木棍，转身离去。\n')
+  let manifest = w.manifest()
+  assert.equal(manifest.version, 2)
+  assert.deepEqual(manifest.rhythm, { ...rhythm, pace: 1 })
+  assert.deepEqual(manifest.events[0].plan.map(item => [item.episode, item.planned_s, item.natural_s]), [[1, 30, 30], [2, 90, 45], [3, 30, 30]])
+  assert.deepEqual(manifest.heavy.map(item => [item.event, item.tier, item.why]), [['E01_甲追乙', '细写', '主角首次追击，关系到后文']])
+  assert.deepEqual(manifest.gaps.map(item => [item.chapter_heading, item.start_line, item.end_line]), [['第3章 余波', 11, 11]])
+  assert.ok(manifest.warnings.some(item => /逆齿造物汇总/.test(item) && /汇总档/.test(item)))
+  const card = w.read('wiki/改编方案/切分卡/第002集.md')
+  assert.match(card, /E01_甲追乙/)
+  assert.match(card, /第2\/3集/)
+  assert.match(card, /计划[^\n]*90/)
+  assert.match(card, /细写/)
+  assert.match(card, /## 峰值[\s\S]*乙偷饭被追到悬崖/)
+  assert.match(card, /## 结尾钩子[\s\S]*甲占上风/)
+  await assert.rejects(w.save('adaptation_card', '# 自己写', { episode_number: 2 }), /程序生成/)
+  // 长回合经 single 放行，但单行无法再切开时给出超时长警告。
+  await w.save('adaptation_event', '# E02', { entity_name: 'E02_余波' })
+  const e02 = { event: 'E02_余波', start: at('第3章 余波', 11), end: at('第3章 余波', 11), skip: [],
+    rounds: [{ ...at('第3章 余波', 11), desc: '长时间追逐', result: '收束', units: { 大招: 13 }, single: true, why: '一场连续的长时间战斗' }] }
+  await annotate({ events: [event(), e02] }, '第003-003章')
+  assert.ok(w.manifest().warnings.some(item => /E02_余波/.test(item) && /195/.test(item) && /90/.test(item)))
+  // 整体节奏：pace 加倍后单元时间加倍，集数变多。
+  await annotate({ replan: { pace: 2 } }, '调整')
+  manifest = w.manifest()
+  assert.equal(manifest.rhythm.pace, 2)
+  assert.ok(manifest.events[0].count > 3)
+  // 重切：E01 指定2集，其后各集前移，多出来的旧集进入 stale。
+  await annotate({ recut: { event: 'E01_甲追乙', episodes: 2 } }, '调整')
+  manifest = w.manifest()
+  assert.deepEqual(manifest.events[0].episodes, [1, 2])
+  assert.ok(manifest.stale.length > 0)
+  assert.ok((w.body(1) + w.body(2)).includes('乙跪地求饶') && (w.body(1) + w.body(2)).includes('甲站在树洞前'))
+})
+
+test('short-drama adapted scripts carry scene times and sources; the program checks range, dialogue time and the platform cap', async t => {
+  const w = await ledgerWorld(t)
+  await w.annotate({ rhythm: w.rhythm, planned_through: '第3章 余波', events: [w.event()] })
+  const scene = (extra = {}) => ({ title: '场1', role: 'main', seconds: 40, sources: [{ chapter_heading: '第1章 树洞', start_line: 4, end_line: 6 }],
+    text: '乙从树后窜出，抱走饭盒。\n“站住！”甲怒喝。\n乙一路狂奔，被逼到悬崖边。', ...extra })
+  const adapt = (adapted, episode_number = 2) => w.save('episode_source_script', { adapted }, { episode_number })
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene()] }, 9), /切分卡|没有/)
+  await assert.rejects(adapt({ strategy: '', scenes: [scene()] }), /strategy|策略/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [] }), /scenes|场/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ sources: [] })] }), /出处/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ sources: [{ chapter_heading: '第1章 树洞', start_line: 2, end_line: 3 }] })] }), /本集原文范围/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ seconds: 1, text: `“${'这是一句很长很长的台词。'.repeat(4)}”` })] }), /对白/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ seconds: 200 })] }), /180/)
+  await assert.rejects(adapt({ strategy: '冷开场', scenes: [scene({ role: 'cold', seconds: 30, sources: [{ chapter_heading: '第2章 悬崖', start_line: 8, end_line: 8 }] }), scene({ seconds: 40 })] }), /25%/)
+  const saved = await adapt({ strategy: '顺叙影视化', scenes: [scene()] })
+  assert.equal(saved.status, 'saved_with_warnings')
+  assert.ok(saved.warnings.some(item => /60[–-]90/.test(item)), '总时长低于本风格区间')
+  assert.ok(saved.warnings.some(item => /计划/.test(item)), '与切分卡计划时长偏差过大')
+  const text = w.script(2)
+  assert.match(text, /^---\nevent: "\[\[wiki\/改编方案\/事件\/E01_甲追乙\|E01_甲追乙\]\]"\nstrategy: 顺叙影视化\nseconds: 40\n/)
+  assert.match(text, /sources:\n  - "第1章 树洞 4–6行"\n---\n/)
+  assert.match(text, /【场1 约40秒｜对白1秒＋其余39秒】\n乙从树后窜出，抱走饭盒。/)
+  assert.doesNotMatch(text, /甲追出去。/)
+  assert.deepEqual(w.manifest().adapted, [2])
+  // 冷开场：峰值片段可来自本集之外，占比不超过25%。
+  await adapt({ strategy: '冷开场', scenes: [scene({ role: 'cold', title: '冷开场', seconds: 10, sources: [{ chapter_heading: '第2章 悬崖', start_line: 8, end_line: 8 }], text: '乙跪在崖边，哭喊求饶。' }), scene({ seconds: 60 })] })
+  assert.match(w.script(2), /strategy: 冷开场/)
+  assert.match(w.script(2), /【冷开场 约10秒｜/)
+  assert.match(w.script(2), /  - "第2章 悬崖 8–8行"/)
+  // 标注不变时重新保存不覆盖已改编的集；重切会把受影响的集恢复为原文直出并清掉改编记录。
+  await w.annotate({ events: [w.event()] })
+  assert.match(w.script(2), /strategy: 冷开场/)
+  await w.annotate({ recut: { event: 'E01_甲追乙', episodes: 2 } }, '调整')
+  assert.doesNotMatch(w.script(2), /strategy:/)
+  assert.deepEqual(w.manifest().adapted, [])
+})
+
+test('short-drama episode scripts start with a header of links (event, characters, scenes, props) found in the text, and the raw body is original text only', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-episode-header-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root, { route: 'short-drama' })
+  const lines = ['第1章 树洞', '甲兄站在树洞前，手里握着木棍。', '乙偷吃了饭，转身就跑。', '丙远远地看着。', '风吹过山岗。']
+  files.set(join(root, '原文.md'), { content: lines.join('\n') + '\n', version: 1 })
+  files.set(join(root, 'wiki/index.md'), { content: '# Wiki', version: 1 })
+  const asset = (path, text) => files.set(join(root, `wiki/项目资料/原作/${path}.md`), { content: text, version: 1 })
+  asset('人物小传/甲', '# 甲\n\n## 身份与基本信息\n- **姓名/称谓**：甲 / 甲兄\n- **身份**：猎人\n')
+  asset('人物小传/乙', '# 乙\n\n- **姓名**：乙\n')
+  asset('人物小传/丙', '# 丙\n\n- **姓名**：丙\n')
+  asset('场景/树洞庇护所', '# 树洞庇护所\n\n## 陈设\n- 木桌\n')
+  asset('道具/木棍', '# 木棍\n')
+  asset('道具/无关道具', '# 无关道具\n')
+  const save = (artifact_kind, content, extra = {}) => tool.execute({ artifact_kind, content: typeof content === 'string' ? content : JSON.stringify(content), ...extra }, exec)
+  await save('adaptation_checkpoint', { stage: 'source', source_paths: ['原文.md'], outputs: [] })
+  const link = (category, name) => `[[wiki/项目资料/原作/${category}/${name}|${name}]]`
+  await save('adaptation_event', `# E01\n\n## 涉及人物/场景/道具\n- ${[link('人物小传', '甲'), link('人物小传', '乙'), link('人物小传', '丙'), link('道具', '木棍'), link('道具', '无关道具')].join('、')}、[[wiki/项目资料/原作/场景/树洞庇护所|树洞]]\n`, { entity_name: 'E01_甲追乙' })
+  await save('adaptation_event', '# E02\n', { entity_name: 'E02_乙逃跑' })
+  await save('adaptation_event', '# E03\n', { entity_name: 'E03_空镜' })
+  const at = line => ({ chapter_heading: '第1章 树洞', line })
+  const rhythm = { name: '标准剧情', min: 75, target: 90, max: 120 }
+  const rounds = (start, end) => [{ ...at(start), desc: '一幕', result: '收束', units: { 停顿: 1 } }]
+  await save('adaptation_annotation', { rhythm, events: [
+    { event: 'E01_甲追乙', start: at(2), end: at(3), rounds: rounds(2, 3), skip: [] },
+    { event: 'E02_乙逃跑', start: at(3), end: at(4), rounds: rounds(3, 4), skip: [] },
+    { event: 'E03_空镜', start: at(5), end: at(5), rounds: rounds(5, 5), skip: [] }] }, { entity_name: '第001-001章' })
+  const read = n => files.get(join(root, `wiki/项目资料/分集剧本/第${n}集分集剧本.md`))?.content
+  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(read(1))
+  assert.ok(match, '文件头存在')
+  const [, header, body] = match
+  assert.equal(body, `${lines[1]}\n${lines[2]}\n`, '正文只有原文')
+  assert.match(header, /^event: "\[\[wiki\/改编方案\/事件\/E01_甲追乙\|E01_甲追乙\]\]"$/m)
+  assert.match(header, /characters:\n  - "\[\[wiki\/项目资料\/原作\/人物小传\/甲\|甲\]\]"\n  - "\[\[wiki\/项目资料\/原作\/人物小传\/乙\|乙\]\]"/, '别名“甲兄”也算出场，按首次出现排序')
+  // 事件文档里的链接标签（“树洞”）也算这个场景的叫法。
+  assert.match(header, /scenes:\n  - "\[\[wiki\/项目资料\/原作\/场景\/树洞庇护所\|树洞庇护所\]\]"/)
+  assert.match(header, /props:\n  - "\[\[wiki\/项目资料\/原作\/道具\/木棍\|木棍\]\]"/)
+  assert.doesNotMatch(header, /丙/)
+  assert.doesNotMatch(header, /无关道具/)
+  // 事件文档没有链接时，按名字在全库资产里查找。
+  assert.match(read(2), /event: "\[\[wiki\/改编方案\/事件\/E02_乙逃跑\|E02_乙逃跑\]\]"/)
+  assert.match(read(2), /\[\[wiki\/项目资料\/原作\/人物小传\/乙\|乙\]\]/)
+  assert.match(read(2), /\[\[wiki\/项目资料\/原作\/人物小传\/丙\|丙\]\]/)
+  assert.doesNotMatch(read(2), /甲/)
+  // 本集没有任何资产出现时只保留所属事件。
+  assert.match(read(3), /^---\nevent: "\[\[wiki\/改编方案\/事件\/E03_空镜\|E03_空镜\]\]"\n---\n风吹过山岗。\n$/)
 })
