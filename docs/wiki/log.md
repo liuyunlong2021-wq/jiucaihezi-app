@@ -3159,3 +3159,5 @@
 ## 2026-10-28 · iOS Release 签名包
 
 - 修复 Xcode 27 Swift 插件入口 Release 可见性（swift-rs 局部 vendor 补丁），同步清理生成 plist 的旧加密声明。正式 2.3.1 (2.3.1.1) IPA 导出、资源审计、Distribution 签名验证通过；合同 11/11、桌面 Cargo 检查通过。上传/安装/外审未做，详情见 Mobile 控制器完善计划的 Release 回执。
+
+- 2026-10-28 12:53：控制器 `2.3.1 (2.3.1.1)` 上传 App Store Connect 成功，Apple processing；源码 `a85a70ed`。内部安装、加密声明、外测审核与邀请尚未完成。
