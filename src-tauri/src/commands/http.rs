@@ -204,6 +204,15 @@ fn is_binary_content_type(value: Option<&str>) -> bool {
         || content_type == "application/octet-stream"
 }
 
+fn should_direct_r2_reference_upload(request: &HttpRequest) -> bool {
+    request.method.as_deref().is_some_and(|method| method.eq_ignore_ascii_case("PUT"))
+        && tauri::Url::parse(&request.url).ok().is_some_and(|url| {
+            url.scheme() == "https"
+                && url.host_str() == Some("d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com")
+                && url.path().starts_with("/jiucaihezi-media-test/creation-temp/")
+        })
+}
+
 #[tauri::command]
 pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let mut client_builder = reqwest::Client::builder()
@@ -212,6 +221,10 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(30),
     ));
+    // 本机系统代理会中断 R2 PUT；同素材直连已实测成功，仅绕过参考素材上传代理。
+    if should_direct_r2_reference_upload(&request) {
+        client_builder = client_builder.no_proxy();
+    }
     if request.deny_redirects.unwrap_or(false) {
         client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
     }
@@ -258,7 +271,7 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("HTTP 请求失败: {}", e.without_url()))?;
+        .map_err(|e| format!("HTTP 请求失败: {}", download_error_detail(e)))?;
 
     let status = resp.status().as_u16();
     let mut headers = HashMap::new();
@@ -776,6 +789,35 @@ mod tests {
             "/api/creations/upload-url",
             Some(HashMap::from([("X-JC-Session".into(), "browser-session".into())])),
         )));
+    }
+
+    #[test]
+    fn r2_reference_upload_direct_connection_is_scoped() {
+        let make_request = |url: &str, method: &str| HttpRequest {
+            url: url.into(), method: Some(method.into()), headers: None,
+            body: None, body_base64: None, timeout_secs: None, deny_redirects: None,
+        };
+        let url = "https://d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com/jiucaihezi-media-test/creation-temp/17/test.png";
+        assert!(should_direct_r2_reference_upload(&make_request(url, "PUT")));
+        assert!(!should_direct_r2_reference_upload(&make_request(url, "GET")));
+        assert!(!should_direct_r2_reference_upload(&make_request(&url.replace("https:", "http:"), "PUT")));
+        assert!(!should_direct_r2_reference_upload(&make_request(&url.replace(".com/", ".com.evil.test/"), "PUT")));
+        assert!(!should_direct_r2_reference_upload(&make_request("https://api.jiucaihezi.studio/v1/videos", "POST")));
+    }
+
+    #[tokio::test]
+    async fn native_http_error_keeps_cause_without_signed_url() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let error = http_request(HttpRequest {
+            url: format!("http://{address}/upload?X-Amz-Signature=private-signature"),
+            method: Some("PUT".into()), headers: None, body: None,
+            body_base64: None, timeout_secs: Some(2), deny_redirects: None,
+        }).await.err().expect("closed port must fail");
+        assert!(error.contains("HTTP 请求失败"));
+        assert!(error.contains("Connection refused") || error.contains("timed out") || error.contains("连接"), "{error}");
+        assert!(!error.contains("private-signature"), "{error}");
     }
 
     #[tokio::test]

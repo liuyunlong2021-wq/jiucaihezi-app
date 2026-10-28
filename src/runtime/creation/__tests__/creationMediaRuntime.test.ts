@@ -1896,6 +1896,27 @@ test('R2 grant validation and failure never submit or fall back to OSS', { concu
   } finally { globalThis.fetch = previous; await restore() }
 })
 
+test('R2 transport failures identify grant versus upload and preserve cancellation', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const previous = globalThis.fetch
+  const { uploadCreationAsset } = await import('@/api/media-generation')
+  try {
+    for (const failure of ['grant', 'upload']) {
+      globalThis.fetch = async (input) => {
+        if (String(input).endsWith('/api/creations/r2/upload-url')) {
+          if (failure === 'grant') throw new Error('connection reset')
+          return Response.json({ method: 'PUT', headers: { 'Content-Type': 'image/png' }, ...r2Fixture() })
+        }
+        throw new Error('connection reset')
+      }
+      await assert.rejects(uploadCreationAsset('data:image/png;base64,AA=='),
+        failure === 'grant' ? /申请 R2 上传地址.*connection reset/ : /R2 参考素材上传.*connection reset/)
+    }
+    globalThis.fetch = async () => { throw new DOMException('cancelled', 'AbortError') }
+    await assert.rejects(uploadCreationAsset('data:image/png;base64,AA=='), { name: 'AbortError' })
+  } finally { globalThis.fetch = previous; await restore() }
+})
+
 test('one failed R2 reference prevents a multi-reference generation', { concurrency: false }, async () => {
   const restore = await installGatewaySession()
   const previous = globalThis.fetch

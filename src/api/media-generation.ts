@@ -459,6 +459,7 @@ export async function uploadCreationAsset(value?: string, externalSignal?: Abort
   if (blob.size < 1 || blob.size > 20 * 1024 * 1024) throw new Error('参考素材需大于 0 且不超过 20 MB')
   const headers = buildGatewayHeaders({})
   const { signal, clear } = createTimeoutSignal(120, externalSignal)
+  let stage = '申请 R2 上传地址'
   try {
     const authorization = await safeFetch(`${getApiBase()}/api/creations/r2/upload-url`, {
       method: 'POST',
@@ -472,12 +473,17 @@ export async function uploadCreationAsset(value?: string, externalSignal?: Abort
     }
     if (signal?.aborted) throw abortError()
     const grant = validateCreationR2Grant(await authorization.json(), blob.type || 'application/octet-stream')
+    stage = 'R2 参考素材上传'
     const uploaded = await safeFetch(grant.uploadUrl, {
       method: 'PUT', headers: grant.headers, body: blob, signal, credentials: 'omit', redirect: 'error',
     })
     if (!uploaded.ok) throw new Error(`参考素材直传 R2 失败 (${uploaded.status})`)
     if (signal?.aborted) throw abortError()
     return grant.assetUrl
+  } catch (error) {
+    if (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError') throw error
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`${stage}失败：${detail}`)
   } finally {
     clear()
   }
