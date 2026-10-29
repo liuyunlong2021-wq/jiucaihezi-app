@@ -74,6 +74,10 @@ test('each batch is reading rounds, then adaptation rounds of adaptSize episodes
   assert.match(w.sent[2], /^【全自动改编·改编】第1、2、3集/)
   assert.match(w.sent[3], /^【全自动改编·改编】第4集/)
   assert.match(w.sent[2], /切分卡[\s\S]*adapted/)
+  // 短剧路线的改编交付物是工程剧本：漫剧只读它，指令不能退回写分集剧本。
+  assert.match(w.sent[2], /wiki_save_artifact\(engineering_script\)/)
+  assert.match(w.sent[2], /剧本\/工程剧本\/第N集工程剧本\.md/)
+  assert.doesNotMatch(w.sent[2], /wiki_save_artifact\(episode_source_script\)/)
   assert.match(w.sent[4], /分集清单[\s\S]*造型表[\s\S]*分集梗概/)
   assert.doesNotMatch(w.sent.join('\n'), /节拍|风格推荐|建议分集|切集】/)
 })
