@@ -171,7 +171,7 @@ interface Step { label: string; text: string; done: () => Promise<boolean> }
 function adaptText(label: '样集' | '改编', episodes: number[]) {
   const list = episodes.join('、')
   const note = label === '样集' ? '这是样集：先改这几集，用户会抽检节奏后再批量。' : ''
-  return `【全自动改编·${label}】第${list}集：按 jc-duanju-xiezuo 的“按时间改编”执行。${note}先读每集的切分卡（改编方案/切分卡/第NNN集.md）、本集原文（项目资料/分集剧本）和出场资产，按切分卡里的时间预算删减、压缩对白、影视化，选改编策略（第1集优先考虑冷开场），逐场写 seconds 和 sources；用 wiki_save_artifact(episode_source_script) 以 {"adapted":{…}} 保存，按回执里的警告修正；然后结束本回合。`
+  return `【全自动改编·${label}】第${list}集：按 jc-gongchengjuben 的“短剧路线：按时间改编”执行。${note}先读每集的切分卡（改编方案/切分卡/第NNN集.md）、本集原文（项目资料/分集剧本）和出场资产，按切分卡里的时间预算删减、压缩对白、影视化，选改编策略（第1集优先考虑冷开场），逐场写 seconds 和 sources；用 wiki_save_artifact(episode_source_script) 以 {"adapted":{…}} 保存，按回执里的警告修正；然后结束本回合。`
 }
 
 async function stepFor(state: DuanjuRunState, deps: DuanjuAutoDeps, manifest: DuanjuManifest | undefined): Promise<Step | undefined> {

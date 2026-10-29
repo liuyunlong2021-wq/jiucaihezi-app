@@ -140,42 +140,6 @@
     }
   },
   {
-    "id": "jc-duanju-xiezuo",
-    "name": "jc-duanju-xiezuo",
-    "displayName": "jc-duanju-xiezuo",
-    "description": "短剧改编的第三步（默认）：按切分卡的时间预算逐集改编——删减没有冲突和爽点的内容、压缩对白、影视化、选开场与结构策略、对决战细写，每场戏标时间和出处，保存后由程序校验范围、对白时间和总时长；也包含用户明确要求时的完整说明书剧本写法（对照切分、总纲和分集规划，写清角色、场景、道具三要素与逐招动作）。",
-    "triggers": [],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/动作与法术戏写法.md",
-      "references/场景与对白打磨.md",
-      "references/独立写作旧规则.md"
-    ],
-    "package": {
-      "schemaVersion": 1,
-      "entry": "SKILL.md",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "kind": "instruction"
-        },
-        {
-          "path": "references/动作与法术戏写法.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/场景与对白打磨.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/独立写作旧规则.md",
-          "kind": "reference"
-        }
-      ]
-    }
-  },
-  {
     "id": "jc-film-style",
     "name": "jc-film-style",
     "displayName": "jc-film-style",
@@ -236,7 +200,7 @@
     "id": "jc-gongchengjuben",
     "name": "jc-gongchengjuben",
     "displayName": "jc-gongchengjuben",
-    "description": "把文学剧本、分场文本或已改编稿逐集改成拍摄剧本（工程台本）：先体检本集资料（人物小传缺长相按角色设计补、场景缺空间与光按场景设计补、道具缺形制按道具设计补），再删掉不推动剧情的内容、压缩对白、把动作与打戏扩写到节拍级，最后完成导演设计（可见表演、景别运镜、空间连续、声画与逐镜节奏）。默认9:16竖屏、快节奏，一编号一连续镜头、一镜一核心节拍、最多一个说话角色，保留原台词和关键动作。一次只改编一集；只有灵感却要工程脚本时先由 jc-manju-brainstorm 补全内容；不替代完整文学剧本创作或模型专用提示词格式转换。",
+    "description": "唯一的改编与台本专家：把文学剧本、分场文本或原文切分改成工程分镜剧本。有切分卡时按时间预算逐集改编（删掉不推动剧情的内容、压缩对白、影视化、选改编策略、逐场标时间与出处，产物是分集剧本），没有切分卡时把剧本转成逐镜台本。两条路线共用同一套删减扩写与细度标准：开写前体检本集资料（人物小传缺长相按角色设计补、场景缺空间与光按场景设计补、道具缺形制按道具设计补），动作与打戏扩写到节拍级。默认9:16竖屏、快节奏，一编号一连续镜头、一镜一核心节拍、最多一个说话角色，保留原台词和关键动作。一次只改编一集；只有灵感却要工程脚本时先由 jc-manju-brainstorm 补全内容；不替代完整文学剧本创作或模型专用提示词格式转换。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -253,7 +217,9 @@
       "references/shot-density.md",
       "references/shot-visibility.md",
       "references/single-scene-cinematic.md",
-      "references/suspense-scenes.md"
+      "references/suspense-scenes.md",
+      "references/动作与法术戏写法.md",
+      "references/场景与对白打磨.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -313,6 +279,14 @@
         },
         {
           "path": "references/suspense-scenes.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/动作与法术戏写法.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/场景与对白打磨.md",
           "kind": "reference"
         }
       ]

@@ -8,6 +8,8 @@ test('production scopes are plain business allowlists with no executable router'
   assert.deepEqual(Object.keys(groups), ['manju', 'short-drama', 'novel'])
   assert.equal(groups.manju.length, 15)
   assert.equal(groups['short-drama'].length, 9)
+  assert.ok(groups['short-drama'].includes('jc-gongchengjuben'), '短剧改编与漫剧共用同一个改编技能')
+  assert.ok(!groups['short-drama'].includes('jc-duanju-xiezuo'), 'jc-duanju-xiezuo 已并入工程剧本')
   for (const name of ['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt']) assert.ok(groups['short-drama'].includes(name), name)
   assert.deepEqual(groups.novel, ['jc-novel'])
   for (const list of Object.values(groups)) {
@@ -177,20 +179,20 @@ test('costume looks keep the character silhouette anchors from the identity desi
 })
 
 test('short-drama episode writing carries scene and dialogue craft rules with an on-demand polish reference', () => {
-  const main = readFileSync('public/skills/jc-duanju-xiezuo/SKILL.md', 'utf8')
+  const main = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
   assert.match(main, /\[场景与对白打磨\]\(references\/场景与对白打磨\.md\)/)
   assert.match(main, /场景转向/)
   assert.match(main, /晚进早出/)
   assert.match(main, /台词字面与真实情绪不一致时/)
   assert.match(main, /影像顺序/)
   assert.match(main, /一行一个画面/)
-  const polish = readFileSync('public/skills/jc-duanju-xiezuo/references/场景与对白打磨.md', 'utf8')
+  const polish = readFileSync('public/skills/jc-gongchengjuben/references/场景与对白打磨.md', 'utf8')
   for (const rule of [/问答式/, /潜台词/, /说话方式/, /意识到/, /弱词/, /句尾/, /有名字的人物开口/, /只写看得见的/]) assert.match(polish, rule)
 })
 
 test('short-drama planning keeps user examples as examples and covers batching, review and deletion checks', () => {
   const read = path => readFileSync(`public/skills/${path}`, 'utf8')
-  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), xiezuo = read('jc-duanju-xiezuo/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md')
+  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), xiezuo = read('jc-gongchengjuben/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md')
   // 本我、自我、超我是可选的人物设计手法，放在参考文件，不作为必填项或写作必读。
   assert.doesNotMatch(cehua, /\*\*本我、超我、自我\*\*/)
   assert.doesNotMatch(xiezuo, /本我/)
@@ -214,7 +216,7 @@ test('short-drama planning keeps user examples as examples and covers batching, 
 
 test('short-drama default is deletion-only: one-pass annotation, program-assembled original-only scripts handed to manju', () => {
   const read = path => readFileSync(`public/skills/${path}`, 'utf8')
-  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md'), xiezuo = read('jc-duanju-xiezuo/SKILL.md'), ziliao = read('jc-xiangmuziliao/SKILL.md')
+  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md'), xiezuo = read('jc-gongchengjuben/SKILL.md'), ziliao = read('jc-xiangmuziliao/SKILL.md')
   // 项目总纲只给用户看：主题与事件摘要。
   assert.match(cehua, /主题[\s\S]*事件摘要/)
   assert.doesNotMatch(cehua, /卖点发动机|必要设定清单|大结构/)
@@ -300,7 +302,7 @@ test('工程剧本自带删减扩写：逐集作业、开写前体检资料、�
 })
 
 test('逐集改编把原文落成引擎可校验的分集剧本', () => {
-  const xiezuo = readFileSync('public/skills/jc-duanju-xiezuo/SKILL.md', 'utf8')
+  const xiezuo = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
   assert.match(xiezuo, /adapted[\s\S]*seconds[\s\S]*sources/)
   assert.match(xiezuo, /25%/)
   const pipeline = readFileSync('public/skills/jc-duanju-pipeline/SKILL.md', 'utf8')

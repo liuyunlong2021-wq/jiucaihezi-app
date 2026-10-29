@@ -153,7 +153,6 @@ test('App bundles only the remaining product Skills', () => {
     'jc-duanju-cehua',
     'jc-duanju-fenji',
     'jc-duanju-pipeline',
-    'jc-duanju-xiezuo',
     'jc-film-style',
     'jc-fuzhuang-prompt',
     'jc-gongchengjuben',
