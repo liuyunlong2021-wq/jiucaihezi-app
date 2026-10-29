@@ -292,3 +292,29 @@ test('regenerating a costume during review also redoes the looks built from it',
   assert.deepEqual(fusions[1].images, ['/p/t1.png', '/p/t4.png'], '用新服装图重新融合')
   assert.equal(look, '/p/t5.png')
 })
+
+test('failed assets are only resubmitted when a step explicitly asks, not on every checkpoint save', async () => {
+  const { deps, fs, tasks, submits } = fakeDeps(prompts)
+  await submitEpisodeAssets(wiki, checkpoint(), deps)
+  assert.equal(submits.length, 2)
+  tasks.set('t1', { status: 'failed', error: 'HTTP 500' })
+  tasks.set('t2', { status: 'failed', error: 'HTTP 500' })
+  // 闸门已把两项写成 failed
+  const path = `${wiki}/${ASSET_REGISTRY_PATH}`
+  const saved = JSON.parse(fs.get(path)!)
+  saved.assets['角色/莫甘娜'].status = 'failed'
+  saved.assets['场景/石道'].status = 'failed'
+  fs.set(path, JSON.stringify(saved))
+
+  // 文字流水线每存一次进度就会调一次：失败项不能在这里重提，否则适配器一坏就是打桩机
+  await submitEpisodeAssets(wiki, checkpoint(), deps, { retryFailed: false })
+  await submitEpisodeAssets(wiki, checkpoint(), deps, { retryFailed: false })
+  assert.equal(submits.length, 2, '进度保存不得反复重提失败资产')
+  assert.equal(registry(fs)['角色/莫甘娜'].status, 'failed', '也不该把失败状态改回 pending')
+
+  // 新一轮运行/闸门入口明确要求重试：每项给一次机会，attempts 重置
+  await submitEpisodeAssets(wiki, checkpoint(), deps, { retryFailed: true })
+  assert.equal(submits.length, 4)
+  assert.equal(registry(fs)['角色/莫甘娜'].status, 'pending')
+  assert.equal(registry(fs)['角色/莫甘娜'].attempts, 1)
+})

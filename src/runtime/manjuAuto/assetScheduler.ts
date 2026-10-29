@@ -98,10 +98,19 @@ async function submit(wikiRoot: string, registry: Registry, id: string, entry: A
   await saveRegistry(wikiRoot, registry, deps)
 }
 
-/** 未登记、提示词改了、或上次运行最终失败的资产需要提交；失败项每次新运行重新给一轮重试。 */
-function needsSubmit(registry: Registry, id: string, hash: string) {
+/**
+ * 未登记、提示词改了、或（明确要求时）上次最终失败的资产需要提交。
+ *
+ * `retryFailed` 默认 true（新一轮运行、闸门入口都靠它给失败项一轮新机会）；但文字流水线
+ * 每存一次进度也会调一次这里，那条高频路径必须显式传 false，否则适配器一坏就是打桩机
+ * （2026-10-29 实测两分钟内 4 轮 12 次）。
+ */
+function needsSubmit(registry: Registry, id: string, hash: string, retryFailed = true) {
   const current = registry.assets[id]
-  return !current || (current.status !== 'locked' && (current.prompt_hash !== hash || current.status === 'failed'))
+  if (!current) return true
+  if (current.status === 'locked') return false
+  if (current.prompt_hash !== hash) return true
+  return retryFailed && current.status === 'failed'
 }
 
 /** 本集需要新生成的资产（预算估算用），与 submitEpisodeAssets 的判断一致。 */
@@ -111,10 +120,15 @@ export async function assetsToSubmit(wikiRoot: string, checkpoint: EpisodeCheckp
 }
 
 /** 资产提示词完成后调用：提交尚未生成的资产，立即返回，不等待结果。 */
-export async function submitEpisodeAssets(wikiRoot: string, checkpoint: EpisodeCheckpoint, deps: AssetSchedulerDeps) {
+export async function submitEpisodeAssets(
+  wikiRoot: string,
+  checkpoint: EpisodeCheckpoint,
+  deps: AssetSchedulerDeps,
+  options: { retryFailed?: boolean } = {},
+) {
   const registry = await loadRegistry(wikiRoot, deps)
   for (const [id, asset] of Object.entries(checkpoint.assets || {})) {
-    if (!needsSubmit(registry, id, asset.prompt_hash)) continue
+    if (!needsSubmit(registry, id, asset.prompt_hash, options.retryFailed ?? true)) continue
     const previous = registry.assets[id]
     const entry: AssetRegistryEntry = { ...asset, status: 'pending', attempts: 1, episode: checkpoint.episode_number,
       ...(previous && { submits: previous.submits ?? previous.attempts }) }

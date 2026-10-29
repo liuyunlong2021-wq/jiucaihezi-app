@@ -471,3 +471,39 @@ test('episode instruction uses the actual script path of that episode', () => {
   assert.match(text, /剧本使用 wiki\/剧本\/第002集\/分集剧本\.md/)
   assert.match(episodeInstruction(2, 'wiki', { videoModel: 'H3' }), /剧本使用 wiki\/项目资料\/分集剧本\/第2集分集剧本\.md/)
 })
+
+test('an episode already in videos is checked before the next episode waits for its own asset review', async () => {
+  const w = world()
+  // 先让第 1 集停在出片中：审图通过 → 提交视频 → 审片时停住
+  w.setApprove('stopped')
+  await runAuto(w.run, w.deps)
+  w.setApprove('approved')
+  w.setApproveCut('stopped')
+  w.run.config.episodes = [1]
+  delete w.run.episodes['2']
+  await runAuto(w.run, w.deps)
+
+  // 模拟 App 关掉时第 1 集正在出片、第 2 集还没开始；视频任务记录已不在（等价于任务表被清）
+  w.run.status = 'stopped'
+  w.run.episodes['1'].phase = 'videos'
+  delete w.run.episodes['1'].videosReviewed
+  w.run.episodes['2'] = { phase: 'queued' }
+  w.run.config.episodes = [1, 2]
+  const registryPath = 'wiki/制作流水线/Seedance/第1集视频任务.json'
+  const registry = JSON.parse(w.fs.get(registryPath)!)
+  for (const segment of registry.segments) { segment.status = 'pending'; segment.task_id = 'gone' }
+  w.fs.set(registryPath, JSON.stringify(registry))
+
+  const textDoneWhenChecked: number[] = []
+  const getTask = w.deps.video.getTask
+  w.deps.video.getTask = async id => {
+    textDoneWhenChecked.push(w.log.filter(entry => entry.startsWith('text')).length)
+    return getTask(id)
+  }
+  w.setApproveCut('approved')
+  w.log.length = 0 // 前两轮的文字记录与本次顺序无关，从零开始数
+  await runAuto(w.run, w.deps)
+  assert.ok(textDoneWhenChecked.length > 0, '第 1 集在出片中就一定会被检查')
+  assert.equal(textDoneWhenChecked[0], 0, `第 1 集必须在第 ${textDoneWhenChecked[0]} 次写文字之后才被检查：` +
+    '主循环要先检查出片中的集，否则它会被后面几集的审图闸门一直挡住')
+})

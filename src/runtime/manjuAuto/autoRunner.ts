@@ -267,7 +267,12 @@ function block(state: AutoRunState, episode: EpisodeRunState, reason: string) {
 }
 
 /** 资产提交（含预算检查），幂等：资产阶段保存事件与回合结束后都会调用。 */
-async function submitAssets(state: AutoRunState, checkpoint: RunnerCheckpoint, deps: AutoRunnerDeps): Promise<boolean> {
+async function submitAssets(
+  state: AutoRunState,
+  checkpoint: RunnerCheckpoint,
+  deps: AutoRunnerDeps,
+  options: { retryFailedAssets?: boolean } = {},
+): Promise<boolean> {
   const episode = state.episodes[String(checkpoint.episode_number)]
   if (episode.assetsSubmitted) return true
   const ids = await assetsToSubmit(deps.wikiRoot, checkpoint, deps.asset)
@@ -277,7 +282,7 @@ async function submitAssets(state: AutoRunState, checkpoint: RunnerCheckpoint, d
     block(state, episode, `资产生图预计 ${cost} 元，超过单集预算 ${state.config.budgetPerEpisode} 元`)
     return false
   }
-  await submitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset)
+  await submitEpisodeAssets(deps.wikiRoot, checkpoint, deps.asset, { retryFailed: options.retryFailedAssets ?? true })
   Object.assign(episode, { assetsSubmitted: true, imageCost: cost })
   return true
 }
@@ -286,7 +291,8 @@ async function submitAssets(state: AutoRunState, checkpoint: RunnerCheckpoint, d
 export async function handleCheckpointSaved(state: AutoRunState, checkpoint: RunnerCheckpoint, deps: AutoRunnerDeps) {
   const episode = state.episodes[String(checkpoint.episode_number)]
   if (state.config.target === 'prompts' || state.status !== 'running' || !episode || checkpoint.video_model !== state.config.videoModel || !checkpoint.assets) return
-  await submitAssets(state, checkpoint, deps)
+  // 进度保存是高频事件：只补「还没提过」的资产，失败项交给闸门重试，别在这里反复提交。
+  await submitAssets(state, checkpoint, deps, { retryFailedAssets: false })
   await deps.save(state)
 }
 
@@ -335,8 +341,10 @@ export async function runAuto(state: AutoRunState, deps: AutoRunnerDeps): Promis
 
   for (const n of state.config.episodes) {
     const episode = state.episodes[String(n)]
-    if (['videos', 'concat', 'done'].includes(episode.phase)) continue
     if (deps.shouldStop()) { state.status = 'stopped'; await deps.save(state); return state }
+    // 先照顾已在出片中的集：它们被后面几集的审图闸门挡着会看起来像「一直没视频」。
+    if (await checkVideos(state, deps)) return state
+    if (['videos', 'concat', 'done'].includes(episode.phase)) continue
 
     const limits = state.config.limits ?? modelLimits(state.config.videoModel, {})
     let checkpoint = await deps.readCheckpoint(n)
