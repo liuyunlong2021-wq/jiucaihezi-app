@@ -196,6 +196,49 @@ function video(value, model = VIDEO) {
  return plugin.protocols.openai_video.decodeRequest({ ...ctx(model), body: { kind: 'json', value: { model, prompt: 'p', ...value } } })
 }
 
+const NINE = 'ft-video-v1-1795bf4b67ce998dbfd8ab55cf838d93'
+const TEN = 'ft-video-v1-d69cdf94c9ed6d80ef7ec6ebf00f74ff'
+const OMNI = 'ft-video-v1-22c418bc12d30fcc1bde650b2bc9727b'
+
+test('FK 2026-10-29 三新型号：固定档位、素材上限与按画质分档的按次计费', () => {
+ // 720p（9图）固定 15 秒 2 元/次；480p（10图）4–30 秒 3.5 元/次（默认 30）；
+ // 720-1080p（全能参考）4–30 秒、720p 8 元/次、1080p 12 元/次，按画质分别计量调用次数。
+ for (const model of [NINE, TEN, OMNI]) assert.ok(plugin.meta.models.includes(model))
+ const nine = plugin.catalog.models.find(item => item.upstream === NINE)
+ assert.deepEqual(nine.duration, { values: [15], default: 15 })
+ assert.deepEqual(nine.refs, { images: 9, videos: 0, audios: 0 })
+ assert.deepEqual(nine.ratios, ['16:9', '9:16'])
+ assert.throws(() => video({ duration: 14 }, NINE), /duration/)
+ assert.throws(() => video({ duration: 15, resolution: '1080p' }, NINE), /resolution/)
+ const ten = plugin.catalog.models.find(item => item.upstream === TEN)
+ assert.deepEqual([ten.duration.min, ten.duration.max], [4, 30])
+ assert.equal(ten.duration.default, 30)
+ assert.deepEqual(ten.refs, { images: 10, videos: 0, audios: 3 })
+ assert.deepEqual(ten.resolutions, ['480p'])
+ assert.throws(() => video({ duration: 31 }, TEN), /duration/)
+ for (const duration of [4, 30]) video({ duration }, TEN)
+ assert.throws(() => video({ duration: 5, videoUrls: ['https://a/v.mp4'] }, TEN), /videos/)
+ assert.throws(() => video({ duration: 5, audioUrls: Array(4).fill('https://a/a.mp3') }, TEN), /audios/)
+ const omni = plugin.catalog.models.find(item => item.upstream === OMNI)
+ assert.deepEqual([omni.duration.min, omni.duration.max], [4, 30])
+ assert.equal(omni.duration.default, 30)
+ assert.deepEqual(omni.refs, { images: 30, videos: 10, audios: 10 })
+ assert.deepEqual(omni.resolutions, ['720p', '1080p'])
+ for (const [resolution, key] of [['720p', 'calls_720p'], ['1080p', 'calls_1080p']]) {
+  const intent = video({ duration: 10, resolution, videoUrls: ['https://a/v.mp4'], audioUrls: ['https://a/a.mp3'] }, OMNI)
+  const usage = plugin.extractUsage({ ...ctx(OMNI), requestBody: intent.requestBody })
+  assert.equal(usage[key], 1)
+  assert.equal(usage[resolution === '720p' ? 'calls_1080p' : 'calls_720p'], 0)
+  assert.equal(usage.calls, 0)
+  assert.equal(usage.seconds, 0)
+  const done = plugin.extractUsageOnComplete({ ...ctx(OMNI), requestBody: intent.requestBody }, {}, { status: 'success', duration: 10, resolution })
+  assert.equal(done[key], 1)
+  assert.equal(done.calls, 0)
+ }
+ assert.equal(plugin.extractUsage({ ...ctx(NINE), requestBody: video({ duration: 15 }, NINE).requestBody }).calls, 1)
+ assert.equal(plugin.extractUsage({ ...ctx(TEN), requestBody: video({ duration: 28 }, TEN).requestBody }).calls, 1)
+})
+
 test('FK 标准视频请求：别名归一、公共 ID、字段白名单及 jobId 轮询', () => {
  const intent = video({ seconds: 10, aspect_ratio: '9:16', resolution: '720p', image: 'https://a/ref.png', ignored: 'x' })
  const request = plugin.buildSubmitRequest({ ...ctx(VIDEO), requestBody: intent.requestBody })
@@ -256,7 +299,7 @@ test('FK 历史视频保留兼容轮询及 content 回收，examples 覆盖完�
  assert.equal(plugin.buildQueryRequest(previous).url, 'https://ai.fanke2026.xyz/v1/videos/compat-job')
  assert.equal(plugin.parseTaskResult(previous, { status: 'completed' }).status, 'SUCCESS')
  assert.equal(plugin.extractUsage({ ...ctx('ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'), requestBody: { duration: 3, resolution: '768p' } }).seconds, 3)
- assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 5)
+ assert.equal(plugin.meta.models.filter(id => id.startsWith('ft-video-v1-')).length, 8)
  for (const example of plugin.meta.usageExamples) assert.deepEqual(Object.keys(example.facts).sort(), Object.keys(plugin.meta.usageSchema).sort())
 })
 

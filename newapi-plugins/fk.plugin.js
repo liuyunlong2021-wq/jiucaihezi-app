@@ -7,6 +7,7 @@
 // 没有签名地址时由宿主 content 代理免鉴权回收。旧任务仅保留历史兼容查询；H3 同样走标准接口。
 // 事实源：用户提供的 FK 官方视频文档与公开模型映射。价格在 NewAPI Task Usage 中配置。
 // 按次型号使用 calls；按秒型号使用 seconds 或对应分辨率 seconds_480p/seconds_720p/seconds_768p/seconds_1080p。
+// 按次但按画质定价的型号用 calls_720p / calls_1080p 分别计量一次调用，表达式不能只写 u("calls")。
 // 官方型号有参考视频时完成用量使用 video_reference_tokens，需同步更新定价表达式。
 
 const LEGACY_VIDEO_IDS = [
@@ -33,8 +34,17 @@ export const catalog = /*jc-catalog*/{
       "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1"], "resolutions": ["480p", "720p"], "duration": { "min": 15, "max": 30, "default": 15 },
       "refs": { "images": 30, "videos": 0, "audios": 10 }, "promptMax": 10000, "billing": "second", "price": "480p ¥0.4/秒 · 720p ¥0.5/秒" },
     { "name": "特价渠道 Seedance 2.0 满血 480p (933)", "upstream": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c", "task": "video", "group": "FK · Seedance 2.5",
-      "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], "resolutions": ["480p"], "duration": { "min": 4, "max": 15, "default": 4 },
-      "refs": { "images": 9, "videos": 3, "audios": 3 }, "billing": "request", "price": "¥2/次" }
+      "ratios": ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"], "resolutions": ["480p"], "duration": { "min": 4, "max": 15, "default": 15 },
+      "refs": { "images": 9, "videos": 3, "audios": 3 }, "billing": "request", "price": "¥2/次" },
+    { "name": "特价渠道 Seedance 2.5 满血 720p（9图）", "upstream": "ft-video-v1-1795bf4b67ce998dbfd8ab55cf838d93", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16"], "resolutions": ["720p"], "duration": { "values": [15], "default": 15 },
+      "refs": { "images": 9, "videos": 0, "audios": 0 }, "billing": "request", "price": "¥2/次" },
+    { "name": "特价渠道 Seedance 2.5 满血 480p（10图）", "upstream": "ft-video-v1-d69cdf94c9ed6d80ef7ec6ebf00f74ff", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["480p"], "duration": { "min": 4, "max": 30, "default": 30 },
+      "refs": { "images": 10, "videos": 0, "audios": 3 }, "billing": "request", "price": "¥3.5/次" },
+    { "name": "特价渠道 Seedance 2.5 满血 720-1080p（全能参考）", "upstream": "ft-video-v1-22c418bc12d30fcc1bde650b2bc9727b", "task": "video", "group": "FK · Seedance 2.5",
+      "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4"], "resolutions": ["720p", "1080p"], "duration": { "min": 4, "max": 30, "default": 30 },
+      "refs": { "images": 30, "videos": 10, "audios": 10 }, "billing": "request", "price": "720p ¥8/次 · 1080p ¥12/次" }
   ]
 }/*end-jc-catalog*/
 const VIDEO_SPECS = Object.fromEntries(catalog.models.map(model => [model.upstream, {
@@ -46,6 +56,8 @@ const VIDEO_SPECS = Object.fromEntries(catalog.models.map(model => [model.upstre
   resolutions: model.resolutions,
   promptMax: model.promptMax,
   unit: model.billing === 'request' ? 'request' : undefined,
+  // 按次但多画质定价的型号按画质各计一次调用。
+  callTiers: model.billing === 'request' && model.resolutions.length > 1 ? model.resolutions : undefined,
   tokenWithVideo: model.billing === 'token-with-video',
 }]))
 const VIDEO_MODEL_IDS = Object.keys(VIDEO_SPECS)
@@ -88,7 +100,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.6.1',
+  version: '0.7.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -103,6 +115,14 @@ export const meta = {
     calls: { type: 'number', unit: 'count', description: { en: 'Billable video requests', zh: '按次视频计费次数' } },
     video_reference_tokens: { type: 'number', unit: 'token', description: { en: 'Settled official video reference tokens', zh: '官方视频参考实际结算 Token' } },
     upstream_cost_yuan: { type: 'number', unit: 'count', unitLabel: { en: 'CNY', zh: '元' }, description: { en: 'Settled upstream cost in CNY', zh: '上游实际结算人民币，仅作账单核对' } },
+    calls_720p: {
+      type: 'number', unit: 'count', unitLabel: { en: 'call', zh: '次' },
+      description: { en: '720p per-request calls', zh: '720p 按次计费次数' },
+    },
+    calls_1080p: {
+      type: 'number', unit: 'count', unitLabel: { en: 'call', zh: '次' },
+      description: { en: '1080p per-request calls', zh: '1080p 按次计费次数' },
+    },
     seconds: {
       type: 'number',
       unit: 'second',
@@ -138,8 +158,10 @@ export const meta = {
     { label: '图片 4 张', facts: { seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 4 } },
   ].map(example => ({ ...example, facts: { calls: 0, video_reference_tokens: 0, upstream_cost_yuan: 0, ...example.facts } })).concat([
     { label: '按次视频', facts: { calls: 1, video_reference_tokens: 0, upstream_cost_yuan: 0, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
+    { label: '按次 720p 全能参考', facts: { calls_720p: 1, calls: 0, video_reference_tokens: 0, upstream_cost_yuan: 0, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
+    { label: '按次 1080p 全能参考', facts: { calls_1080p: 1, calls: 0, video_reference_tokens: 0, upstream_cost_yuan: 0, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
     { label: '官方视频参考结算', facts: { calls: 0, video_reference_tokens: 1000000, upstream_cost_yuan: 31.5, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
-  ]).map(example => ({ ...example, facts: { seconds_768p: 0, seconds_1080p: 0, ...example.facts } })),
+  ]).map(example => ({ ...example, facts: { seconds_768p: 0, seconds_1080p: 0, calls_720p: 0, calls_1080p: 0, ...example.facts } })),
 }
 
 const HOST_STATUS = {
@@ -244,9 +266,13 @@ function usageFacts(ctx, duration, body) {
   const spec = compatibilityVideo(ctx) ? undefined : VIDEO_SPECS[videoModel(ctx.upstreamModel || ctx.model || request.model)]
   const billing = snapshot(result.billing)
   const token = billing.mode === 'token' && billing.settled === true
-  const billableSeconds = (spec && spec.unit === 'request') || token ? 0 : validSeconds
+  const byRequest = Boolean(spec && spec.unit === 'request')
+  const callTier = byRequest && spec.callTiers ? spec.callTiers.find(item => resolution.includes(item.replace('p', ''))) || spec.callTiers[0] : ''
+  const billableSeconds = byRequest || token ? 0 : validSeconds
   return {
-    calls: spec && spec.unit === 'request' ? 1 : 0,
+    calls: byRequest && !callTier ? 1 : 0,
+    calls_720p: callTier === '720p' ? 1 : 0,
+    calls_1080p: callTier === '1080p' ? 1 : 0,
     video_reference_tokens: token ? Number(snapshot(billing.usage).total_tokens) : 0,
     upstream_cost_yuan: Number.isFinite(Number(billing.charged_cost_cents)) ? Number(billing.charged_cost_cents) / 100 : 0,
     seconds: billableSeconds,

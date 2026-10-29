@@ -1,7 +1,7 @@
 {
   "plugin": "fk",
-  "version": "0.6.0",
-  "scope": "五个当前视频型号；售价为用户 2026-10-26 提供的定价",
+  "version": "0.7.0",
+  "scope": "八个当前视频型号；售价为用户 2026-10-26 与 2026-10-29 提供的定价",
   "coefficientConvention": "沿用用户确认人民币与Task Usage系数同数值口径；实际分组倍率和实扣待验收",
   "models": [
     {
@@ -44,6 +44,27 @@
       "upstreamModel": "ft-video-v1-43644108aaba72b7cbad4cd322737f6c",
       "salePriceCnyPerRequest": 2,
       "expression": "tier(\"base\", u(\"calls\") * 2)"
+    },
+    {
+      "model": "特价渠道 Seedance 2.5 满血 720p（9图）",
+      "upstreamModel": "ft-video-v1-1795bf4b67ce998dbfd8ab55cf838d93",
+      "salePriceCnyPerRequest": 2,
+      "expression": "tier(\"base\", u(\"calls\") * 2)"
+    },
+    {
+      "model": "特价渠道 Seedance 2.5 满血 480p（10图）",
+      "upstreamModel": "ft-video-v1-d69cdf94c9ed6d80ef7ec6ebf00f74ff",
+      "salePriceCnyPerRequest": 3.5,
+      "expression": "tier(\"base\", u(\"calls\") * 3.5)"
+    },
+    {
+      "model": "特价渠道 Seedance 2.5 满血 720-1080p（全能参考）",
+      "upstreamModel": "ft-video-v1-22c418bc12d30fcc1bde650b2bc9727b",
+      "salePriceCnyPerRequest": {
+        "720p": 8,
+        "1080p": 12
+      },
+      "expression": "tier(\"base\", u(\"calls_720p\") * 8 + u(\"calls_1080p\") * 12)"
     }
   ]
 }

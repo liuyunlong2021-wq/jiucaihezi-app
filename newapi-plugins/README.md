@@ -24,7 +24,7 @@
 | `comfy.plugin.js` | `comfy` | 不取代（`comfy-adapter` 是执行器，插件只代理它） | 代码已就绪，**未上传** |
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
-| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | 0.6.0（2026-10-26）视频五型号，`catalog` 面板目录；映射 `fk-video-model-mapping.json`、售价 `fk-pricing.json`；图片型号不变。待上传激活与真实验收 |
+| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | 0.7.0（2026-10-29）视频八型号，`catalog` 面板目录；映射 `fk-video-model-mapping.json`、售价 `fk-pricing.json`；图片型号不变。待上传激活与真实验收 |
 | `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.1` 新增原生异步提交/查询，覆盖五个 `xy-` 图片模型；本地通过，尚未上传，宿主容量与真实出图待验收 |
 | `t8-mj.plugin.js` | `t8-mj` | 直接取代 T8 的 MJ 代理（无需适配器） | `0.3.0` 只接 `mj_relax_imagine`（T8 的 `mj-relax` 模式），插件直连 `https://ai.t8star.org` 的 `/mj/submit/imagine` 与 `/mj/task/{id}/fetch`；固定打 T8（忽略渠道 Base URL）、接受 JSON 与面板的 multipart，把面板比例拼成 `--ar`，仅文生图（垫图待接入）；待上传激活与真实验收 |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
@@ -99,6 +99,18 @@ curl -X POST <NewAPI>/api/plugin/task \
 FK 2026-10-13 官方图片合同复查：0.2.1 修复规格校验、混合素材静默丢失、请求失败/结果可用性判断、真实jobId与错误消息解析；CPU503来自宿主准入，独立于插件。见 `docs/wiki/运维/FK官方图片合同复查与CPU503定位-2026-10-13.md`。
 
 FK 当前增量：上传 `fk.plugin.js` 0.3.5，保留已有渠道模型，只添加三个官方2.0名称；已有官方2.5仍保留。四型号无视频售价分别0.4/0.6/0.7/1元每秒，有参考视频按上游Token单价最终结算的人民币分金额收取；使用 `fk-pricing.json` 中的四条表达式，不能只保留seconds，也不能把秒费、Token费和上游金额重复相加。后台配置不会随插件自动保存；三个新型号需配套画布合同。详见统一手册F节，不为此次变更构建NewAPI。
+
+FK 0.7.0（2026-10-29）新增三个按次型号，只改插件目录与 NewAPI 渠道/表达式，App 不需要发版：
+
+| 公开模型名 | 画质 · 时长 | 素材上限 | 人民币售价 | Task Usage 表达式 |
+| --- | --- | --- | --- | --- |
+| `特价渠道 Seedance 2.5 满血 720p（9图）` | 720p · 固定 15 秒 | 9/0/0 | 2 元/次 | `tier("base", u("calls") * 2)` |
+| `特价渠道 Seedance 2.5 满血 480p（10图）` | 480p · 4–30 秒（默认 30） | 10/0/3 | 3.5 元/次 | `tier("base", u("calls") * 3.5)` |
+| `特价渠道 Seedance 2.5 满血 720-1080p（全能参考）` | 720p、1080p · 4–30 秒（默认 30） | 30/10/10 | 720p 8 元/次、1080p 12 元/次 | `tier("base", u("calls_720p") * 8 + u("calls_1080p") * 12)` |
+
+三个型号都是按次收费（用户 2026-10-29 确认，8 元 / 12 元为每次任务价格）。**按次型号面板默认时长取该型号最大值**：固定档 15 秒，480p（10图）与全能参考均为 4–30 秒、默认 30 秒；既有 933 型号同步由 4 秒改为默认 15 秒。
+
+按次但按画质定价的型号用 `calls_720p` / `calls_1080p` 分别计量一次调用，不能只写 `u("calls")`（那会把 1080p 当成 720p 收）。该表达式形状超出可用性服务的换算范围，面板价格回退到目录 `price`。
 
 历史 FK Seedance 2.5：三保留、三新增、四旧型号隐藏；插件 0.3.0 的按次型号改用 `calls`，官方视频参考最终使用 `video_reference_tokens`。旧配置与计费事实见 `docs/wiki/运维/FK-Seedance2.5模型与标准视频合同对齐-2026-10-14.md`，四官方型号价格以当前F节为准。
 

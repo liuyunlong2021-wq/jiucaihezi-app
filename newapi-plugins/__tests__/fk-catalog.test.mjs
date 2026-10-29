@@ -28,12 +28,23 @@ test('FK 目录与公开名映射、插件白名单逐字一致', () => {
   for (const model of models) assert.ok(plugin.meta.models.includes(model.name), model.name)
 })
 
+test('FK 按次型号默认时长取该型号最大值', () => {
+  // 按次收费与时长无关，面板默认给最长时长（用户 2026-10-29 确认）。
+  for (const model of plugin.catalog.models.filter(item => item.billing === 'request')) {
+    const max = model.duration.values ? Math.max(...model.duration.values) : model.duration.max
+    assert.equal(model.duration.default, max, model.name)
+  }
+})
+
 test('FK 插件校验完全由目录推导', () => {
   for (const model of plugin.catalog.models) {
     const intent = decode(model, base(model))
     assert.equal(intent.requestBody.model, model.upstream, model.name)
     const usage = plugin.extractUsage({ model: model.name, requestBody: intent.requestBody })
-    assert.equal(usage.calls, model.billing === 'request' ? 1 : 0, model.name)
+    // 按次但多画质定价的型号按画质各计一次调用（calls_720p / calls_1080p），不再置 calls。
+    const tiered = model.billing === 'request' && model.resolutions.length > 1
+    assert.equal(usage.calls, model.billing === 'request' && !tiered ? 1 : 0, model.name)
+    if (tiered) assert.equal(usage['calls_' + model.resolutions[0]], 1, model.name)
 
     for (const ratio of model.ratios) decode(model, { ...base(model), ratio })
     for (const resolution of model.resolutions) decode(model, { ...base(model), resolution })

@@ -308,13 +308,13 @@ test('目录型号随可用性下发规格，价格以 NewAPI 实际表达式为
   const special = '特价渠道 Seedance 2.0 满血 480p (933)'
   const h3 = '特价渠道 MiniMax H3 480p-1080p'
   const catalogModels = buildCatalogModels(
-    [{ key: 'fk', version: '0.6.0', catalog: /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)[1] }, { key: 'other', version: '1', catalog: null }],
+    [{ key: 'fk', version: '0.7.0', catalog: /\/\*jc-catalog\*\/([\s\S]*?)\/\*end-jc-catalog\*\//.exec(source)[1] }, { key: 'other', version: '1', catalog: null }],
     {
       'billing_setting.plugin_billing_expr': JSON.stringify({ [`fk::${real}`]: 'tier("base", u("calls") * 6)' }),
       'billing_setting.billing_expr': JSON.stringify({ [h3]: 'tier("base", u("seconds_480p") * 0.1 + u("seconds_720p") * 0.1 + u("seconds_768p") * 0.2 + u("seconds_1080p") * 0.3)' }),
     },
   )
-  assert.equal(catalogModels.length, 5)
+  assert.equal(catalogModels.length, 8)
   const channels = [{ id: 1, name: 'fk', status: 1, baseUrl: '', models: [real, h3] }]
   const models = buildCreationModelAvailability(channels, new Date('2026-10-25T00:00:00Z'), catalogModels)
   const byId = new Map(models.map(model => [model.id, model]))

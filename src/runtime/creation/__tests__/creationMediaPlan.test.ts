@@ -1390,6 +1390,31 @@ test('FK当前Seedance型号规格与执行目录一致', () => {
   }
 })
 
+test('FK 2026-10-29 三新型号的目录规格、素材上限与面板价格', () => {
+  // 目录是唯一真源：插件 catalog 增项后 App 不写死条目，这里只钉住用户确认的规格与售价。
+  const expected = [
+    ['ft-video-v1-1795bf4b67ce998dbfd8ab55cf838d93', '特价渠道 Seedance 2.5 满血 720p（9图）', [15], 9, 0, 0, '¥2/次', ['16:9', '9:16']],
+    ['ft-video-v1-d69cdf94c9ed6d80ef7ec6ebf00f74ff', '特价渠道 Seedance 2.5 满血 480p（10图）', [4, 30], 10, 0, 3, '¥3.5/次', ['16:9', '9:16', '1:1', '4:3', '3:4']],
+    ['ft-video-v1-22c418bc12d30fcc1bde650b2bc9727b', '特价渠道 Seedance 2.5 满血 720-1080p（全能参考）', [4, 30], 30, 10, 10, '720p ¥8/次 · 1080p ¥12/次', ['16:9', '9:16', '1:1', '4:3', '3:4']],
+  ] as const
+  for (const [id, label, duration, images, videos, audios, price, ratios] of expected) {
+    const spec = getCreationModelSpec(`newapi/fk/${id}`)!
+    assert.equal(spec.model, label)
+    assert.equal(spec.label, label)
+    assert.equal(spec.price, price)
+    assert.equal(spec.endpoint, '/v1/videos')
+    assert.equal(spec.files?.images?.max, images)
+    assert.equal(spec.files?.videos?.max || 0, videos)
+    assert.equal(spec.files?.audios?.max || 0, audios)
+    assert.deepEqual(spec.capabilities.duration?.allowedValues || [spec.capabilities.duration?.min, spec.capabilities.duration?.max], [...duration])
+    assert.deepEqual(spec.fields.find(field => field.key === 'ratio')?.options?.map(option => option.value), [...ratios])
+    // 按次收费与时长无关，面板时长默认值取该型号最大值（用户 2026-10-29 确认）。
+    assert.equal(spec.fields.find(field => field.key === 'duration')?.defaultValue, duration[duration.length - 1])
+    assert.ok(getMediaModel(id), `${id} must stay executable`)
+    assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', duration: duration[0], resolution: spec.capabilities.resolutions?.[0], ratio: '16:9' } }).model, label)
+  }
+})
+
 test('FK 分组排在视频最前，灵动组内首个模型为 ld-2.5特价-1-720', () => {
   // 用户已将 FK 置顶；同时保留灵动组内既有排序。
   const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
@@ -1646,10 +1671,10 @@ test('FK H3 在面板显示公开名、四档售价和独立分组，执行目�
   }
 })
 
-test('FK five current video choices share public names, specs and content recovery', () => {
+test('FK eight current video choices share public names, specs and content recovery', () => {
   const mapping = JSON.parse(readFileSync('newapi-plugins/fk-video-model-mapping.json', 'utf8')) as Record<string, string>
   const visible = listCreationModels({ task: 'video' }).filter(model => model.id.startsWith('newapi/fk/'))
-  assert.equal(visible.length, 5)
+  assert.equal(visible.length, 8)
   for (const [name, id] of Object.entries(mapping)) {
     const spec = getCreationModelSpec(`newapi/fk/${id}`)!
     assert.equal(spec.model, name)
