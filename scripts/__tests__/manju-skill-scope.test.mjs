@@ -301,6 +301,16 @@ test('工程剧本自带删减扩写：逐集作业、开写前体检资料、�
   }
 })
 
+test('漫剧制作只读工程剧本，已有成品台本时复用而不是重写', () => {
+  const pipeline = readFileSync('public/skills/jc-manju-pipeline/SKILL.md', 'utf8')
+  assert.match(pipeline, /只读工程剧本/)
+  assert.match(pipeline, /已有工程剧本[\s\S]{0,60}复用/)
+  const skill = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
+  // 短剧路线产物仍是分集剧本，位置不变；工程剧本仍在 剧本/工程剧本/
+  assert.match(skill, /项目资料\/分集剧本\/第N集分集剧本\.md/)
+  assert.match(skill, /剧本\/工程剧本\/第x集工程剧本\.md/)
+})
+
 test('拖节奏的设定说明改用精炼旁白，而不是让人物硬讲或整段删掉', () => {
   const skill = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
   assert.match(skill, /设定说明/)

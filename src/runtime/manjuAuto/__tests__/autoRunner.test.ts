@@ -472,6 +472,26 @@ test('episode instruction uses the actual script path of that episode', () => {
   assert.match(episodeInstruction(2, 'wiki', { videoModel: 'H3' }), /剧本使用 wiki\/项目资料\/分集剧本\/第2集分集剧本\.md/)
 })
 
+test('漫剧只读工程剧本：同一集有多份稿时以工程剧本为准', () => {
+  const scanned = scanEpisodeScripts([
+    'docs/wiki/项目资料/分集剧本/第1集分集剧本.md',
+    'docs/wiki/剧本/第001集/分集剧本.md',
+    'docs/wiki/剧本/工程剧本/第1集工程剧本.md',
+  ])
+  assert.equal(scanned.scripts[1], 'docs/wiki/剧本/工程剧本/第1集工程剧本.md', '工程剧本优先于分集剧本')
+  assert.ok(scanned.duplicates.includes(1), '其余稿仍列为重复，供确认卡提示')
+  // 没有工程剧本时维持原口径：入稿的分集剧本优先于短剧改写稿
+  const noEngineering = scanEpisodeScripts([
+    'docs/wiki/项目资料/分集剧本/第1集分集剧本.md',
+    'docs/wiki/剧本/第001集/分集剧本.md',
+  ])
+  assert.equal(noEngineering.scripts[1], 'docs/wiki/项目资料/分集剧本/第1集分集剧本.md')
+  // 只有工程剧本也能开跑
+  const onlyEngineering = scanEpisodeScripts(['docs/wiki/剧本/工程剧本/第3集工程剧本.md'])
+  assert.deepEqual(onlyEngineering.episodes, [3])
+  assert.equal(onlyEngineering.scripts[3], 'docs/wiki/剧本/工程剧本/第3集工程剧本.md')
+})
+
 test('an episode already in videos is checked before the next episode waits for its own asset review', async () => {
   const w = world()
   // 先让第 1 集停在出片中：审图通过 → 提交视频 → 审片时停住

@@ -142,19 +142,23 @@ function refsRule(limits: ModelLimits) {
 const USER_FIRST = '用户的明确制作要求优先于 Skill 默认路线（如要求不生图、纯文生、不用参考图），只有违反模型硬限制（时长、参考图上限）才以 blocked 说明'
 
 /**
- * 扫描可用的分集剧本：漫剧入稿的「项目资料/分集剧本/第N集分集剧本.md」与短剧改编的「剧本/第NNN集/分集剧本.md」。
- * 同一集两处都有时以入稿剧本为准，并列入 duplicates 供确认卡提示。
+ * 扫描可用的分集剧本：漫剧入稿的「项目资料/分集剧本/第N集分集剧本.md」、短剧改写稿「剧本/第NNN集/分集剧本.md」，
+ * 以及成品台本「剧本/工程剧本/第N集工程剧本.md」。
+ * 漫剧制作只读工程剧本：三处都有时以工程剧本为准；没有工程剧本时沿用入稿优先。
+ * 落选的其余稿列入 duplicates 供确认卡提示。
  */
 export function scanEpisodeScripts(paths: string[]): { wikiRoot: string; episodes: number[]; scripts: Record<number, string>; duplicates: number[] } {
   const found = paths.flatMap(path => {
+    const engineering = path.match(/^(.*)\/剧本\/工程剧本\/第(\d+)集工程剧本\.md$/)
+    if (engineering) return [{ root: engineering[1], episode: Number(engineering[2]), path, rank: 3 }]
     const intake = path.match(/^(.*)\/项目资料\/分集剧本\/第(\d+)集分集剧本\.md$/)
-    if (intake) return [{ root: intake[1], episode: Number(intake[2]), path, intake: true }]
+    if (intake) return [{ root: intake[1], episode: Number(intake[2]), path, rank: 2 }]
     const adapted = path.match(/^(.*)\/剧本\/第(\d+)集\/分集剧本\.md$/)
-    return adapted ? [{ root: adapted[1], episode: Number(adapted[2]), path, intake: false }] : []
+    return adapted ? [{ root: adapted[1], episode: Number(adapted[2]), path, rank: 1 }] : []
   })
-  const wikiRoot = (found.find(item => item.intake) ?? found[0])?.root || (paths.some(path => path.startsWith('docs/wiki/')) ? 'docs/wiki' : 'wiki')
+  const wikiRoot = (found.find(item => item.rank > 1) ?? found[0])?.root || (paths.some(path => path.startsWith('docs/wiki/')) ? 'docs/wiki' : 'wiki')
   const scripts: Record<number, string> = {}, duplicates: number[] = []
-  for (const item of found.filter(item => item.root === wikiRoot).sort((a, b) => Number(b.intake) - Number(a.intake))) {
+  for (const item of found.filter(item => item.root === wikiRoot).sort((a, b) => b.rank - a.rank)) {
     if (scripts[item.episode]) duplicates.push(item.episode)
     else scripts[item.episode] = item.path
   }
