@@ -13,6 +13,8 @@ gateway/assets/
 public/landing/*.dmg
 __pycache__/
 *.pyc
+# 本地临时打包/探针产物（如 esbuild 打出的 test.mjs），不属于源码
+tmp/
 
 # Editor
 .vscode/
