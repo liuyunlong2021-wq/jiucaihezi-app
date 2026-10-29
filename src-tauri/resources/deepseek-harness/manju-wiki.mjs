@@ -791,17 +791,30 @@ async function requirePipelineReads(ctx, args, exec, agent) {
   const root = state.path.split('/制作流水线/')[0]
   const materials = Object.keys(state.files?.materials || {})
   const entity = args.entity_name ? safeName(args.entity_name, '实体') : ''
+  const cwd = exec.agent.session.header.cwd
   const candidates = category => researchCandidates(materials, entity, category)
+  // materials 是 plan 之后的快照：本集新增的改编版资料（例如新出场角色的小传）不在里面。
+  // 这类资料只要落在标准位置且被真实读过，同样能支撑当前资产，否则会死锁在 assets 阶段。
+  const onDisk = async category => {
+    if (!entity) return []
+    const present = []
+    for (const path of researchPaths(root, category, entity)) {
+      const target = await ctx.fs.resolve(path, { cwd, signal: exec.signal })
+      if ((await ctx.fs.stat(target, exec.signal))?.type === 'file') present.push(path)
+    }
+    return present
+  }
+  const withDisk = async category => [...new Set([...candidates(category), ...await onDisk(category)])]
+  const bioPaths = await withDisk('人物小传')
   const groups = {
     summary: materials.filter(path => /\/故事梗概\.md$/.test(path)),
     style: Object.keys(state.files?.style || {}).filter(path => path === `${root}/项目风格/影片比例与风格.md`), source: [state.source_path],
-    bio: candidates('人物小传'), scene: candidates('场景说明'), prop: candidates('道具说明'),
+    bio: bioPaths, scene: await withDisk('场景说明'), prop: await withDisk('道具说明'),
     // 三格格式提示词可由已读的角色设计提示词，或（全自动成片一步出格式时）已读的人物小传支撑。
-    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`, ...candidates('人物小传')],
+    image: [`${root}/资产/角色/${entity}/角色生图提示词.md`, ...bioPaths],
     engineering: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
     engineeringOrStoryboard: Object.keys(state.files?.engineering || {}).filter(path => /工程剧本\.md$/.test(path)),
   }
-  const cwd = exec.agent.session.header.cwd
   const observed = async path => {
     const target = await ctx.fs.resolve(path, { cwd, signal: exec.signal })
     const prior = reads.get(target.targetKey ?? target)
@@ -849,6 +862,15 @@ export function researchCandidates(materials, entity, category) {
   const paths = materials.filter(path => path.includes('/项目资料/') && aliases.some(name => path.includes(`/${name}/`)))
   const exact = paths.filter(path => posix.basename(path, '.md') === entity)
   return exact.length || category === '人物小传' || category === '道具说明' ? exact : paths
+}
+
+/**
+ * 某实体项目资料的标准位置：`项目资料/<分类>/`，以及 `项目资料/原作/`、`项目资料/改编版/` 两个版本目录。
+ * 场景与道具兼容旧库目录名（场景说明／道具说明）。
+ */
+export function researchPaths(wikiRoot, category, entity) {
+  const aliases = { '场景说明': ['场景说明', '场景'], '道具说明': ['道具说明', '道具'] }[category] ?? [category]
+  return aliases.flatMap(name => ['', '原作/', '改编版/'].map(version => `${wikiRoot}/项目资料/${version}${name}/${entity}.md`))
 }
 
 const pipelineStages = ['plan', 'materials', 'style', 'assets', 'engineering', 'prompts', 'complete']

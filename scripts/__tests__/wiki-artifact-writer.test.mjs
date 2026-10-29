@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead, dialogueSeconds, unitSeconds, planEventEpisodes, researchCandidates, TIME_UNITS, TIER_FACTORS } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
+import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead, dialogueSeconds, unitSeconds, planEventEpisodes, researchCandidates, researchPaths, TIME_UNITS, TIER_FACTORS } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
 function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const files = new Map()
@@ -573,6 +573,20 @@ test('scene and prop research accept both layout directory names', () => {
   assert.deepEqual(researchCandidates([prop], '旧剑', '道具说明'), [prop])
   // 资产产物不算资料。
   assert.deepEqual(researchCandidates(['wiki/资产/场景/机场与传送现场.md'], '机场与传送现场', '场景说明'), [])
+  // materials 是 plan 后的快照，本集新增资料不在里面；标准位置同样算候选（2026-10-29 系统音小传实测）。
+  assert.deepEqual(researchPaths('wiki', '人物小传', '系统音'), [
+    'wiki/项目资料/人物小传/系统音.md',
+    'wiki/项目资料/原作/人物小传/系统音.md',
+    'wiki/项目资料/改编版/人物小传/系统音.md',
+  ])
+  assert.deepEqual(researchPaths('wiki', '场景说明', '机场'), [
+    'wiki/项目资料/场景说明/机场.md',
+    'wiki/项目资料/原作/场景说明/机场.md',
+    'wiki/项目资料/改编版/场景说明/机场.md',
+    'wiki/项目资料/场景/机场.md',
+    'wiki/项目资料/原作/场景/机场.md',
+    'wiki/项目资料/改编版/场景/机场.md',
+  ])
 })
 
 test('original and adapted research stay separate and legacy paths remain unchanged', async t => {
