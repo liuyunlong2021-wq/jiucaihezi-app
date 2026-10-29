@@ -32,7 +32,7 @@ test('props are only plot props and character signature items; everyday objects 
   assert.match(source, /道具判定标准（漫剧资产唯一口径）/)
   assert.match(source, /剧情道具[\s\S]*角色标志物/)
   assert.match(source, /茶碗、筷子、桌椅、桌上的菜[\s\S]*场景说明的“陈设”/)
-  for (const name of ['jc-gongchengjuben', 'jc-prop-prompt', 'jc-manju-pipeline']) assert.match(read(name), /道具判定标准/, name)
+  for (const name of ['jc-prop-prompt', 'jc-manju-pipeline']) assert.match(read(name), /道具判定标准/, name)
   assert.match(read('jc-scene-prompt'), /陈设”中的日常物件/)
   assert.match(read('jc-seedance'), /日常物件属于场景陈设，不占@图/)
   assert.match(read('h3-prompt-writing'), /日常物件属于场景陈设，不占图/)
@@ -44,7 +44,6 @@ test('crowds are one shared lineup asset per group, referenced with headcount an
   assert.match(read('jc-renqun'), /crowd_asset[\s\S]*资产\/人群\/<群体>\/群像生图提示词\.md/)
   assert.match(read('jc-xiangmuziliao'), /场景说明的“人群”[\s\S]*出场人数/)
   assert.match(read('jc-manju-pipeline'), /jc-renqun\/SKILL\.md\) 保存一份 crowd_asset/)
-  assert.match(read('jc-gongchengjuben'), /群戏另列“人群”/)
   assert.match(read('jc-seedance'), /太虚宗弟子一千余人站成方阵/)
   assert.match(read('h3-prompt-writing'), /crowd from <Picture 4>/)
 })
@@ -66,7 +65,6 @@ test('costume looks: same face, new outfit, fused from identity sheet + costume 
   assert.match(costume, /character_look[\s\S]*以参考图1为人物身份[\s\S]*参考图2的整套服装/)
   assert.match(read('jc-xiangmuziliao'), /造型表（换装）/)
   assert.match(read('jc-manju-pipeline'), /同阶段保存 costume_asset 与 character_look/)
-  assert.match(read('jc-gongchengjuben'), /同一段内换装须在换装处切段/)
   assert.match(read('jc-seedance'), /顾云舟·帝王，龙袍冕旒/)
 })
 
@@ -259,17 +257,14 @@ test('short-drama default is deletion-only: one-pass annotation, program-assembl
   assert.match(xiezuo, /冷开场[\s\S]*悬念开场[\s\S]*闪回[\s\S]*细写扩展/)
 })
 
-test('工程剧本自带删减扩写：逐集作业、开写前体检资料、细度按节拍写', () => {
+test('工程剧本自带删减扩写：逐集作业、不管理资产、细度按节拍写', () => {
   const dir = 'public/skills/jc-gongchengjuben'
   const skill = readFileSync(`${dir}/SKILL.md`, 'utf8')
   // 一次只改一集，不能把两集合成一稿
   assert.match(skill, /一次只改编一集/)
-  // 第 1 集开写前先体检资料，缺长相／空间／形制按设计 Skill 补齐
-  assert.match(skill, /开写前先体检本集资料/)
-  assert.match(skill, /jc-juese-sheji\/SKILL\.md[\s\S]{0,160}人物小传/)
-  assert.match(skill, /character_bio[\s\S]{0,80}只补缺/)
-  assert.match(skill, /jc-scene-prompt\/SKILL\.md[\s\S]{0,80}场景说明/)
-  assert.match(skill, /jc-prop-prompt\/SKILL\.md[\s\S]{0,80}道具/)
+  assert.match(skill, /不承担资产整理、设计或维护/)
+  assert.match(skill, /不输出整集资产清单/)
+  assert.doesNotMatch(skill, /jc-juese-sheji\/SKILL\.md|jc-scene-prompt\/SKILL\.md|jc-prop-prompt\/SKILL\.md|character_bio|scene_research|prop_research/)
   // 删：不推动剧情的删掉，原台词／伏笔／钩子不能删
   assert.match(skill, /不推动剧情[\s\S]{0,120}删/)
   // 扩：动作与打戏写到节拍，禁止用结论词代替动作
@@ -291,7 +286,7 @@ test('工程剧本自带删减扩写：逐集作业、开写前体检资料、�
   const rewrite = readFileSync(`${dir}/references/adaptation-rewrite.md`, 'utf8')
   assert.match(rewrite, /删|压缩/)
   assert.match(rewrite, /伏笔/)
-  assert.match(rewrite, /对白电影化|每分钟240字/)
+  assert.match(rewrite, /对白电影化|每分钟\s*240\s*字/)
 
   // 索引必须登记新参考文件，否则打包后在 Agent 里读不到
   const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
@@ -347,4 +342,15 @@ test('逐集改编把原文落成引擎可校验的分集剧本', () => {
   assert.match(skill, /不要求用户先建人物、场景、道具档案/)
   assert.match(skill, /references\/时间账标注兼容流程.md/)
   assert.doesNotMatch(skill, /每次只读.*20章/)
+})
+
+test('剧本路径直接转逐镜本：先删再扩，显式按场路线不抢占入口', () => {
+ const skill = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
+ assert.match(skill, /读取.*[\s\S]*先删无效内容[\s\S]*再扩动作和表演[\s\S]*最后拆镜[\s\S]*保存并读回/)
+ assert.match(skill, /不因旁边存在切分卡而改交按场稿/)
+ assert.match(skill, /content=完整 Markdown 台本/)
+ assert.match(skill, /自由转分镜默认原台词逐字保留/)
+ assert.match(skill, /允许补足实现原意必需的表演细节/)
+ assert.match(skill, /原文件保持原样/)
+ assert.match(skill, /缺少资产档案不阻塞写作/)
 })
