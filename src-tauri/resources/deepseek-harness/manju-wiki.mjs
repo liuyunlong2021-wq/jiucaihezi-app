@@ -681,7 +681,8 @@ async function saveArtifact(ctx, args, exec, contract, route, sourceAgent, prepa
   // 短剧删减式改编：事件文档按“E序号_一句话概述”命名；分集剧本只能由程序从已校验的切分生成，正文只有原文。
   if (route === 'short-drama' && args.artifact_kind === 'adaptation_event' && !/^E\d+_./.test(String(args.entity_name || '')))
     throw new Error('事件文档名须为“E数字_一句话概述”，如 E03_噗叽偷食被收服，以保持顺序')
-  if (route === 'short-drama' && args.artifact_kind === 'episode_source_script') {
+  // 逐集改编的交付物：分集剧本与工程剧本共用同一份 {"adapted":…} 载荷与同一套校验。
+  if (route === 'short-drama' && ['episode_source_script', 'engineering_script'].includes(args.artifact_kind)) {
     let input
     try { input = JSON.parse(args.content) } catch { input = undefined }
     if (input?.adapted !== undefined) {
@@ -689,7 +690,7 @@ async function saveArtifact(ctx, args, exec, contract, route, sourceAgent, prepa
       content = result.content
       extraWarnings.push(...result.warnings)
       adapted = true
-    } else content = await episodeScriptFromCut(ctx, args, exec, wikiRoot, sourceAgent)
+    } else if (args.artifact_kind === 'episode_source_script') content = await episodeScriptFromCut(ctx, args, exec, wikiRoot, sourceAgent)
   }
   if (spec.mode === 'adaptation_pipeline') content = await adaptationCheckpoint(ctx, args, exec, wikiRoot, content, sourceAgent)
   }
@@ -735,7 +736,7 @@ async function saveArtifact(ctx, args, exec, contract, route, sourceAgent, prepa
     operation: saved.operation,
     warnings,
     wikiRoot,
-    ...(args.artifact_kind === 'episode_source_script' && adapted ? { adapted } : {}),
+    ...(adapted ? { adapted } : {}),
   }
 }
 
@@ -1897,12 +1898,12 @@ async function adaptationCheckpoint(ctx, args, exec, root, content, agent) {
       }
       if (stage === 3 && !outputs[path]) throw new Error('切分阶段须登记每集真实原文切分')
       if (stage >= 4) {
-        // 默认交付删减后的分集剧本（漫剧直接读取）；可选的逐集改写产出剧本/第NNN集/分集剧本.md。
-        const candidates = [`${root}/项目资料/分集剧本/第${number}集分集剧本.md`, `${root}/剧本/${episodeFolder(number)}/分集剧本.md`]
+        // 本集的改编交付物：工程剧本优先（漫剧只读它），其次删减后直出的分集剧本，最后是逐集改写的分集剧本。
+        const candidates = [`${root}/剧本/工程剧本/第${number}集工程剧本.md`, `${root}/项目资料/分集剧本/第${number}集分集剧本.md`, `${root}/剧本/${episodeFolder(number)}/分集剧本.md`]
         const present = []
         for (const path of candidates) if ((await ctx.fs.stat(await ctx.fs.resolve(path, { cwd, signal: exec.signal }), exec.signal))?.type === 'file') present.push(path)
-        if (!present.length) throw new Error(`第${number}集缺少分集剧本（项目资料/分集剧本）或改写剧本`)
-        if (stage === 4 && !present.some(path => outputs[path])) throw new Error('逐集阶段须登记所有目标集的分集剧本')
+        if (!present.length) throw new Error(`第${number}集缺少工程剧本或分集剧本`)
+        if (stage === 4 && !present.some(path => outputs[path])) throw new Error('逐集阶段须登记所有目标集的工程剧本或分集剧本')
       }
     }
     // 不要求全覆盖：列出目标章节中未被任何一集使用的原文行号，供删减清单核对。
@@ -2015,7 +2016,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent, route = 'none
       const assembled = args.artifact_kind === 'adaptation_annotation'
         ? await assembleEpisodes(ctx, exec, contract, route, sourceAgent, value.wikiRoot, JSON.parse(await ctx.fs.readText(await ctx.fs.resolve(value.path, { cwd: exec.agent.session.header.cwd, signal: exec.signal }), exec.signal)))
         : undefined
-      if (route === 'short-drama' && args.artifact_kind === 'episode_source_script' && value.adapted) await markAdapted(ctx, exec, value.wikiRoot, args.episode_number)
+      if (route === 'short-drama' && ['episode_source_script', 'engineering_script'].includes(args.artifact_kind) && value.adapted) await markAdapted(ctx, exec, value.wikiRoot, args.episode_number)
       return { status: value.status, path: value.path, operation: value.operation, warnings: value.warnings, ...(assembled ? { assembled } : {}) }
     },
   }

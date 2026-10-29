@@ -157,7 +157,8 @@
       "label": "{episode}工程剧本",
       "episode": true,
       "production_routes": [
-        "manju"
+        "manju",
+        "short-drama"
       ]
     },
     "video_prompt": {
@@ -694,6 +695,10 @@
       },
       "screenplay": {
         "index": "剧本/{episode}/index.md"
+      },
+      "engineering_script": {
+        "path": "剧本/工程剧本/第{episode_number}集工程剧本.md",
+        "index": "剧本/工程剧本/index.md"
       }
     },
     "directories": [

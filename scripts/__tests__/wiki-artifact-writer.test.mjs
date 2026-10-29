@@ -714,7 +714,7 @@ test('all 48 artifact contracts have explicit routes and every allowed kind save
       assert.ok(files.get(join(exec.agent.session.header.cwd, result.path))?.content.trim())
     }
   }
-  assert.deepEqual(counts, { manju: 27, 'short-drama': 20, novel: 16 })
+  assert.deepEqual(counts, { manju: 27, 'short-drama': 21, novel: 16 })
 })
 
 test('source links use document-relative targets and summaries contain only readable labels', async t => {
@@ -1010,6 +1010,80 @@ test('short-drama adapted scripts carry scene times and sources; the program che
   await w.annotate({ recut: { event: 'E01_甲追乙', episodes: 2 } }, '调整')
   assert.doesNotMatch(w.script(2), /strategy:/)
   assert.deepEqual(w.manifest().adapted, [])
+})
+
+test('短剧路线也能把逐集改编保存成工程剧本：不带 adapted 是普通台本，带了就走同一套校验', async t => {
+  const w = await ledgerWorld(t)
+  await w.annotate({ rhythm: w.rhythm, planned_through: '第3章 余波', events: [w.event()] })
+  const scene = (extra = {}) => ({ title: '场1', role: 'main', seconds: 40, sources: [{ chapter_heading: '第1章 树洞', start_line: 4, end_line: 6 }],
+    text: '乙从树后窜出，抱走饭盒。\n“站住！”甲怒喝。\n乙一路狂奔，被逼到悬崖边。', ...extra })
+  const adapt = (adapted, episode_number = 2) => w.save('engineering_script', { adapted }, { episode_number })
+  // 漫剧路线单独用工程剧本时没有切分卡：不带 adapted 的普通台本照旧能写。
+  const plain = await w.save('engineering_script', '# 第2集工程剧本\n\n【场1 约40秒】乙从树后窜出，抱走饭盒。', { episode_number: 2 })
+  assert.equal(plain.path, 'wiki/剧本/工程剧本/第2集工程剧本.md')
+  assert.deepEqual(w.manifest().adapted, [], '普通台本不算本集已完成改编')
+  // 带 adapted 时，四类拒绝与分集剧本完全一致。
+  await assert.rejects(adapt({ strategy: '', scenes: [scene()] }), /strategy|策略/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ sources: [] })] }), /出处/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ sources: [{ chapter_heading: '第1章 树洞', start_line: 2, end_line: 3 }] })] }), /本集原文范围/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ seconds: 1, text: `“${'这是一句很长很长的台词。'.repeat(4)}”` })] }), /对白/)
+  await assert.rejects(adapt({ strategy: '顺叙影视化', scenes: [scene({ seconds: 200 })] }), /180/)
+  await assert.rejects(adapt({ strategy: '冷开场', scenes: [scene({ role: 'cold', seconds: 30, sources: [{ chapter_heading: '第2章 悬崖', start_line: 8, end_line: 8 }] }), scene({ seconds: 40 })] }), /25%/)
+  const saved = await adapt({ strategy: '顺叙影视化', scenes: [scene()] })
+  assert.equal(saved.path, 'wiki/剧本/工程剧本/第2集工程剧本.md')
+  const text = w.read('wiki/剧本/工程剧本/第2集工程剧本.md')
+  assert.match(text, /event: "\[\[wiki\/改编方案\/事件\/E01_甲追乙\|E01_甲追乙\]\]"\nstrategy: 顺叙影视化\nseconds: 40\n/)
+  assert.match(text, /sources:\n  - "第1章 树洞 4–6行"\n---\n/)
+  assert.match(text, /【场1 约40秒｜对白1秒＋其余39秒】\n乙从树后窜出，抱走饭盒。/)
+  assert.deepEqual(w.manifest().adapted, [2], '带 adapted 的工程剧本同样记为本集改编完成')
+})
+
+test('短剧 writing 阶段认工程剧本：只有工程剧本、没有分集剧本时也能登记', async t => {
+  const w = await ledgerWorld(t)
+  await w.annotate({ rhythm: w.rhythm, planned_through: '第3章 余波', events: [w.event()] })
+  await w.save('story_summary', '# 原作梗概\n甲追乙到悬崖。', { research_version: 'original' })
+  await w.save('adaptation_checkpoint', { stage: 'materials', outputs: ['wiki/项目资料/原作/故事梗概.md'] })
+  await w.save('project_overview', '# 项目总纲\n忠实原作。')
+  await w.save('adaptation_episode_plan', '# 分集规划\n第1集起。')
+  await w.save('adaptation_checkpoint', { stage: 'scheme', outputs: ['wiki/改编方案/项目总纲.md', 'wiki/改编方案/分集规划.md'] })
+  await w.save('adaptation_checkpoint', { stage: 'cuts', episodes: [1], outputs: ['wiki/改编方案/分集切分/第001集原文.md'] })
+  // 工程剧本取代分集剧本作为交付物：把程序组装的分集剧本删掉。
+  for (const n of [1, 2, 3]) w.files.delete(join(w.root, `wiki/项目资料/分集剧本/第${n}集分集剧本.md`))
+  await assert.rejects(w.save('adaptation_checkpoint', { stage: 'writing', outputs: ['wiki/改编方案/项目总纲.md'] }), /分集剧本|工程剧本/)
+  await w.save('engineering_script', '# 第1集工程剧本\n\n【场1 约40秒】甲站在树洞前，握紧木棍。', { episode_number: 1 })
+  await w.save('adaptation_checkpoint', { stage: 'writing', outputs: ['wiki/剧本/工程剧本/第1集工程剧本.md'] })
+  const progress = JSON.parse(w.read('wiki/改编方案/执行进度.json'))
+  assert.equal(progress.stage, 'writing')
+  assert.ok(progress.files.writing['wiki/剧本/工程剧本/第1集工程剧本.md'])
+})
+
+test('漫剧工程阶段遇已有工程剧本走复用：读过来源后只登记，正文不变', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-manju-engineering-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'manju' })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  const read = path => recordWikiRead(sourceAgent, { targetKey: join(root, path) }, { kind: 'present', version: files.get(join(root, path)).version }, { ...exec, agent: sourceAgent, name: 'read' })
+  const save = (artifact_kind, content, extra = {}) => tool.execute({ artifact_kind, content, ...extra }, exec)
+  const engineering = 'wiki/剧本/工程剧本/第1集工程剧本.md'
+  const body = '# 第1集工程剧本\n\n比例 9:16。\n\n## 资产清单\n- 甲\n'
+  files.set(join(root, 'wiki/index.md'), { content: '# Wiki\n', version: 1 })
+  files.set(join(root, engineering), { content: body, version: 1 })
+  const checkpoint = input => save('pipeline_checkpoint', JSON.stringify(input), { video_model: 'H3', episode_number: 1 })
+  const plan = await checkpoint({ stage: 'plan', source_path: engineering, outputs: [] })
+  await checkpoint({ stage: 'materials', outputs: [(await save('story_summary', '# 故事梗概\n甲追乙到悬崖。')).path] })
+  read('wiki/项目资料/故事梗概.md')
+  const style = (await save('film_style', '# 影片比例与风格\n画面比例：9:16\n视觉风格：二维平涂。')).path
+  await checkpoint({ stage: 'style', outputs: [style] })
+  read('wiki/项目风格/影片比例与风格.md')
+  // 短剧路线已经产出的工程剧本就是本集的来源。
+  await assert.rejects(save('engineering_script', body, { episode_number: 1 }), /精准读取缺失|source/)
+  read(engineering)
+  const kept = await save('engineering_script', body, { episode_number: 1 })
+  assert.equal(kept.path, engineering)
+  assert.equal(kept.operation, 'unchanged')
+  assert.equal(files.get(join(root, engineering)).content, body)
+  assert.equal(JSON.parse(files.get(join(root, plan.path)).content).source_path, engineering)
 })
 
 test('short-drama episode scripts start with a header of links (event, characters, scenes, props) found in the text, and the raw body is original text only', async t => {
