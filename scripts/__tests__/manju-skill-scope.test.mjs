@@ -192,7 +192,7 @@ test('short-drama episode writing carries scene and dialogue craft rules with an
 
 test('short-drama planning keeps user examples as examples and covers batching, review and deletion checks', () => {
   const read = path => readFileSync(`public/skills/${path}`, 'utf8')
-  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), xiezuo = read('jc-gongchengjuben/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md')
+  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/references/时间账标注兼容流程.md'), xiezuo = read('jc-gongchengjuben/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md')
   // 本我、自我、超我是可选的人物设计手法，放在参考文件，不作为必填项或写作必读。
   assert.doesNotMatch(cehua, /\*\*本我、超我、自我\*\*/)
   assert.doesNotMatch(xiezuo, /本我/)
@@ -216,7 +216,7 @@ test('short-drama planning keeps user examples as examples and covers batching, 
 
 test('short-drama default is deletion-only: one-pass annotation, program-assembled original-only scripts handed to manju', () => {
   const read = path => readFileSync(`public/skills/${path}`, 'utf8')
-  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/SKILL.md'), pipeline = read('jc-duanju-pipeline/SKILL.md'), xiezuo = read('jc-gongchengjuben/SKILL.md'), ziliao = read('jc-xiangmuziliao/SKILL.md')
+  const cehua = read('jc-duanju-cehua/SKILL.md'), fenji = read('jc-duanju-fenji/references/时间账标注兼容流程.md'), pipeline = read('jc-duanju-pipeline/SKILL.md'), xiezuo = read('jc-gongchengjuben/SKILL.md'), ziliao = read('jc-xiangmuziliao/SKILL.md')
   // 项目总纲只给用户看：主题与事件摘要。
   assert.match(cehua, /主题[\s\S]*事件摘要/)
   assert.doesNotMatch(cehua, /卖点发动机|必要设定清单|大结构/)
@@ -325,7 +325,7 @@ test('逐集改编把原文落成引擎可校验的分集剧本', () => {
   assert.match(xiezuo, /adapted[\s\S]*seconds[\s\S]*sources/)
   assert.match(xiezuo, /25%/)
   const pipeline = readFileSync('public/skills/jc-duanju-pipeline/SKILL.md', 'utf8')
-  const fenji = readFileSync('public/skills/jc-duanju-fenji/SKILL.md', 'utf8')
+  const fenji = readFileSync('public/skills/jc-duanju-fenji/references/时间账标注兼容流程.md', 'utf8')
   const ziliao = readFileSync('public/skills/jc-xiangmuziliao/SKILL.md', 'utf8')
   assert.match(pipeline, /样集/)
   assert.match(ziliao, /一档一件[\s\S]*汇总档/)
@@ -335,4 +335,16 @@ test('逐集改编把原文落成引擎可校验的分集剧本', () => {
   assert.match(fenji, /正文只有原文/)
   assert.match(readFileSync('public/skills/jc-manju-pipeline/SKILL.md', 'utf8'), /文件头[\s\S]*资产链接[\s\S]*不是剧本/)
   assert.ok(!groups['short-drama'].includes('jc-film-style'))
+})
+
+ test('自由切分只读指定章并用现有切片接口归档，兼容标注按需加载', () => {
+  const skill = readFileSync('public/skills/jc-duanju-fenji/SKILL.md', 'utf8')
+  assert.match(skill, /第一章[\s\S]*下一未切分章/)
+  assert.match(skill, /默认保留全部正文/)
+  assert.match(skill, /adaptation_episode_plan[\s\S]*adaptation_cut[\s\S]*episode_source_script/)
+  assert.match(skill, /from_cut/)
+  assert.match(skill, /实际 read 本次保存/)
+  assert.match(skill, /不要求用户先建人物、场景、道具档案/)
+  assert.match(skill, /references\/时间账标注兼容流程.md/)
+  assert.doesNotMatch(skill, /每次只读.*20章/)
 })

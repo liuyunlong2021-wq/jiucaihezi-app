@@ -96,11 +96,12 @@
     "id": "jc-duanju-fenji",
     "name": "jc-duanju-fenji",
     "displayName": "jc-duanju-fenji",
-    "description": "短剧改编的第一步：原文只读一遍，每段约20章同时写角色、场景、道具等资产与事件文档，并把每个事件划分成回合、估动作单元时间、定重要度档位，保存结构化标注；程序按“内容算时间、时间定集数”切集，生成切分卡和原文直出的分集剧本，再交给逐集改编。本步只标注，不改写、不新增任何文字。",
+    "description": "根据用户提供的小说文件或章节目录路径切分短剧集数：读取指定章节，按冲突、因果、转折和结尾钩子规划分集，按真实行号切出各集原文并写入Wiki。用户说“切分集”“这一章分几集”“按要求切集”时使用；支持单章、指定范围与已有分集的定向修订。",
     "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",
+      "references/时间账标注兼容流程.md",
       "references/独立写作旧规则.md"
     ],
     "package": {
@@ -110,6 +111,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/时间账标注兼容流程.md",
+          "kind": "reference"
         },
         {
           "path": "references/独立写作旧规则.md",
