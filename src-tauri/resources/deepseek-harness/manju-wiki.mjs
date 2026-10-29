@@ -783,7 +783,7 @@ async function requirePipelineReads(ctx, args, exec, agent) {
     film_style: ['summary'], character_asset: ['style', 'bio'], character_voice: ['style', 'bio'],
     character_format: ['style', 'image'], scene_asset: ['style', 'scene'], prop_asset: ['style', 'prop'], crowd_asset: ['style'], costume_asset: ['style'], character_look: ['style'],
     engineering_script: ['style', 'source', 'cast'], sound_direction: ['engineering', 'cast'],
-    storyboard_prompt: ['engineering'], video_prompt: ['engineeringOrStoryboard'],
+    storyboard_prompt: ['engineering'], video_prompt: ['engineeringOrStoryboard', 'style'],
   }
   if (kind === 'video_prompt' && args.video_model === 'Seedance' && Object.keys(state.files?.assets || {}).length) validateSeedanceReferences(args.content)
   if (!rules[kind]) return
@@ -821,7 +821,7 @@ async function requirePipelineReads(ctx, args, exec, agent) {
     const prior = reads.get(target.targetKey ?? target)
     return prior && JSON.stringify((await ctx.fs.stat(target, exec.signal))?.version) === JSON.stringify(prior.version)
   }
-  if (kind === 'video_prompt' && args.video_model === 'Seedance') {
+  if (kind === 'video_prompt') {
     const byEntity = new Map()
     for (const path of Object.keys(state.files?.assets || {}).filter(path => /生图(?:格式)?提示词\.md$/.test(path))) {
       const name = posix.basename(posix.dirname(path))
@@ -957,8 +957,9 @@ async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spe
   if (input.stage === 'engineering') {
     const path = input.outputs.find(path => /工程剧本\.md$/.test(path))
     if (!path) throw new Error('工程阶段缺少工程剧本')
-    const text = await ctx.fs.readText(await projectTarget(ctx, cwd, path, exec.signal, workspace), exec.signal)
-    if (!/资产清单/.test(text) || !/比例/.test(text)) throw new Error('工程剧本缺少影片比例或整集资产清单')
+    // 分镜正文保持纯时间戳；风格与资产由已校验的阶段快照承载，兼容既有逐镜稿。
+    if (!Object.keys(files.style || {}).some(path => /影片比例与风格\.md$/.test(path)))
+      throw new Error('分镜交接缺少已登记的影片比例与风格')
   }
   const segments = input.segments ?? state.segments
   if (stage >= 5) {

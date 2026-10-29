@@ -208,8 +208,8 @@ test('resource discovery excludes foreign project skills and rejects symlink ali
 
 test('legal tools still load business methods, save notes and archive the engineering script', { timeout: 30000 }, async t => {
   const f = await fixture(t)
-  f.plan([{ name: 'skill', args: { name: 'jc-gongchengjuben' } },
-    { name: 'read', args: { file_path: join(skills, 'jc-gongchengjuben/references/shot-visibility.md'), limit: 10 } },
+  f.plan([{ name: 'skill', args: { name: 'jc-shijiancuo-fenjing' } },
+    { name: 'read', args: { file_path: join(skills, 'jc-seedance/references/director/shot-visibility.md'), limit: 10 } },
     { name: 'write', args: { file_path: '创作记录.md', content: '暂定草稿\n' } },
     { name: 'edit', args: { file_path: '创作记录.md', old_string: '暂定', new_string: '已选' } },
     { name: 'wiki_save_artifact', args: { artifact_kind: 'engineering_script', episode_number: 1, content: '# 工程台本\n\n镜头1：人物进入房间。\n' } },
@@ -241,9 +241,9 @@ test('single-Skill production keeps its route and cold-resumes it without restri
   await f.run('short-drama', { mode: 'skills:jc-xiangmuziliao', harness: recovered })
   assert.deepEqual(f.tools(), core)
   const kinds = f.requests.at(-1).tools.find(t => t.function.name === 'wiki_save_artifact').function.parameters.properties.artifact_kind.enum
-  assert.equal(kinds.length, 20)
+  assert.equal(kinds.length, 21)
   assert.ok(kinds.includes('screenplay'))
-  assert.ok(!kinds.includes('engineering_script'))
+  assert.ok(kinds.includes('engineering_script'))
   await f.run('none', { harness: recovered })
   assert.ok(f.tools().includes('bash'))
 })
@@ -433,16 +433,16 @@ test('actual SDK resumes a stopped pipeline until verified completion for both m
     checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
     save({ artifact_kind: 'story_summary' }, '# 故事梗概\n主角归来')
     save({ artifact_kind: 'scene_research', entity_name: '山门' }, '# 山门说明')
-    checkpoint({ stage: 'materials', outputs: ['wiki/项目资料/故事梗概.md', 'wiki/项目资料/场景说明/山门.md'] })
+    checkpoint({ stage: 'materials', outputs: ['wiki/项目资料/故事梗概.md', 'wiki/项目资料/场景/山门.md'] })
     calls.push(null) // A model final answer must not end an unfinished pipeline.
     calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/项目资料/故事梗概.md') } })
     save({ artifact_kind: 'film_style' }, '# 影片比例与风格\n比例：9:16\n风格：二维动画')
     checkpoint({ stage: 'style', outputs: ['wiki/项目风格/影片比例与风格.md'] })
-    calls.push(...['wiki/项目风格/影片比例与风格.md', 'wiki/项目资料/场景说明/山门.md'].map(path => ({ name: 'read', args: { file_path: join(f.root, path) } })))
+    calls.push(...['wiki/项目风格/影片比例与风格.md', 'wiki/项目资料/场景/山门.md'].map(path => ({ name: 'read', args: { file_path: join(f.root, path) } })))
     save({ artifact_kind: 'scene_asset', entity_name: '山门' }, '# 山门提示词')
     checkpoint({ stage: 'assets', outputs: ['wiki/资产/场景/山门/场景生图提示词.md'] })
     calls.push({ name: 'read', args: { file_path: join(f.root, '剧本.md') } })
-    save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n风格：二维动画\n资产清单：山门\n镜头1')
+    save({ artifact_kind: 'engineering_script', episode_number: 1 }, '0.0–10.0s：山门在云海上显现，镜头沿石阶缓推。')
     checkpoint({ stage: 'engineering', outputs: ['wiki/剧本/工程剧本/第1集工程剧本.md'], duration_seconds: 10 })
     calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/剧本/工程剧本/第1集工程剧本.md') } })
     calls.push({ name: 'read', args: { file_path: join(f.root, 'wiki/资产/场景/山门/场景生图提示词.md') } })
@@ -454,7 +454,7 @@ test('actual SDK resumes a stopped pipeline until verified completion for both m
     f.plan(calls)
     await f.run('manju', { sessionId: 'pipeline-both-models' })
     const progress = JSON.parse(readFileSync(join(f.root, `wiki/制作流水线/${model}/第1集进度.json`), 'utf8'))
-    assert.equal(progress.stage, 'complete')
+    assert.equal(progress.stage, 'complete', f.results().filter(x => /Error:/.test(String(x))).join('\n'))
     assert.equal(progress.status, 'completed')
     // 纯文生段可以没有 @图 行（2026-10-26），但仍须五模块交付。
     if (model === 'Seedance') assert.ok(f.results().some(result => /五模块/.test(String(result))))

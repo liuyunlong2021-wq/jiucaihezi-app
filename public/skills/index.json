@@ -131,7 +131,8 @@
     "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md"
+      "SKILL.md",
+      "references/按时间改编兼容.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -140,27 +141,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
-        }
-      ]
-    }
-  },
-  {
-    "id": "jc-fenjingben",
-    "name": "jc-fenjingben",
-    "displayName": "jc-fenjingben",
-    "description": "读取用户粘贴的文字或指定文件，写成“0.0–1.0s：画面动作”的连续时间戳分镜本。适用于时间戳分镜、按秒写画面、文字转分镜；先删无效信息，再设计首尾钩子，逐段交付动作、表演、摄影与声音，默认写入Wiki工程剧本目录。",
-    "triggers": [],
-    "commands": [],
-    "files": [
-      "SKILL.md"
-    ],
-    "package": {
-      "schemaVersion": 1,
-      "entry": "SKILL.md",
-      "files": [
+        },
         {
-          "path": "SKILL.md",
-          "kind": "instruction"
+          "path": "references/按时间改编兼容.md",
+          "kind": "reference"
         }
       ]
     }
@@ -218,102 +202,6 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
-        }
-      ]
-    }
-  },
-  {
-    "id": "jc-gongchengjuben",
-    "name": "jc-gongchengjuben",
-    "displayName": "jc-gongchengjuben",
-    "description": "根据用户提供的剧本路径直接制作分镜本：读取实际剧本，先删减不影响剧情与情绪的无效内容，再扩写动作和表演，最后拆成逐镜工程台本并写入Wiki。适用于“改成分镜本”“转分镜”“工程台本”；一次处理一集，保留原台词、关键因果与人物选择，输出连续镜号、时间码、镜头规格、可见动作及对白。既有按时间改编路线仅在明确要求时使用。",
-    "triggers": [],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/adaptation-rewrite.md",
-      "references/camera-grammar.md",
-      "references/character-entrance.md",
-      "references/dialogue-scenes.md",
-      "references/drama-performance.md",
-      "references/exaggerated-animation-performance.md",
-      "references/kungfu-duel.md",
-      "references/maoshan-exorcism-action.md",
-      "references/scene-rhythm.md",
-      "references/shot-density.md",
-      "references/shot-visibility.md",
-      "references/single-scene-cinematic.md",
-      "references/suspense-scenes.md",
-      "references/动作与法术戏写法.md",
-      "references/场景与对白打磨.md"
-    ],
-    "package": {
-      "schemaVersion": 1,
-      "entry": "SKILL.md",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "kind": "instruction"
-        },
-        {
-          "path": "references/adaptation-rewrite.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/camera-grammar.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/character-entrance.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/dialogue-scenes.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/drama-performance.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/exaggerated-animation-performance.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/kungfu-duel.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/maoshan-exorcism-action.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/scene-rhythm.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/shot-density.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/shot-visibility.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/single-scene-cinematic.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/suspense-scenes.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/动作与法术戏写法.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/场景与对白打磨.md",
-          "kind": "reference"
         }
       ]
     }
@@ -403,7 +291,7 @@
     "id": "jc-manju-brainstorm",
     "name": "jc-manju-brainstorm",
     "displayName": "jc-manju-brainstorm",
-    "description": "独立创作脑暴，从一句灵感、画面、台词或招式出发，基于项目资料提供风格与资产候选，并对每个对白、动作和攻防节拍给出具体选项；支持逐句、整组、混搭与委托推荐，选定后形成专业工程剧本。用于没有完整剧本却要写工程脚本、卡在某个节拍或明确要求脑暴的任务；已有完整剧本只做工程转换时直接使用 jc-gongchengjuben，完整短剧与分集文学创作由短剧写作路线承接。",
+    "description": "独立创作脑暴，从一句灵感、画面、台词或招式出发，基于项目资料提供风格与资产候选，并对每个对白、动作和攻防节拍给出具体选项；支持逐句、整组、混搭与委托推荐，选定后形成时间戳分镜本。用于没有完整剧本却要写工程脚本、卡在某个节拍或明确要求脑暴的任务；已有完整剧本只做工程转换时直接使用 jc-shijiancuo-fenjing，完整短剧与分集文学创作由短剧写作路线承接。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -439,7 +327,7 @@
     "id": "jc-manju-pipeline",
     "name": "jc-manju-pipeline",
     "displayName": "jc-manju-pipeline",
-    "description": "将用户提供的分集剧本与已确认的影片比例和风格，自动组织为项目资料、独立资产提示词、含资产清单的工程剧本，以及Seedance或MiniMax H3每段不超过30秒（以所选模型限制为准）的视频提示词；逐步保存Wiki、校验阶段并支持中断续做，不生成图片或视频。",
+    "description": "将用户提供的分集剧本与已确认的影片比例和风格，自动组织为项目资料、独立资产提示词、时间戳分镜本及其资产、风格关联，以及Seedance或MiniMax H3每段不超过30秒（以所选模型限制为准）的视频提示词；逐步保存Wiki、校验阶段并支持中断续做，不生成图片或视频。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -1203,7 +1091,7 @@
     "id": "jc-seedance",
     "name": "jc-seedance",
     "displayName": "jc-seedance",
-    "description": "将已确认工程台本忠实转写为 Seedance 2.5／SD2.5 固定结构的中文视频提示词，按独立可提交的五模块格式绑定@图资产与角色九维声音，保留表演因果、镜头顺序、时间切片和空间连续。也接收故事或单场戏：先复用 jc-gongchengjuben 的导演规则进行内部设计，再按本格式交付；不另维护导演体系。",
+    "description": "将已确认工程台本忠实转写为 Seedance 2.5／SD2.5 固定结构的中文视频提示词，按独立可提交的五模块格式绑定@图资产与角色九维声音，保留表演因果、镜头顺序、时间切片和空间连续。也接收故事或单场戏：先复用 jc-shijiancuo-fenjing 的导演规则进行内部设计，再按本格式交付；不另维护导演体系。",
     "triggers": [
       "导演分镜",
       "导演分镜提示词",
@@ -1221,6 +1109,21 @@
       ".jc-skill-package.json",
       "SKILL.md",
       "agents/openai.yaml",
+      "references/director/adaptation-rewrite.md",
+      "references/director/camera-grammar.md",
+      "references/director/character-entrance.md",
+      "references/director/dialogue-scenes.md",
+      "references/director/drama-performance.md",
+      "references/director/exaggerated-animation-performance.md",
+      "references/director/kungfu-duel.md",
+      "references/director/maoshan-exorcism-action.md",
+      "references/director/scene-rhythm.md",
+      "references/director/shot-density.md",
+      "references/director/shot-visibility.md",
+      "references/director/single-scene-cinematic.md",
+      "references/director/suspense-scenes.md",
+      "references/director/动作与法术戏写法.md",
+      "references/director/场景与对白打磨.md",
       "references/drama-performance.md",
       "references/exaggerated-animation-performance.md",
       "references/kungfu-duel.md",
@@ -1242,6 +1145,66 @@
         {
           "path": "agents/openai.yaml",
           "kind": "metadata"
+        },
+        {
+          "path": "references/director/adaptation-rewrite.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/camera-grammar.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/character-entrance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/dialogue-scenes.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/drama-performance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/exaggerated-animation-performance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/kungfu-duel.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/maoshan-exorcism-action.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/scene-rhythm.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/shot-density.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/shot-visibility.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/single-scene-cinematic.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/suspense-scenes.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/动作与法术戏写法.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/director/场景与对白打磨.md",
+          "kind": "reference"
         },
         {
           "path": "references/drama-performance.md",
@@ -1292,6 +1255,27 @@
     "name": "jc-shengyin-sheji",
     "displayName": "jc-shengyin-sheji",
     "description": "根据剧本、故事、角色资料、角色造型图片或参考录音，单独或综合设计可复用的角色九维音色与试听台词。当用户需要从角色照片推演声音、结合造型和剧情设计角色声音、制作音色档案、配音提示词、九维声音设计或参考录音绑定时使用。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-shijiancuo-fenjing",
+    "name": "jc-shijiancuo-fenjing",
+    "displayName": "jc-shijiancuo-fenjing",
+    "description": "读取用户的文字或文件路径，忠实展开为“0.0–1.0s：画面动作”的时间戳分镜。用于文字转时间戳分镜、按秒写动作和表演；保持原文内容与台词，不承担改编、删减、钩子策划或资产设计。",
     "triggers": [],
     "commands": [],
     "files": [

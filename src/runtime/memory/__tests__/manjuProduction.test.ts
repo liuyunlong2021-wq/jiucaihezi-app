@@ -126,8 +126,8 @@ test('short drama route resources are packaged and all delegated links resolve i
   const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
   const allowed = new Set([...skills, 'wiki-memory'])
   // 借用的设计Skill只取设计方法，其原有漫剧交接链接（如角色格式）可指向漫剧范围。
-  // jc-gongchengjuben 是两条路线共用的改编技能，体检资料时要读角色／场景／道具／人群／服装的设计方法。
-  const borrowed = new Set(['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt', 'jc-renqun', 'jc-gongchengjuben'])
+  // 时间戳分镜仅做忠实转换；既有短剧按场改编参考复用漫剧导演方法。
+  const borrowed = new Set(['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt', 'jc-renqun', 'jc-duanju-pipeline'])
   const manju = new Set(JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8')).manju as string[])
   for (const name of skills) {
     const entry = index.find((item: { name: string }) => item.name === name)

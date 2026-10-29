@@ -23,6 +23,7 @@ function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   }
   const fs = {
     sandboxMode: undefined,
+    processPath(target) { return typeof target === 'string' ? target : target.targetKey },
     async resolve(path) { return absolute(path) },
     contains(parent, child) {
       const value = relative(parent, child)
@@ -133,7 +134,7 @@ test('pipeline checkpoints reject missing stages and overlong segments, then com
     await checkpoint({ stage: 'style', outputs: [style] })
     const asset = await save({ artifact_kind: 'scene_asset', entity_name: '山门' }, '# 山门提示词')
     await checkpoint({ stage: 'assets', outputs: [asset] })
-    const engineering = await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '# 工程剧本\n比例：9:16\n资产清单：山门\n镜头1')
+    const engineering = await save({ artifact_kind: 'engineering_script', episode_number: 1 }, '0.0–1.0s：山门缓缓开启，门后透出冷光。')
     const limit = 30
     await checkpoint({ stage: 'engineering', outputs: [engineering], duration_seconds: limit + 1 })
     const first = await save({ artifact_kind: 'video_prompt', episode_number: 1, video_model: model, segment: '001' }, model === 'H3' ? '# 第一段\n<Picture 1> is 山门.' : '# 第一段\n@图1：山门')
@@ -1139,4 +1140,38 @@ test('short-drama episode scripts start with a header of links (event, character
   assert.doesNotMatch(read(2), /甲/)
   // 本集没有任何资产出现时只保留所属事件。
   assert.match(read(3), /^---\nevent: "\[\[wiki\/改编方案\/事件\/E03_空镜\|E03_空镜\]\]"\n---\n风吹过山岗。\n$/)
+})
+
+test('timestamp handoff requires current storyboard, style and used asset reads for both video models', async t => {
+ for (const model of ['H3', 'Seedance']) {
+  const root = mkdtempSync(join(tmpdir(), 'jc-timestamp-handoff-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'manju' })
+  files.set(join(root, '剧本.md'), { content: '山门开启。', version: 1 })
+  const save = async (artifact_kind, content, extra = {}) => tool.execute({ artifact_kind, content, ...extra }, exec)
+  const checkpoint = input => save('pipeline_checkpoint', JSON.stringify(input), { video_model: model, episode_number: 1 })
+  await checkpoint({ stage: 'plan', source_path: '剧本.md', outputs: [] })
+  const summary = await save('story_summary', '# 故事梗概\n山门开启。')
+  await checkpoint({ stage: 'materials', outputs: [summary.path] })
+  const style = await save('film_style', '# 影片比例与风格\n比例：9:16\n风格：二维')
+  await checkpoint({ stage: 'style', outputs: [style.path] })
+  const asset = await save('scene_asset', '# 山门\n青灰石门。', { entity_name: '山门' })
+  await checkpoint({ stage: 'assets', outputs: [asset.path] })
+  const script = await save('engineering_script', '0.0–1.0s：山门开启，冷光穿过门缝。', { episode_number: 1 })
+  await checkpoint({ stage: 'engineering', outputs: [script.path], duration_seconds: 1 })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  const read = path => recordWikiRead(sourceAgent, { targetKey: join(root, path) }, { kind: 'present', version: files.get(join(root, path)).version }, { ...exec, agent: sourceAgent, name: 'read' })
+  const body = model === 'H3' ? '<Picture 1> is 山门. The gate opens.' : '@图1：山门\n【全局设定】9:16二维\n【时间戳剧本分镜】0–1秒：@图1开启。\n【全局补充】无字幕'
+  const prompt = () => save('video_prompt', body, { episode_number: 1, video_model: model, segment: '001' })
+  await assert.rejects(prompt(), /尚未读取|精准读取/)
+  read(asset.path)
+  await assert.rejects(prompt(), /engineeringOrStoryboard/)
+  read(script.path)
+  await assert.rejects(prompt(), /style/)
+  read(style.path)
+  await prompt()
+  files.set(join(root, asset.path), { content: '# 山门\n用户修改石门', version: 1000 })
+  await assert.rejects(prompt(), /尚未读取或已过期/)
+ }
 })

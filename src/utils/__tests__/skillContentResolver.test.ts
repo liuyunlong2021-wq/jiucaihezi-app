@@ -201,9 +201,9 @@ test('refreshing the picker updates the catalog subsequently used by skill loadi
   globalThis.fetch = (async () => Response.json(entries)) as typeof fetch
   try {
     await loadWebSkillCatalog(fetch, { refresh: true })
-    entries = [...catalog, { ...catalog[0]!, id: 'jc-fenjingben', name: 'jc-fenjingben' }]
+    entries = [...catalog, { ...catalog[0]!, id: 'jc-shijiancuo-fenjing', name: 'jc-shijiancuo-fenjing' }]
     await loadWebSkillCatalog(fetch, { refresh: true })
-    assert.ok((await loadWebSkillCatalog()).some(skill => skill.name === 'jc-fenjingben'))
+    assert.ok((await loadWebSkillCatalog()).some(skill => skill.name === 'jc-shijiancuo-fenjing'))
   } finally {
     globalThis.fetch = (async () => Response.json(catalog)) as typeof fetch
     await loadWebSkillCatalog(fetch, { refresh: true })

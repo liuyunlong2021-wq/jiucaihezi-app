@@ -4,6 +4,11 @@ description: Write MiniMax H3 video generation prompts for T2VA, I2VA, FL2VA, L2
 compatibility: Portable to any agent that can read local files — no external API calls, MiniMax Hub tools, or proprietary runtime required. The agents/openai.yaml file only adds optional ChatGPT/Codex UI metadata; it does not restrict the skill to OpenAI agents.
 ---
 
+## 漫剧交接：分镜、资产、风格
+
+生成本段提示词前实际读取：本集工程剧本目录内的时间戳分镜（或用户已确认的旧工程稿）、本段关联的角色及造型／场景／道具资产正文与真实图片绑定、已确认的项目比例与风格。沿 Wiki 索引与制作进度的 assets 登记定位，核对当前版本与本段时间范围。分镜正文不需要资产清单；不因缺少镜号、资产说明或风格头而重写分镜。新稿以时间范围定位，旧稿可沿镜号；完整保留动作、台词、声音及顺序，再换算为本段从0起的时间。纯文生或没有需要带图的资产时允许空引用，不能虚构图号或已上传状态。缺少必需分镜、风格或本段所需资产时说明具体缺项，不凭旧聊天补造。
+
+
 ## 漫剧 Wiki 精准输入与归档
 
 本节适用于漫剧制作。始终读取用户本轮消息，以本轮要求决定修改范围；上下文只辅助指代，不以旧聊天替代当前Wiki正文。下列“本轮应读”必须通过read实际读取正文；本轮刚生成、保存在聊天里或只读index均不算。相同版本可在本轮复用已读正文，文件修改后须重读。先wiki_read_guidance(overview)，沿真实index唯一定位，不凭人名猜路径，不把索引摘要当正文。
