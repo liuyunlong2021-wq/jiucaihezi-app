@@ -1710,8 +1710,22 @@ async function adaptedScript(ctx, args, exec, root, agent, adapted) {
     return `【${label} 约${secondsText(scene.seconds)}秒｜对白${Math.round(dialogue)}秒＋其余${secondsText(round1(scene.seconds - Math.round(dialogue)))}秒】\n${text}\n`
   }).join('\n')
   const header = episodeHeader(await assetIndex(ctx, exec, root), await eventAssetNames(ctx, exec, root, found.event.event), root, found.event.event, body,
-    { before: [`strategy: ${strategy}`, `seconds: ${secondsText(total)}`], after: ['sources:', ...sources.map(label => `  - "${label}"`)] })
+    { before: [`strategy: ${strategy}`, `seconds: ${secondsText(total)}`, `比例: ${await filmRatio(ctx, exec, root)}`, '资产清单: 见下方 characters、scenes、props'],
+      after: ['sources:', ...sources.map(label => `  - "${label}"`)] })
   return { content: header + body, warnings }
+}
+
+/**
+ * 本项目的影片比例。漫剧 pipeline 的 engineering 阶段要求工程剧本写明比例与整集资产清单，
+ * 短剧路线的改编稿同样带上这两行，两种形态才能被同一条漫剧流水线读取。
+ */
+async function filmRatio(ctx, exec, root) {
+  const cwd = exec.agent.session.header.cwd
+  const target = await ctx.fs.resolve(`${root}/项目风格/影片比例与风格.md`, { cwd, signal: exec.signal })
+  if ((await ctx.fs.stat(target, exec.signal))?.type !== 'file') return '待确认'
+  const text = await ctx.fs.readText(target, exec.signal)
+  const found = /(?:画面比例|影片比例|比例)[^0-9\n]*([0-9]{1,2}\s*:\s*[0-9]{1,2})/.exec(text ?? '')
+  return found ? found[1].replace(/\s+/g, '') : '待确认'
 }
 
 async function markAdapted(ctx, exec, root, episode) {

@@ -1033,9 +1033,16 @@ test('短剧路线也能把逐集改编保存成工程剧本：不带 adapted �
   assert.equal(saved.path, 'wiki/剧本/工程剧本/第2集工程剧本.md')
   const text = w.read('wiki/剧本/工程剧本/第2集工程剧本.md')
   assert.match(text, /event: "\[\[wiki\/改编方案\/事件\/E01_甲追乙\|E01_甲追乙\]\]"\nstrategy: 顺叙影视化\nseconds: 40\n/)
+  // 漫剧 pipeline 的 engineering 阶段按这两个词认工程剧本：短剧改编稿也要带，不能只有漫剧形态才有。
+  assert.match(text, /^比例: 待确认$/m, '项目还没有风格文件时标待确认')
+  assert.match(text, /^资产清单: /m)
   assert.match(text, /sources:\n  - "第1章 树洞 4–6行"\n---\n/)
   assert.match(text, /【场1 约40秒｜对白1秒＋其余39秒】\n乙从树后窜出，抱走饭盒。/)
   assert.deepEqual(w.manifest().adapted, [2], '带 adapted 的工程剧本同样记为本集改编完成')
+  // 项目已有确认的比例时原样写进文件头。
+  w.files.set(join(w.root, 'wiki/项目风格/影片比例与风格.md'), { content: '# 影片比例与风格\n画面比例：9:16\n视觉风格：二维\n', version: 1 })
+  await adapt({ strategy: '顺叙影视化', scenes: [scene()] })
+  assert.match(w.read('wiki/剧本/工程剧本/第2集工程剧本.md'), /^比例: 9:16$/m)
 })
 
 test('短剧 writing 阶段认工程剧本：只有工程剧本、没有分集剧本时也能登记', async t => {
