@@ -6,8 +6,8 @@ import { resolve, dirname } from 'node:path'
 const groups = JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8'))
 test('production scopes are plain business allowlists with no executable router', () => {
   assert.deepEqual(Object.keys(groups), ['manju', 'short-drama', 'novel'])
-  assert.equal(groups.manju.length, 15)
-  assert.equal(groups['short-drama'].length, 9)
+  assert.equal(groups.manju.length, 16)
+  assert.equal(groups['short-drama'].length, 10)
   assert.ok(groups['short-drama'].includes('jc-gongchengjuben'), '短剧改编与漫剧共用同一个改编技能')
   assert.ok(!groups['short-drama'].includes('jc-duanju-xiezuo'), 'jc-duanju-xiezuo 已并入工程剧本')
   for (const name of ['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt']) assert.ok(groups['short-drama'].includes(name), name)
@@ -353,4 +353,31 @@ test('剧本路径直接转逐镜本：先删再扩，显式按场路线不抢�
  assert.match(skill, /允许补足实现原意必需的表演细节/)
  assert.match(skill, /原文件保持原样/)
  assert.match(skill, /缺少资产档案不阻塞写作/)
+})
+
+test('分镜按语义与观看重点拆镜，时间由对白和动作推导，首次登场先读参考', () => {
+ const root = 'public/skills/jc-gongchengjuben/'
+ const main = readFileSync(root + 'SKILL.md', 'utf8')
+ const density = readFileSync(root + 'references/shot-density.md', 'utf8')
+ const entrance = readFileSync(root + 'references/character-entrance.md', 'utf8')
+ assert.match(main, /先按观看重点拆镜，再计算每镜时长/)
+ assert.match(main, /每秒4–5个汉字[\s\S]*每秒3字/)
+ assert.match(main, /较大者[\s\S]*先做再说才相加/)
+ assert.match(main, /首次登场[\s\S]*必须实际读取.*角色登场与退场/)
+ assert.match(main, /严禁附加“资产说明”/)
+ assert.match(main, /先推近再拉回[\s\S]*另编号/)
+ for (const phrase of ['“干燥、”', '“隐蔽、”', '“全天然采光！”', '“正中间这片地，”', '“就是我的第一块农田！”']) assert.ok(density.includes(phrase))
+ const example = density.split('## 正例甲：')[1].split('## 正例乙：')[0]
+ const ranges = [...example.matchAll(/镜头(\d+)【(\d+):(\d+(?:\.\d+)?)-(\d+):(\d+(?:\.\d+)?)】/g)]
+ assert.equal(ranges.length, 5)
+ let end = 0
+ for (const m of ranges) {
+  const from = Number(m[2]) * 60 + Number(m[3]), to = Number(m[4]) * 60 + Number(m[5])
+  assert.equal(from, end)
+  assert.ok(to > from && to - from < 3)
+  end = to
+ }
+ assert.doesNotMatch(density, /单镜一般 3–8 秒|保持原始姿态，注视镜头/)
+ assert.match(entrance, /动物、怪物、无名角色[\s\S]*必须实际读取/)
+ assert.match(entrance, /每项独立编号/)
 })

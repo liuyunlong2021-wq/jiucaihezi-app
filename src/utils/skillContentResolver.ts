@@ -79,7 +79,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 let catalogPromise: Promise<WebSkillCatalogEntry[]> | null = null
 
 async function fetchWebSkillCatalog(fetcher: typeof fetch): Promise<WebSkillCatalogEntry[]> {
-  const response = await fetcher('/skills/index.json')
+  const response = await fetcher('/skills/index.json', { cache: 'no-cache' })
   if (!response.ok) throw new Error(`Skill 目录加载失败: HTTP ${response.status}`)
   const value = await response.json()
   if (!Array.isArray(value)) throw new Error('Skill 目录格式无效')
@@ -104,7 +104,8 @@ export async function loadWebSkillCatalog(
   fetcher: typeof fetch = fetch,
   options: { refresh?: boolean } = {},
 ): Promise<WebSkillCatalogEntry[]> {
-  if (fetcher !== fetch || options.refresh) return await fetchWebSkillCatalog(fetcher)
+  if (fetcher !== fetch) return await fetchWebSkillCatalog(fetcher)
+  if (options.refresh) catalogPromise = null
   catalogPromise ||= fetchWebSkillCatalog(fetcher).catch(error => {
     catalogPromise = null
     throw error

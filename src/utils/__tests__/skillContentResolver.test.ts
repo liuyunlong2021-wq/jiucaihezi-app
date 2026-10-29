@@ -187,10 +187,26 @@ test('default Web Skill catalog retries after a temporary request failure', { co
   }) as typeof fetch
 
   try {
-    await assert.rejects(() => loadWebSkillCatalog(), /HTTP 503/)
+    await assert.rejects(() => loadWebSkillCatalog(fetch, { refresh: true }), /HTTP 503/)
     assert.equal((await loadWebSkillCatalog()).length, catalog.length)
     assert.equal(attempts, 2)
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('refreshing the picker updates the catalog subsequently used by skill loading', { concurrency: false }, async () => {
+  const original = globalThis.fetch
+  let entries = catalog
+  globalThis.fetch = (async () => Response.json(entries)) as typeof fetch
+  try {
+    await loadWebSkillCatalog(fetch, { refresh: true })
+    entries = [...catalog, { ...catalog[0]!, id: 'jc-fenjingben', name: 'jc-fenjingben' }]
+    await loadWebSkillCatalog(fetch, { refresh: true })
+    assert.ok((await loadWebSkillCatalog()).some(skill => skill.name === 'jc-fenjingben'))
+  } finally {
+    globalThis.fetch = (async () => Response.json(catalog)) as typeof fetch
+    await loadWebSkillCatalog(fetch, { refresh: true })
+    globalThis.fetch = original
   }
 })

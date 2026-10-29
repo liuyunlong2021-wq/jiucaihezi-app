@@ -145,6 +145,27 @@
     }
   },
   {
+    "id": "jc-fenjingben",
+    "name": "jc-fenjingben",
+    "displayName": "jc-fenjingben",
+    "description": "读取用户粘贴的文字或指定文件，写成“0.0–1.0s：画面动作”的连续时间戳分镜本。适用于时间戳分镜、按秒写画面、文字转分镜；先删无效信息，再设计首尾钩子，逐段交付动作、表演、摄影与声音，默认写入Wiki工程剧本目录。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
     "id": "jc-film-style",
     "name": "jc-film-style",
     "displayName": "jc-film-style",

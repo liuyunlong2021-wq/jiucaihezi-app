@@ -1336,7 +1336,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     )
     if (matchingTools.length) return matchingTools
   }
-  const bundledSkills = await loadWebSkillCatalog().catch(() => [])
+  const bundledSkills = await loadWebSkillCatalog(fetch, { refresh: true }).catch(() => [])
   if (!mentionOpen.value || mentionScope.value !== scope) return []
   const skillOptions = [
     ...bundledSkills.filter(skill => skill.name !== 'wiki-memory').map(skill => ({
