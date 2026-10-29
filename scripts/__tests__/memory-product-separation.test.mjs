@@ -157,7 +157,6 @@ test('App bundles only the remaining product Skills', () => {
     'jc-film-style',
     'jc-fuzhuang-prompt',
     'jc-gongchengjuben',
-    'jc-juese-geshi',
     'jc-juese-sheji',
     'jc-manju-brainstorm',
     'jc-manju-pipeline',

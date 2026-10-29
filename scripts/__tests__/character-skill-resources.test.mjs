@@ -16,7 +16,7 @@ function files(directory) {
 test('the character package bundles all four physiognomy references and both prompt suffix resources', () => {
   const index = JSON.parse(readFileSync(join(root, '..', 'index.json'), 'utf8'))
   const skill = index.find(item => item.id === 'jc-juese-sheji')
-  const required = ['guxiang.md', 'mianxiang.md', 'tixiang.md', 'body-proportions.md', 'shouxiang.md', 'portrait-beauty.md', 'deai-and-detail.md', 'random-words.md']
+  const required = ['guxiang.md', 'mianxiang.md', 'tixiang.md', 'body-proportions.md', 'shouxiang.md', 'portrait-beauty.md', 'deai-and-detail.md', 'random-words.md', '9-16.md', '16-9.md']
   for (const name of required) assert.ok(skill.files.includes(`references/${name}`), name)
   const actual = files(root).map(path => relative(root, path).split(sep).join('/')).sort()
   assert.deepEqual(skill.files, actual)
@@ -35,8 +35,8 @@ test('every character reference is reachable locally without personal skill dire
     visited.add(path)
     for (const match of readFileSync(path, 'utf8').matchAll(/\[[^\]\n]+\]\(([^)]+\.md)\)/g)) {
       const target = resolve(dirname(path), match[1])
-      if (target.startsWith(root)) pending.push(target)
-      else assert.equal(target, resolve(root, '../jc-juese-geshi/SKILL.md'), 'unexpected external resource')
+      assert.ok(target.startsWith(root), `角色设计已自带三格模板，不应再引用外部包：${target}`)
+      pending.push(target)
     }
   }
   assert.deepEqual([...visited].sort(), [...resources].sort())
@@ -44,7 +44,7 @@ test('every character reference is reachable locally without personal skill dire
 
 test('both character format templates accept text without implying an attached image', () => {
   for (const ratio of ['9-16', '16-9']) {
-    const template = readFileSync(join(root, '..', 'jc-juese-geshi', 'references', `${ratio}.md`), 'utf8')
+    const template = readFileSync(join(root, 'references', `${ratio}.md`), 'utf8')
     assert.match(template, /角色文字提示词或人物参考图/)
     assert.match(template, /只有文字时直接用于文生图，无需参考图/)
     assert.doesNotMatch(template, /所附参考图|参考图中人物/)

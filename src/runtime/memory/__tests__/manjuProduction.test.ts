@@ -11,7 +11,7 @@ import {
 import { NOVEL_MODE, restoreNovelSelection } from '../novelProduction'
 
 test('the production bundle includes both video routes and excludes the portrait skill', () => {
-  assert.equal(MANJU_SKILLS.length, 17)
+  assert.equal(MANJU_SKILLS.length, 16)
   assert.ok(MANJU_SKILLS.includes('jc-fuzhuang-prompt'), '服装换装随漫剧白名单内置')
   assert.ok(MANJU_SKILLS.includes('jc-renqun'), '人群群像随漫剧白名单内置')
   assert.ok(!MANJU_SKILLS.includes('jc-duanju'))
@@ -65,7 +65,7 @@ test('brainstorm resources and delegated skills resolve inside the production pa
 
 
 test('character format requests accept existing character text and override ordinary continuation routing', () => {
-  const format = readFileSync('public/skills/jc-juese-geshi/SKILL.md', 'utf8')
+  const format = readFileSync('public/skills/jc-juese-sheji/SKILL.md', 'utf8')
   assert.match(format, /已有角色文字提示词/)
   assert.match(format, /文字模式.*不要求.*参考图/)
   assert.match(format, /不声称.*看过.*图片/)

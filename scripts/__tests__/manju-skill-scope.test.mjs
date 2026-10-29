@@ -6,7 +6,7 @@ import { resolve, dirname } from 'node:path'
 const groups = JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8'))
 test('production scopes are plain business allowlists with no executable router', () => {
   assert.deepEqual(Object.keys(groups), ['manju', 'short-drama', 'novel'])
-  assert.equal(groups.manju.length, 16)
+  assert.equal(groups.manju.length, 15)
   assert.equal(groups['short-drama'].length, 9)
   for (const name of ['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt']) assert.ok(groups['short-drama'].includes(name), name)
   assert.deepEqual(groups.novel, ['jc-novel'])
@@ -49,7 +49,7 @@ test('crowds are one shared lineup asset per group, referenced with headcount an
 
 test('the identity close-up of the character sheet is a 30–35° three-quarter chest-up head shot, not facing the camera', () => {
   for (const file of ['9-16.md', '16-9.md']) {
-    const text = readFileSync(`public/skills/jc-juese-geshi/references/${file}`, 'utf8')
+    const text = readFileSync(`public/skills/jc-juese-sheji/references/${file}`, 'utf8')
     assert.match(text, /约30°至35°斜侧齐胸头部特写/, file)
     assert.match(text, /不正对镜头/, file)
     assert.doesNotMatch(text, /双眼直视镜头/, file)
