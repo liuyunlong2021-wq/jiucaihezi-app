@@ -179,8 +179,10 @@ async function stepFor(state: DuanjuRunState, deps: DuanjuAutoDeps, manifest: Du
   const batch = batchOf(state)
   if (state.phase === 'plan') {
     const parts = slices(batch, config.readSize), part = parts[state.index], last = state.index === parts.length - 1
-    const register = state.index === 0
-      ? `先以 chapter_range（source_paths 为 ${JSON.stringify(config.sourcePaths)}，from「${batch[0]}」，to「${batch.at(-1)}」）保存 source 进度；${state.batch > 0 ? '上一批末尾未完的事件，先读它的事件文档，在同一事件里续写；' : ''}`
+    // 只有首批登记 source 进度：登记的是整个目标范围（不是本批切片），否则执行进度里的章范围会被
+    // 每批改写成上一批读到的那几章，面板的可选范围就越跑越窄；重存 source 还会把后续阶段的产物记录清空。
+    const register = state.batch === 0 && state.index === 0
+      ? `先以 chapter_range（source_paths 为 ${JSON.stringify(config.sourcePaths)}，from「${config.chapters[0]}」，to「${config.chapters.at(-1)}」）保存 source 进度；`
       : '上一段末尾标为未完的事件，先读它的事件文档，在同一事件里续写，整体重交；'
     const rhythm = JSON.stringify({ name: config.rhythm.name, min: config.rhythm.min, target: config.rhythm.target, max: config.rhythm.max })
     const ending = last ? '这是本批最后一段：仍未完的事件照样标 unfinished，下一批会从它的起始章开始读；如果它从本批第一章就开始，就在自然转折处拆成两个事件。' : ''

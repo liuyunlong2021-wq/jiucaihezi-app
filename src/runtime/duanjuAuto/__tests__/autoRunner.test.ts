@@ -19,13 +19,13 @@ function world(options: { fail?: RegExp; failTimes?: number; blocked?: RegExp; b
       sent.push(text)
       if (options.fail?.test(text) && failures < (options.failTimes ?? 1)) { failures += 1; return }
       if (options.blocked?.test(text)) { progress = { ...progress, status: 'blocked', reason: '原文第3章缺失' }; return }
-      if (/from「([^」]+)」，to「([^」]+)」/.test(text)) batch += 1
       const range = text.match(/^【全自动改编·规划】「([^」]+)」至「([^」]+)」/)
       if (range) {
         events += 1
         episode += 2
         const heavy = options.heavyEvent === events
-        const unfinished = /本批最后一段/.test(text) ? options.unfinishedAt?.(batch) : undefined
+        // 批次只在每批最后一段结算：首批登记完 source 进度后，后续批次不再发 chapter_range。
+        const unfinished = /本批最后一段/.test(text) ? (batch += 1, options.unfinishedAt?.(batch)) : undefined
         manifest = { ...manifest, planned_through: range[2], events: [...manifest.events.filter(item => !item.unfinished),
           { event: `E${events}_事件`, episodes: [episode - 1, episode], rounds: [{ tier: heavy ? '细写' : '如实' }],
             plan: [{ episode: episode - 1, planned_s: 60, rounds: [0] }, { episode, planned_s: 130, rounds: [0] }] },
@@ -67,7 +67,7 @@ test('each batch is reading rounds, then adaptation rounds of adaptSize episodes
   assert.equal(state.status, 'done')
   // 每批读2段各出2集 → 共4集：改编分成3+1两轮。
   assert.deepEqual(w.sent.map(kind), ['规划', '规划', '改编', '改编', '收尾', '规划', '规划', '改编', '改编', '收尾'])
-  assert.match(w.sent[0], /chapter_range[\s\S]*from「第1章 标题1」，to「第4章 标题4」/)
+  assert.match(w.sent[0], /chapter_range[\s\S]*from「第1章 标题1」，to「第8章 标题8」/)
   assert.match(w.sent[0], /adaptation_annotation[\s\S]*"min":90[\s\S]*"target":120[\s\S]*"max":150/)
   assert.match(w.sent[0], /回合[\s\S]*档位[\s\S]*跳过/)
   assert.match(w.sent[0], /角色[\s\S]*场景[\s\S]*道具/)
@@ -149,8 +149,10 @@ test('the next batch starts from the first chapter of an event left unfinished a
   assert.equal(state.status, 'done')
   const plans = w.sent.filter(text => /^【全自动改编·规划】/.test(text))
   assert.match(plans[1], /未完/)
-  assert.match(plans[2], /from「第4章 标题4」，to「第7章 标题7」/)
-  assert.match(plans.at(-1) ?? '', /from「第8章 标题8」，to「第8章 标题8」/)
+  // 顺延后第二批从第4章开始读；source 进度只在首批登记过，不再重发 chapter_range。
+  assert.match(plans[2], /^【全自动改编·规划】「第4章 标题4」/)
+  assert.doesNotMatch(plans[2], /chapter_range/)
+  assert.match(plans.at(-1) ?? '', /^【全自动改编·规划】「第8章 标题8」/)
 })
 
 test('an unfinished event that started at the first chapter of the batch cannot be deferred again', async () => {

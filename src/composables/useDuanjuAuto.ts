@@ -6,6 +6,7 @@
  */
 import { ref } from 'vue'
 import { createDuanjuRun, resolveSampleReview, runDuanjuAuto, DUANJU_AUTO_PATH, type DuanjuAutoConfig, type DuanjuManifest, type DuanjuProgress, type DuanjuRunState, type SampleDecision } from '@/runtime/duanjuAuto/autoRunner'
+import { readSourceChapters } from '@/runtime/duanjuAuto/sourceChapters'
 import { createRuntimeProjectFileService, createSkillDraftFiles } from '@/services/projectFileService'
 
 const PROGRESS_PATH = '改编方案/执行进度.json'
@@ -96,17 +97,18 @@ export function useDuanjuAuto(options: {
       const saved = await readJson<DuanjuRunState>(owner, `${wikiRoot}/${DUANJU_AUTO_PATH}`)
       // 早期版本（节拍数、没有时间账）的运行记录不提供续做，需要重新规划。
       const resumable = saved && saved.status !== 'done' && saved.version === 3 ? saved : undefined
-      const chapters = progress?.chapters ?? []
-      if (!chapters.length && !resumable) {
+      const registered = (progress?.chapters ?? []).map(item => item.chapter_heading)
+      if (!registered.length && !resumable) {
         if (!prepareOptions.onlyIfReady) error.value = '还没有入库的原文：请在全自动·改编模式下发送原文路径或全文。'
         return
       }
-      draft.value = {
-        wikiRoot,
-        sourcePaths: progress?.source_inputs ?? (chapters[0] ? [chapters[0].source_path] : resumable?.config.sourcePaths ?? []),
-        chapters: chapters.length ? chapters.map(item => item.chapter_heading) : resumable?.config.chapters ?? [],
-        saved: resumable,
-      }
+      const sourcePaths = progress?.source_inputs ?? (progress?.chapters?.[0] ? [progress.chapters[0].source_path] : resumable?.config.sourcePaths ?? [])
+      // 章节范围取原文里的全部章：执行进度只登记过首批读到的章，直接拿它会让可选范围越跑越窄。
+      const chapters = await readSourceChapters(sourcePaths, {
+        listDirectory: async path => await service().listDirectory(owner, path).catch(() => []),
+        readText: async path => await files(owner).readText(path).catch(() => undefined),
+      }, registered.length ? registered : resumable?.config.chapters ?? [])
+      draft.value = { wikiRoot, sourcePaths, chapters, saved: resumable }
     } catch (cause) {
       error.value = `无法准备全自动改编：${cause instanceof Error ? cause.message : String(cause)}`
     }
