@@ -104,6 +104,12 @@ class TasksCfg:
     max_entries: int = 500
     #: 是否允许取消
     allow_cancel: bool = True
+    #: 任务表落盘位置（相对项目根目录）。重启后靠它按任务号回答上游，不能为空串
+    state_file: str = "state/tasks.json"
+
+    @property
+    def state_path(self) -> Path:
+        return ROOT / self.state_file
 
 
 @dataclass

@@ -165,6 +165,24 @@ class ComfyClient:
             return None
         return data.get(prompt_id)
 
+    # ------------------------------------------------------ 重启后接管在途任务
+    async def history_entry(self, prompt_id: str) -> dict | None:
+        """按 prompt_id 取 ComfyUI 的历史记录（没有则 None）。"""
+        return await self._get_history(prompt_id)
+
+    async def queue_state(self, prompt_id: str) -> str | None:
+        """prompt 还在 ComfyUI 队列里吗：running / pending / None（不在队列）。"""
+        try:
+            q = await self.queue_info()
+        except httpx.HTTPError as e:
+            log.warning("查询 /queue 失败: %s", e)
+            return None
+        for bucket, state in (("queue_running", "running"), ("queue_pending", "pending")):
+            for item in q.get(bucket) or []:
+                if isinstance(item, (list, tuple)) and len(item) > 1 and item[1] == prompt_id:
+                    return state
+        return None
+
     # ---------------------------------------------------------- 结果解析
     @staticmethod
     def extract_error(entry: dict) -> str | None:

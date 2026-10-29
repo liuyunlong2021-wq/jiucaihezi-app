@@ -7,6 +7,9 @@ __pycache__/
 static/
 tools/out/
 
+# 任务表落盘位置（重启接管的凭据，本机运行态）
+state/
+
 # 运行时配置：本地私密信息（api_keys、隧道地址）
 # 仓库里放的是 config.example.yaml，部署时复制一份改名再填
 config.yaml

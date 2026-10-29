@@ -88,11 +88,14 @@ class GenerationService:
         raw_params: dict,
         image_inputs: dict[str, list[ReferenceImage]] | None = None,
         on_start: Callable[[], None] | None = None,
+        on_prompt: Callable[[str], None] | None = None,
     ) -> GenResult:
         """生成一次。
 
         `image_inputs` 形如 ``{"reference_images": [...], "first_frame": [...]}``，
         键名必须和模板 meta 里 `dynamic_blocks[].param` 对上。
+        `on_prompt` 在拿到 ComfyUI 的 prompt_id 时回调 —— 适配器靠它把任务「挂」到
+        具体 prompt 上，重启后才能接管。
         """
         tpl = self.get_template(model_id)
         inputs = {k: list(v) for k, v in (image_inputs or {}).items() if v}
@@ -189,49 +192,10 @@ class GenerationService:
 
             prompt_id = await self.client.submit(rendered)
             log.info("[%s] 已提交 prompt_id=%s", tpl.id, prompt_id)
+            if on_prompt is not None:
+                on_prompt(prompt_id)
 
-            entry = await self.client.wait_for_result(prompt_id)
-            err = self.client.extract_error(entry)
-            if err:
-                raise ComfyError(f"ComfyUI 执行失败: {err}")
-
-            outputs = self.client.extract_images(entry)
-            if not outputs:
-                raise ComfyError(
-                    "任务完成，但没有找到任何产出文件（检查模板里的 SaveImage / VHS_VideoCombine 节点）"
-                )
-
-            blobs: list[bytes] = []
-            metas: list[dict] = []
-            for item in outputs:
-                blobs.append(await self.client.fetch_image(item))
-                metas.append(
-                    {
-                        "filename": item.get("filename"),
-                        "subfolder": item.get("subfolder", ""),
-                        "type": item.get("type", "output"),
-                        "kind": self.client.guess_kind(item),
-                    }
-                )
-
-            elapsed = time.monotonic() - started
-            self.stats.ok += 1
-            self.stats.last_elapsed = elapsed
-            log.info(
-                "[%s] 完成，%d 个产出（%s），耗时 %.2fs",
-                tpl.id,
-                len(blobs),
-                ", ".join(m["kind"] for m in metas),
-                elapsed,
-            )
-            return GenResult(
-                model=tpl.id,
-                prompt_id=prompt_id,
-                images=blobs,
-                elapsed=elapsed,
-                params=values,
-                outputs=metas,
-            )
+            return await self._await_and_collect(tpl, prompt_id, started, values)
 
         except (ComfyError, TemplateError, Busy):
             self.stats.failed += 1
@@ -245,6 +209,82 @@ class GenerationService:
                 self._sem.release()
             async with self._lock:
                 self._inflight -= 1
+
+    async def resume(self, model_id: str | None, prompt_id: str) -> GenResult:
+        """接管一个进程重启前已提交到 ComfyUI 的任务：接着等结果，不重新提交。
+
+        ComfyUI 里查不到这条 prompt（history 没有、队列也没有）时立刻失败 ——
+        否则上游会一直等到 job_timeout 才收场。
+        """
+        tpl = self.get_template(model_id)
+        entry = await self.client.history_entry(prompt_id)
+        if entry is None and await self.client.queue_state(prompt_id) is None:
+            raise ComfyError(
+                f"ComfyUI 里已经没有任务 {prompt_id}（可能已完成并超出历史保留，或 ComfyUI 也重启过）"
+            )
+        self.stats.total += 1
+        started = time.monotonic()
+        try:
+            result = await self._await_and_collect(tpl, prompt_id, started)
+        except (ComfyError, TemplateError, Busy):
+            self.stats.failed += 1
+            raise
+        except Exception as e:  # noqa: BLE001
+            self.stats.failed += 1
+            self.stats.last_error = f"{type(e).__name__}: {e}"
+            raise
+        return result
+
+    async def _await_and_collect(
+        self,
+        tpl: WorkflowTemplate,
+        prompt_id: str,
+        started: float,
+        params: dict | None = None,
+    ) -> GenResult:
+        """等 ComfyUI 出结果 → 取产物 → 组装 GenResult（提交之后的所有步骤）。"""
+        entry = await self.client.wait_for_result(prompt_id)
+        err = self.client.extract_error(entry)
+        if err:
+            raise ComfyError(f"ComfyUI 执行失败: {err}")
+
+        outputs = self.client.extract_images(entry)
+        if not outputs:
+            raise ComfyError(
+                "任务完成，但没有找到任何产出文件（检查模板里的 SaveImage / VHS_VideoCombine 节点）"
+            )
+
+        blobs: list[bytes] = []
+        metas: list[dict] = []
+        for item in outputs:
+            blobs.append(await self.client.fetch_image(item))
+            metas.append(
+                {
+                    "filename": item.get("filename"),
+                    "subfolder": item.get("subfolder", ""),
+                    "type": item.get("type", "output"),
+                    "kind": self.client.guess_kind(item),
+                }
+            )
+
+        elapsed = time.monotonic() - started
+        self.stats.ok += 1
+        self.stats.last_elapsed = elapsed
+        log.info(
+            "[%s] 完成，%d 个产出（%s），耗时 %.2fs",
+            tpl.id,
+            len(blobs),
+            ", ".join(m["kind"] for m in metas),
+            elapsed,
+        )
+        return GenResult(
+            model=tpl.id,
+            prompt_id=prompt_id,
+            images=blobs,
+            elapsed=elapsed,
+            params=dict(params or {}),
+            outputs=metas,
+        )
 
     # ---------------------------------------------------------------- 状态
     async def health(self) -> dict:

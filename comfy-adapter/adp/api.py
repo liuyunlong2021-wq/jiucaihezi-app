@@ -205,7 +205,11 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         )
         service = GenerationService(cfg, client, templates)
         store = ImageStore(cfg.output.static_path, cfg.server.public_base_url, cfg.output.static_ttl)
-        tasks = TaskStore(ttl=cfg.tasks.ttl, max_entries=cfg.tasks.max_entries)
+        tasks = TaskStore(
+            ttl=cfg.tasks.ttl,
+            max_entries=cfg.tasks.max_entries,
+            path=cfg.tasks.state_path if cfg.tasks.state_file else None,
+        )
 
         app.state.cfg = cfg
         app.state.client = client
@@ -214,6 +218,51 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         app.state.tasks = tasks
 
         store.cleanup()
+
+        # ---------------------------------------------- 重启接管上一条进程的任务
+        # 任务表落了盘，所以重启后上游拿老任务号来问不会再 404。还活着的 ComfyUI 任务
+        # 就接着等结果（不重新提交），没提交到 ComfyUI 的立刻判失效——否则上游要干等到超时。
+        async def _resume_task(task: Task) -> None:
+            task.status = RUNNING
+            task.started_at = task.started_at or time.time()
+            log.info(
+                "[任务 %s] 接管 ComfyUI prompt %s（重启前已提交）", task.id, task.comfy_prompt_id
+            )
+            try:
+                result = await service.resume(task.model, task.comfy_prompt_id or "")
+                task.result = _image_payload(result, task.params.get("response_format"))
+                task.status = SUCCEEDED
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                task.status = FAILED
+                task.error = {
+                    "message": str(e),
+                    "type": type(e).__name__,
+                    "code": _task_error_code(e),
+                }
+                log.warning("[任务 %s] 接管失败: %s", task.id, e)
+            finally:
+                if task.finished_at is None:
+                    task.finished_at = time.time()
+                tasks.flush()
+
+        def _lost_task(task: Task) -> None:
+            task.status = FAILED
+            task.finished_at = time.time()
+            task.error = {
+                "message": "适配器重启前这个任务还没提交到 ComfyUI，已失效，请重新提交",
+                "type": "AdapterRestarted",
+                "code": "adapter_restarted",
+            }
+
+        recovered = tasks.recover(
+            resume=lambda task: asyncio.create_task(_resume_task(task)),
+            lost=_lost_task,
+        )
+        if recovered:
+            tasks.flush()
+            log.info("重启接管：%d 条未结束任务已分派", recovered)
 
         # 后台清理：产物超时删除 + 任务记录过期回收
         async def _sweeper() -> None:
@@ -544,19 +593,26 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         if task.cancel_requested:
             task.status = CANCELLED
             task.finished_at = time.time()
+            app.state.tasks.flush()
             return
 
         def _on_start() -> None:
             # 拿到并发名额、真正开始跑的时刻。之前的等待都算排队
             task.status = RUNNING
             task.started_at = time.time()
+            app.state.tasks.flush()
             log.info(
                 "[任务 %s] 开始执行（排队 %.1fs）", task.id, task.started_at - task.created_at
             )
 
+        def _on_prompt(prompt_id: str) -> None:
+            # 记下 ComfyUI 的 prompt_id：适配器重启后靠它接管，任务号才不会变成 404。
+            task.comfy_prompt_id = prompt_id
+            app.state.tasks.flush()
+
         try:
             result = await app.state.service.generate(
-                model, raw, image_inputs, on_start=_on_start
+                model, raw, image_inputs, on_start=_on_start, on_prompt=_on_prompt
             )
             task.result = _image_payload(result, raw.get("response_format"))
             task.status = SUCCEEDED
@@ -574,6 +630,7 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         finally:
             if task.finished_at is None:
                 task.finished_at = time.time()
+            app.state.tasks.flush()
             log.info(
                 "[任务 %s] %s（%s），排队 %ss + 执行 %ss",
                 task.id, task.status, task.type, task.queued_seconds, task.elapsed,
@@ -834,6 +891,7 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         else:
             task.status = CANCELLED
             task.finished_at = time.time()
+        app.state.tasks.flush()
         log.info("[任务 %s] 请求取消", task.id)
         return _task_response(task)
 

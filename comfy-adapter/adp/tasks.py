@@ -1,18 +1,22 @@
 """异步任务注册表。
 
-内存态即可 —— 产物本身 24 小时就删（`output.static_ttl`），
-任务记录也没必要落盘。进程重启后任务丢失是预期行为。
+任务表会落盘（`tasks.state_file`，默认 `state/tasks.json`）。原因：任务号是 NewAPI
+唯一的对账凭据，进程一重启就清空的话，上游拿着老号来问只会拿到 404，然后把他
+判成「上游任务失败」——2026-10-29 第 1 集四段视频就是这么全灭的。
+落盘只留有界字段：大字段（prompt / 参考图 base64）走 `_safe_params` 裁掉。
 
 状态机：queued -> running -> succeeded / failed / cancelled
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 log = logging.getLogger("adp.tasks")
 
@@ -69,6 +73,8 @@ class Task:
     result: dict | None = None
     error: dict | None = None
     cancel_requested: bool = False
+    #: 提交到 ComfyUI 后拿到的 prompt_id。重启后靠它去 ComfyUI 接管在途任务。
+    comfy_prompt_id: str | None = None
 
     @property
     def elapsed(self) -> float | None:
@@ -109,12 +115,55 @@ class Task:
         out.setdefault("params", _safe_params(self.params))
         return out
 
+    # ---------------------------------------------------------------- 落盘
+    def to_record(self) -> dict[str, Any]:
+        """落盘用的记录：大字段一律裁掉，只留有界值。"""
+        return {
+            "id": self.id,
+            "type": self.type,
+            "model": self.model,
+            "status": self.status,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "result": self.result,
+            "error": self.error,
+            "cancel_requested": self.cancel_requested,
+            "comfy_prompt_id": self.comfy_prompt_id,
+            "params": _safe_params(self.params),
+        }
+
+    @classmethod
+    def from_record(cls, rec: dict) -> "Task":
+        return cls(
+            id=str(rec["id"]),
+            type=str(rec.get("type") or "unknown"),
+            model=rec.get("model"),
+            params=dict(rec.get("params") or {}),
+            status=str(rec.get("status") or QUEUED),
+            created_at=float(rec.get("created_at") or time.time()),
+            started_at=rec.get("started_at"),
+            finished_at=rec.get("finished_at"),
+            result=rec.get("result"),
+            error=rec.get("error"),
+            cancel_requested=bool(rec.get("cancel_requested")),
+            comfy_prompt_id=rec.get("comfy_prompt_id"),
+        )
+
 
 class TaskStore:
-    def __init__(self, ttl: float = 86400.0, max_entries: int = 500) -> None:
+    def __init__(
+        self,
+        ttl: float = 86400.0,
+        max_entries: int = 500,
+        path: str | Path | None = None,
+    ) -> None:
         self.ttl = float(ttl)
         self.max_entries = int(max_entries)
+        self.path = Path(path) if path else None
         self._tasks: dict[str, Task] = {}
+        if self.path is not None:
+            self._load()
 
     # ------------------------------------------------------------ 读写
     def create(self, task_type: str, model: str | None, params: dict) -> Task:
@@ -134,6 +183,7 @@ class TaskStore:
 
         task = Task(id=new_task_id(), type=task_type, model=model, params=params)
         self._tasks[task.id] = task
+        self.flush()
         return task
 
     def get(self, task_id: str) -> Task | None:
@@ -162,4 +212,62 @@ class TaskStore:
                 removed += 1
         if removed:
             log.info("已清理 %d 条历史任务", removed)
+            self.flush()
         return removed
+
+    # -------------------------------------------------------------- 持久化
+    def flush(self) -> None:
+        """把任务表写回磁盘。写失败只告警：落盘坏了不该让服务停下来。"""
+        if self.path is None:
+            return
+        payload = {
+            "version": 1,
+            "saved_at": time.time(),
+            "tasks": [t.to_record() for t in self._tasks.values()],
+        }
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self.path)  # 原子替换，半截文件不会留在原位
+        except Exception as e:  # noqa: BLE001
+            log.warning("任务表落盘失败（%s）: %s", self.path, e)
+
+    def _load(self) -> None:
+        assert self.path is not None
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except Exception as e:  # noqa: BLE001
+            log.warning("任务表读取失败，按空表启动（%s）: %s", self.path, e)
+            return
+        for rec in raw.get("tasks") or []:
+            try:
+                task = Task.from_record(rec)
+            except Exception as e:  # noqa: BLE001
+                log.warning("跳过损坏的任务记录: %s", e)
+                continue
+            self._tasks[task.id] = task
+        if self._tasks:
+            log.info("已从 %s 恢复 %d 条任务", self.path, len(self._tasks))
+        self.sweep()
+
+    def recover(
+        self,
+        *,
+        resume: Callable[[Task], None],
+        lost: Callable[[Task], None],
+    ) -> int:
+        """重启后给未结束的任务分派：有 prompt_id 的接管，没有的判失效。
+
+        没有 prompt_id 说明进程在提交到 ComfyUI 之前就没了，ComfyUI 那边不会产出，
+        继续挂着只会让上游一直等到超时。
+        """
+        count = 0
+        for task in list(self._tasks.values()):
+            if task.is_terminal:
+                continue
+            (resume if task.comfy_prompt_id else lost)(task)
+            count += 1
+        return count
