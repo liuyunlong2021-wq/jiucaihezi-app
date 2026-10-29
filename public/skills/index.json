@@ -236,11 +236,12 @@
     "id": "jc-gongchengjuben",
     "name": "jc-gongchengjuben",
     "displayName": "jc-gongchengjuben",
-    "description": "把文学剧本、分场文本或脑暴已选定的对白动作改写成拍摄剧本（工程台本），负责导演设计：可见表演、景别运镜、空间连续、动作因果、声画与逐镜节奏。默认9:16竖屏、快节奏，一编号一连续镜头、一镜一核心节拍、最多一个说话角色，保留原台词和动作节拍。只有灵感却要工程脚本时先由 jc-manju-brainstorm 补全内容；不替代完整文学剧本创作或模型专用提示词格式转换。",
+    "description": "把文学剧本、分场文本或已改编稿逐集改成拍摄剧本（工程台本）：先体检本集资料（人物小传缺长相按角色设计补、场景缺空间与光按场景设计补、道具缺形制按道具设计补），再删掉不推动剧情的内容、压缩对白、把动作与打戏扩写到节拍级，最后完成导演设计（可见表演、景别运镜、空间连续、声画与逐镜节奏）。默认9:16竖屏、快节奏，一编号一连续镜头、一镜一核心节拍、最多一个说话角色，保留原台词和关键动作。一次只改编一集；只有灵感却要工程脚本时先由 jc-manju-brainstorm 补全内容；不替代完整文学剧本创作或模型专用提示词格式转换。",
     "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",
+      "references/adaptation-rewrite.md",
       "references/camera-grammar.md",
       "references/character-entrance.md",
       "references/dialogue-scenes.md",
@@ -249,6 +250,7 @@
       "references/kungfu-duel.md",
       "references/maoshan-exorcism-action.md",
       "references/scene-rhythm.md",
+      "references/shot-density.md",
       "references/shot-visibility.md",
       "references/single-scene-cinematic.md",
       "references/suspense-scenes.md"
@@ -260,6 +262,10 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/adaptation-rewrite.md",
+          "kind": "reference"
         },
         {
           "path": "references/camera-grammar.md",
@@ -291,6 +297,10 @@
         },
         {
           "path": "references/scene-rhythm.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/shot-density.md",
           "kind": "reference"
         },
         {

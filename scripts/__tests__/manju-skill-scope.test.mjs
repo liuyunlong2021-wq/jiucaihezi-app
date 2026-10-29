@@ -255,14 +255,63 @@ test('short-drama default is deletion-only: one-pass annotation, program-assembl
   // 逐集改编是默认的第3步：按切分卡的时间预算改编，选策略，逐场标时间和出处，保存 adapted。
   assert.match(xiezuo, /按时间改编/)
   assert.match(xiezuo, /冷开场[\s\S]*悬念开场[\s\S]*闪回[\s\S]*细写扩展/)
+})
+
+test('工程剧本自带删减扩写：逐集作业、开写前体检资料、细度按节拍写', () => {
+  const dir = 'public/skills/jc-gongchengjuben'
+  const skill = readFileSync(`${dir}/SKILL.md`, 'utf8')
+  // 一次只改一集，不能把两集合成一稿
+  assert.match(skill, /一次只改编一集/)
+  // 第 1 集开写前先体检资料，缺长相／空间／形制按设计 Skill 补齐
+  assert.match(skill, /开写前先体检本集资料/)
+  assert.match(skill, /jc-juese-sheji\/SKILL\.md[\s\S]{0,160}人物小传/)
+  assert.match(skill, /character_bio[\s\S]{0,80}只补缺/)
+  assert.match(skill, /jc-scene-prompt\/SKILL\.md[\s\S]{0,80}场景说明/)
+  assert.match(skill, /jc-prop-prompt\/SKILL\.md[\s\S]{0,80}道具/)
+  // 删：不推动剧情的删掉，原台词／伏笔／钩子不能删
+  assert.match(skill, /不推动剧情[\s\S]{0,120}删/)
+  // 扩：动作与打戏写到节拍，禁止用结论词代替动作
+  assert.match(skill, /打斗激烈[\s\S]{0,40}结论词|结论词[\s\S]{0,60}打斗激烈/)
+  assert.match(skill, /references\/shot-density\.md/)
+  assert.match(skill, /references\/adaptation-rewrite\.md/)
+
+  for (const file of ['shot-density.md', 'adaptation-rewrite.md']) {
+    assert.ok(existsSync(`${dir}/references/${file}`), file)
+  }
+  const density = readFileSync(`${dir}/references/shot-density.md`, 'utf8')
+  // 细度标尺要落到可执行的四件事：发起、轨迹、反馈、结果
+  assert.match(density, /发起[\s\S]*轨迹[\s\S]*反馈[\s\S]*结果/)
+  // 打戏与文戏各有正反例，且范例用到 0.5–1.5 秒级的镜内节拍
+  assert.match(density, /反例/)
+  assert.match(density, /0\.\d–\d\.\d?s/)
+  assert.match(density, /朱砂红/)
+
+  const rewrite = readFileSync(`${dir}/references/adaptation-rewrite.md`, 'utf8')
+  assert.match(rewrite, /删|压缩/)
+  assert.match(rewrite, /伏笔/)
+  assert.match(rewrite, /对白电影化|每分钟240字/)
+
+  // 索引必须登记新参考文件，否则打包后在 Agent 里读不到
+  const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
+  const files = index.find(s => s.name === 'jc-gongchengjuben').files
+  for (const file of ['references/shot-density.md', 'references/adaptation-rewrite.md']) {
+    assert.ok(files.includes(file), file)
+  }
+})
+
+test('逐集改编把原文落成引擎可校验的分集剧本', () => {
+  const xiezuo = readFileSync('public/skills/jc-duanju-xiezuo/SKILL.md', 'utf8')
   assert.match(xiezuo, /adapted[\s\S]*seconds[\s\S]*sources/)
   assert.match(xiezuo, /25%/)
+  const pipeline = readFileSync('public/skills/jc-duanju-pipeline/SKILL.md', 'utf8')
+  const fenji = readFileSync('public/skills/jc-duanju-fenji/SKILL.md', 'utf8')
+  const ziliao = readFileSync('public/skills/jc-xiangmuziliao/SKILL.md', 'utf8')
   assert.match(pipeline, /样集/)
   assert.match(ziliao, /一档一件[\s\S]*汇总档/)
   assert.doesNotMatch(pipeline, /风格推荐|建议分集】|定集】|切集】/)
   // 分集剧本文件头只放链接（所属事件、出场角色、场景、道具），正文只有原文；漫剧读取时把文件头当资产清单。
   assert.match(fenji, /文件头[\s\S]*event[\s\S]*characters[\s\S]*scenes[\s\S]*props/)
   assert.match(fenji, /正文只有原文/)
-  assert.match(read('jc-manju-pipeline/SKILL.md'), /文件头[\s\S]*资产链接[\s\S]*不是剧本/)
+  assert.match(readFileSync('public/skills/jc-manju-pipeline/SKILL.md', 'utf8'), /文件头[\s\S]*资产链接[\s\S]*不是剧本/)
   assert.ok(!groups['short-drama'].includes('jc-film-style'))
 })
