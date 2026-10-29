@@ -10,11 +10,24 @@ export interface MediaParamProfile {
   keys: string[]
   imageKey: string
   maxImages?: number
+  /** 模型登记的比例枚举。项目风格存的是「9:16」，H3 只认「9:16 (Portrait Widescreen)」。 */
+  ratios?: string[]
   duration?: { min?: number; max?: number; allowedValues?: number[] }
 }
 
+const RATIO_KEYS = ['ratio', 'aspect_ratio', 'aspectRatio']
+
+/** 选项标签是给界面看的（「竖屏 9:16」），值才是要发出去的东西。 */
 export function profileFromSpec(spec: Pick<CreationModelSpec, 'fields' | 'capabilities' | 'files'>): MediaParamProfile {
-  return { keys: spec.fields.map(field => field.key), imageKey: 'images', maxImages: spec.files?.images?.max, duration: spec.capabilities.duration }
+  const ratioField = spec.fields.find(field => RATIO_KEYS.includes(field.key))
+  const ratios = ratioField?.options?.map(option => String(option.value)) ?? spec.capabilities.ratios
+  return {
+    keys: spec.fields.map(field => field.key),
+    imageKey: 'images',
+    maxImages: spec.files?.images?.max,
+    ratios: ratios?.length ? ratios : undefined,
+    duration: spec.capabilities.duration,
+  }
 }
 
 export function profileFromCapability(capability: Pick<CreationCapability, 'parameter_schema' | 'asset_slots'>): MediaParamProfile {
@@ -22,12 +35,24 @@ export function profileFromCapability(capability: Pick<CreationCapability, 'para
   const slot = capability.asset_slots.find(item => item.modalities.includes('image'))
   const duration = properties.duration
   const allowed = duration?.enum?.map(Number).filter(Number.isFinite)
+  const ratios = RATIO_KEYS.map(key => properties[key]?.enum).find(values => values?.length)?.map(String)
   return {
     keys: Object.keys(properties),
     imageKey: slot?.name || 'images',
     maxImages: slot?.max,
+    ratios,
     duration: duration && { min: duration.minimum, max: duration.maximum, allowedValues: allowed?.length ? allowed : undefined },
   }
+}
+
+/** 项目比例 → 模型登记的比例值：“9:16” 能命中 “9:16 (Portrait Widescreen)”。 */
+function fitRatio(requested: string, options?: string[]): string {
+  if (!options?.length) return requested
+  const short = (value: string) => value.split(' (')[0]
+  const hit = options.find(option => option === requested) || options.find(option => short(option) === requested)
+  if (hit) return hit
+  const allowed = [...new Set(options.map(short))].join('、')
+  throw new Error(`比例 ${requested} 该模型不支持，可选 ${allowed}`)
 }
 
 export function buildMediaParams(
@@ -35,8 +60,8 @@ export function buildMediaParams(
   input: { prompt: string; ratio: string; images?: string[]; durationSeconds?: number; resolution?: string },
 ): Record<string, unknown> {
   const keys = new Set(profile?.keys || [])
-  const ratioKey = ['ratio', 'aspect_ratio', 'aspectRatio'].find(key => keys.has(key)) || 'aspect_ratio'
-  const params: Record<string, unknown> = { prompt: input.prompt, [ratioKey]: input.ratio }
+  const ratioKey = RATIO_KEYS.find(key => keys.has(key)) || 'aspect_ratio'
+  const params: Record<string, unknown> = { prompt: input.prompt, [ratioKey]: fitRatio(input.ratio, profile?.ratios) }
   if (input.resolution && keys.has('resolution')) params.resolution = input.resolution
   if (input.images?.length) {
     const max = profile?.maxImages
