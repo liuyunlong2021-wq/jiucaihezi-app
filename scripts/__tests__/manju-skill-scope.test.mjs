@@ -301,6 +301,15 @@ test('工程剧本自带删减扩写：逐集作业、开写前体检资料、�
   }
 })
 
+test('拖节奏的设定说明改用精炼旁白，而不是让人物硬讲或整段删掉', () => {
+  const skill = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
+  assert.match(skill, /设定说明/)
+  assert.match(skill, /精炼旁白/)
+  assert.match(skill, /拖慢节奏/)
+  // 旁白口径要与「旁白最后」的原则并存：只作拖节奏设定说明的例外，不是全面放开
+  assert.match(skill, /旁白／OS最后[\s\S]{0,80}例外/)
+})
+
 test('逐集改编把原文落成引擎可校验的分集剧本', () => {
   const xiezuo = readFileSync('public/skills/jc-gongchengjuben/SKILL.md', 'utf8')
   assert.match(xiezuo, /adapted[\s\S]*seconds[\s\S]*sources/)
