@@ -791,11 +791,7 @@ async function requirePipelineReads(ctx, args, exec, agent) {
   const root = state.path.split('/制作流水线/')[0]
   const materials = Object.keys(state.files?.materials || {})
   const entity = args.entity_name ? safeName(args.entity_name, '实体') : ''
-  const candidates = category => {
-    const paths = materials.filter(path => path.includes(`/${category}/`))
-    const exact = paths.filter(path => posix.basename(path, '.md') === entity)
-    return exact.length || category === '人物小传' || category === '道具说明' ? exact : paths
-  }
+  const candidates = category => researchCandidates(materials, entity, category)
   const groups = {
     summary: materials.filter(path => /\/故事梗概\.md$/.test(path)),
     style: Object.keys(state.files?.style || {}).filter(path => path === `${root}/项目风格/影片比例与风格.md`), source: [state.source_path],
@@ -842,8 +838,20 @@ async function requirePipelineReads(ctx, args, exec, agent) {
   }
 }
 
-const pipelineStages = ['plan', 'materials', 'style', 'assets', 'engineering', 'prompts', 'complete']
+/**
+ * 某实体的项目资料候选：默认布局写 `项目资料/场景`、`项目资料/道具`，
+ * 短剧布局写 `项目资料/场景说明`、`项目资料/道具说明`（见 wiki-artifacts.json 的 short_drama_layout）。
+ * 两类都是同类资料，归档器只关心「该实体正文被读过」，所以两种目录名都算候选；
+ * 限定在 项目资料/ 下，避免把 资产/场景 之类的产物当成资料。
+ */
+export function researchCandidates(materials, entity, category) {
+  const aliases = { '场景说明': ['场景说明', '场景'], '道具说明': ['道具说明', '道具'] }[category] ?? [category]
+  const paths = materials.filter(path => path.includes('/项目资料/') && aliases.some(name => path.includes(`/${name}/`)))
+  const exact = paths.filter(path => posix.basename(path, '.md') === entity)
+  return exact.length || category === '人物小传' || category === '道具说明' ? exact : paths
+}
 
+const pipelineStages = ['plan', 'materials', 'style', 'assets', 'engineering', 'prompts', 'complete']
 async function pipelineCheckpoint(ctx, args, exec, cwd, workspace, wikiRoot, spec, content) {
   const input = JSON.parse(content)
   const stage = pipelineStages.indexOf(input.stage)

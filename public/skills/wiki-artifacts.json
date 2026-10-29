@@ -573,14 +573,6 @@
         "path": "资产/角色/{entity}/角色造型融合提示词.md",
         "index": "资产/角色/{entity}/index.md"
       },
-      "scene_research": {
-        "path": "项目资料/场景说明/{entity}.md",
-        "index": "项目资料/场景说明/index.md"
-      },
-      "prop_research": {
-        "path": "项目资料/道具说明/{entity}.md",
-        "index": "项目资料/道具说明/index.md"
-      },
       "video_prompt": {
         "path": "剧本/视频提示词/{model}/第{episode_number}集{clip}视频提示词.md",
         "index": "剧本/视频提示词/{model}/index.md"
@@ -668,12 +660,12 @@
         "purpose": "保存分集剧本的对应资料与产物。"
       },
       {
-        "path": "项目资料/场景说明",
-        "purpose": "保存场景说明的对应资料与产物。"
+        "path": "项目资料/场景",
+        "purpose": "保存场景的对应资料与产物。"
       },
       {
-        "path": "项目资料/道具说明",
-        "purpose": "保存道具说明的对应资料与产物。"
+        "path": "项目资料/道具",
+        "purpose": "保存道具的对应资料与产物。"
       },
       {
         "path": "剧本/分镜提示词/H3",

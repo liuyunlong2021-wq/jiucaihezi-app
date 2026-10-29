@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead, dialogueSeconds, unitSeconds, planEventEpisodes, TIME_UNITS, TIER_FACTORS } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
+import { createWikiArtifactTool, setWikiSourceContent, validateSeedanceReferences, resetWikiReads, recordWikiRead, dialogueSeconds, unitSeconds, planEventEpisodes, researchCandidates, TIME_UNITS, TIER_FACTORS } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
 function createHarness(root, { beforeWrite, route = 'none' } = {}) {
   const files = new Map()
@@ -92,7 +92,7 @@ test('Manju precise layout separates film style, character image, format, voice 
     [{ artifact_kind: 'character_asset', entity_name: '甲' }, '资产/角色/甲/角色生图提示词.md'],
     [{ artifact_kind: 'character_format', entity_name: '甲' }, '资产/角色/甲/角色生图格式提示词.md'],
     [{ artifact_kind: 'character_voice', entity_name: '甲' }, '资产/角色/甲/声音设计提示词.md'],
-    [{ artifact_kind: 'scene_research', entity_name: '山门' }, '项目资料/场景说明/山门.md'],
+    [{ artifact_kind: 'scene_research', entity_name: '山门' }, '项目资料/场景/山门.md'],
     [{ artifact_kind: 'episode_source_script', episode_number: 1 }, '项目资料/分集剧本/第1集分集剧本.md'],
     [{ artifact_kind: 'engineering_script', episode_number: 1 }, '剧本/工程剧本/第1集工程剧本.md'],
     [{ artifact_kind: 'sound_direction', episode_number: 1 }, '剧本/声音剧本/第1集声音剧本.md'],
@@ -559,6 +559,21 @@ test('chapter confirmation conversion can recover after the source was appended'
   assert.equal(files.get(join(root, retry.path)).content.match(/# 第001章 归来/g)?.length, 1)
 })
 
+
+test('scene and prop research accept both layout directory names', () => {
+  // 2026-10-28 实测：项目资料登记的是 原作/场景/，归档器只认 场景说明/，scene_asset 两次被拒。
+  const scene = 'wiki/项目资料/原作/场景/机场与传送现场.md'
+  const adapted = 'wiki/项目资料/改编版/场景说明/机场与传送现场.md'
+  assert.deepEqual(researchCandidates([scene], '机场与传送现场', '场景说明'), [scene])
+  assert.deepEqual(researchCandidates([adapted], '机场与传送现场', '场景说明'), [adapted])
+  // 同名不匹配时，场景回落到同类全部；人物小传与道具说明仍只认同名。
+  assert.deepEqual(researchCandidates([scene], '别的场景', '场景说明'), [scene])
+  assert.deepEqual(researchCandidates([scene], '别的场景', '人物小传'), [])
+  const prop = 'wiki/项目资料/原作/道具/旧剑.md'
+  assert.deepEqual(researchCandidates([prop], '旧剑', '道具说明'), [prop])
+  // 资产产物不算资料。
+  assert.deepEqual(researchCandidates(['wiki/资产/场景/机场与传送现场.md'], '机场与传送现场', '场景说明'), [])
+})
 
 test('original and adapted research stay separate and legacy paths remain unchanged', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-research-'))
