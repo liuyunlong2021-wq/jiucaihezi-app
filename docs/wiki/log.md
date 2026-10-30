@@ -3230,3 +3230,5 @@
 2026-10-30 用户确认剧本改编只需“切分、改编”两个 Skill，并明确 AGENTS.md 不再坚持“桌面端只增不减”，改以第一性原理取舍。新增 `jc-duanju-gaibian`（开场钩子前置、结尾钩子完善、中间冲突写好、画面化，输出 Markdown 工程剧本），`jc-duanju-fenji` 精简为仅切分（一章可切几集，每集开场与结尾有钩子）；删除 `jc-duanju-pipeline`、`jc-duanju-cehua` 及两个兼容 references；移除“全自动·改编”（autoRunner、useDuanjuAuto、DuanjuAutoPanel 与工作台菜单，短剧改编按钮改为开关）和 wiki-runtime 里针对短剧流水线的自动续跑。manju-wiki 中事件标注、时间账、切分卡等程序工具暂留未用，未删，待后续确认无调用后清理。验证：scripts 下 224 项通过；focused 测试 2413 通过、1 项失败为 iPhone 发布元数据，与本次无关；未做真实模型效果与桌面端手动验证。
 
 2026-10-30 清理短剧改编遗留程序：`manju-wiki.mjs` 删除事件标注、时间账、切分卡、分集组装、按场改编校验与改编执行进度（约 800 行），只保留 adaptation_cut 行号切分与由切分生成分集剧本；`wiki-artifacts.json` 删除 adaptation_annotation / adaptation_event / adaptation_card / adaptation_checkpoint 四类及切分卡目录（短剧路线类型 21→17，总数 48→44）；同步删除对应的 7 个旧测试并更新计数。分集剧本不再带资产链接文件头。验证：scripts 211 项通过；聚焦测试 2400 通过，1 项 iPhone 发布元数据失败与本次无关；vue-tsc 无报错；未做真实模型与桌面端手动验证。
+
+2026-10-30 梳理漫剧衔接：短剧改编稿原存 `剧本/工程剧本/第N集工程剧本.md`，与漫剧 engineering 阶段的时间戳分镜同一路径，会被当作现成工程稿复用，或重写时因来源哈希变化被程序拒绝。改为改编稿存 `剧本/第N集/分集剧本.md`（screenplay，只要求读过本集切分原文，不再要求规划/切分记录/项目总纲）；`scanEpisodeScripts` 优先级调整为工程剧本 > 改编稿 > 切分原文；`jc-duanju-gaibian` 与 `jc-manju-pipeline` 同步（并删去已不存在的“分集剧本文件头”说明）。新增回归测试。

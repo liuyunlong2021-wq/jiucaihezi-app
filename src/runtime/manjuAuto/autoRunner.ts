@@ -152,9 +152,9 @@ export function scanEpisodeScripts(paths: string[]): { wikiRoot: string; episode
     const engineering = path.match(/^(.*)\/剧本\/工程剧本\/第(\d+)集工程剧本\.md$/)
     if (engineering) return [{ root: engineering[1], episode: Number(engineering[2]), path, rank: 3 }]
     const intake = path.match(/^(.*)\/项目资料\/分集剧本\/第(\d+)集分集剧本\.md$/)
-    if (intake) return [{ root: intake[1], episode: Number(intake[2]), path, rank: 2 }]
+    if (intake) return [{ root: intake[1], episode: Number(intake[2]), path, rank: 1 }]
     const adapted = path.match(/^(.*)\/剧本\/第(\d+)集\/分集剧本\.md$/)
-    return adapted ? [{ root: adapted[1], episode: Number(adapted[2]), path, rank: 1 }] : []
+    return adapted ? [{ root: adapted[1], episode: Number(adapted[2]), path, rank: 2 }] : []
   })
   const wikiRoot = (found.find(item => item.rank > 1) ?? found[0])?.root || (paths.some(path => path.startsWith('docs/wiki/')) ? 'docs/wiki' : 'wiki')
   const scripts: Record<number, string> = {}, duplicates: number[] = []

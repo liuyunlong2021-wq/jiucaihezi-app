@@ -807,6 +807,24 @@ test('short-drama split plan saves after a Wiki read even when no 项目总纲 e
   assert.equal(result.path, 'wiki/改编方案/分集规划.md')
 })
 
+test('short-drama 改编稿 saves to 剧本/第N集/分集剧本.md after reading its cut source, without plan, cut record or 项目总纲', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-adapt-screenplay-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'short-drama' })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  const read = path => recordWikiRead(sourceAgent, { targetKey: join(root, path) }, { kind: 'present', version: files.get(join(root, path)).version }, { ...exec, agent: sourceAgent, name: 'read' })
+  files.set(join(root, 'wiki/index.md'), { content: '# Wiki', version: 1 })
+  const source = 'wiki/项目资料/分集剧本/第1集分集剧本.md'
+  files.set(join(root, source), { content: '原文。', version: 1 })
+  read('wiki/index.md')
+  await assert.rejects(tool.execute({ artifact_kind: 'screenplay', episode_number: 1, content: '改编稿' }, exec), /必须先实际read/)
+  read(source)
+  const saved = await tool.execute({ artifact_kind: 'screenplay', episode_number: 1, content: '改编稿' }, exec)
+  assert.equal(saved.path, 'wiki/剧本/第001集/分集剧本.md')
+  assert.ok(!files.has(join(root, 'wiki/剧本/工程剧本/第1集工程剧本.md')), '改编稿不占用时间戳分镜的工程剧本位置')
+})
+
 test('漫剧工程阶段遇已有工程剧本走复用：读过来源后只登记，正文不变', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-manju-engineering-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))

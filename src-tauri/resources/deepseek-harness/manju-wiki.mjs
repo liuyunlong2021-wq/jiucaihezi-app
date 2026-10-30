@@ -1103,9 +1103,7 @@ async function requireAdaptationReads(ctx, args, exec, contract, agent) {
     const summary = await exists(`${root}/项目资料/原作/故事梗概.md`) ? `${root}/项目资料/原作/故事梗概.md` : `${root}/项目资料/故事梗概.md`
     await adaptationFile(ctx, exec, summary, agent, true)
   }
-  // 项目总纲不再由流程产出：存在才要求读过，不存在不挡切分规划与剧本。
-  if (args.artifact_kind === 'screenplay' && await exists(`${root}/改编方案/项目总纲.md`)) await adaptationFile(ctx, exec, `${root}/改编方案/项目总纲.md`, agent, true)
-  if (['project_overview', 'screenplay'].includes(args.artifact_kind)) {
+  if (args.artifact_kind === 'project_overview') {
     for (const category of ['人物小传', '场景', '道具']) {
       const selected = new Map()
       for (const version of ['', '原作/', '改编版/']) {
@@ -1121,12 +1119,8 @@ async function requireAdaptationReads(ctx, args, exec, contract, agent) {
       for (const path of selected.values()) await adaptationFile(ctx, exec, path, agent, true)
     }
   }
-  if (args.artifact_kind !== 'screenplay') return
-  const plan = await exists(`${root}/改编方案/逐章规划.md`) ? `${root}/改编方案/逐章规划.md` : `${root}/改编方案/分集规划.md`
-  await adaptationFile(ctx, exec, plan, agent, true)
-  const cut = await adaptationFile(ctx, exec, `${root}/改编方案/分集切分/${episodeFolder(args.episode_number)}原文.md`, agent, true)
-  const record = await verifiedCut(ctx, exec, cut.text, agent)
-  if (record.episode_number !== args.episode_number) throw new Error('切分记录与当前集号不一致')
+  // 改编稿只依据切分好的本集原文：必须读过。
+  if (args.artifact_kind === 'screenplay') await adaptationFile(ctx, exec, `${root}/项目资料/分集剧本/第${args.episode_number}集分集剧本.md`, agent, true)
 }
 
 export function setWikiSourceContent(agent, blocks) {

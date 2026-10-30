@@ -453,7 +453,7 @@ test('advice summary tells the user what will be drawn and roughly what it costs
   assert.equal(adviceSummary(referenceAdvice('画面比例：9:16'), 0.2), undefined)
 })
 
-test('manju auto finds short-drama screenplays as episode scripts and prefers the intake script when both exist', () => {
+test('manju auto finds short-drama screenplays as episode scripts and prefers the adapted script over the intake script when both exist', () => {
   const only = scanEpisodeScripts(['wiki/剧本/第001集/分集剧本.md', 'wiki/剧本/第002集/分集剧本.md', 'wiki/剧本/index.md'])
   assert.equal(only.wikiRoot, 'wiki')
   assert.deepEqual(only.episodes, [1, 2])
@@ -462,7 +462,7 @@ test('manju auto finds short-drama screenplays as episode scripts and prefers th
   const both = scanEpisodeScripts(['docs/wiki/项目资料/分集剧本/第1集分集剧本.md', 'docs/wiki/剧本/第001集/分集剧本.md', 'docs/wiki/剧本/第003集/分集剧本.md'])
   assert.equal(both.wikiRoot, 'docs/wiki')
   assert.deepEqual(both.episodes, [1, 3])
-  assert.equal(both.scripts[1], 'docs/wiki/项目资料/分集剧本/第1集分集剧本.md')
+  assert.equal(both.scripts[1], 'docs/wiki/剧本/第001集/分集剧本.md')
   assert.deepEqual(both.duplicates, [1])
 })
 
@@ -480,12 +480,12 @@ test('漫剧只读工程剧本：同一集有多份稿时以工程剧本为准',
   ])
   assert.equal(scanned.scripts[1], 'docs/wiki/剧本/工程剧本/第1集工程剧本.md', '工程剧本优先于分集剧本')
   assert.ok(scanned.duplicates.includes(1), '其余稿仍列为重复，供确认卡提示')
-  // 没有工程剧本时维持原口径：入稿的分集剧本优先于短剧改写稿
+  // 没有工程剧本时，短剧改编稿优先于切分原文
   const noEngineering = scanEpisodeScripts([
     'docs/wiki/项目资料/分集剧本/第1集分集剧本.md',
     'docs/wiki/剧本/第001集/分集剧本.md',
   ])
-  assert.equal(noEngineering.scripts[1], 'docs/wiki/项目资料/分集剧本/第1集分集剧本.md')
+  assert.equal(noEngineering.scripts[1], 'docs/wiki/剧本/第001集/分集剧本.md')
   // 只有工程剧本也能开跑
   const onlyEngineering = scanEpisodeScripts(['docs/wiki/剧本/工程剧本/第3集工程剧本.md'])
   assert.deepEqual(onlyEngineering.episodes, [3])
