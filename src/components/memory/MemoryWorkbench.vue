@@ -151,7 +151,7 @@ import { queuePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
 import { saveSplitTiles } from '@/utils/imageGridSplit'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
-import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
+import { createScene3DDocument, parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
@@ -1103,7 +1103,6 @@ function openFormalVersion(episodes: number[]) {
   manjuMode.value = 'film'
   void manjuAuto.prepare({ route: 'Seedance', select: episodes })
 }
-] as const
 const manjuModeLabels = { free: '漫剧·自由', prompts: '全自动·到提示词', film: '全自动·到成片' } as const
 const manjuModeItems = [
   { mode: 'free', label: '自由创作', note: '按你的话自动选 Skill，想做哪步做哪步，不产生媒体费用' },
@@ -4289,6 +4288,24 @@ async function openDeliverable(path: string) {
   }
 }
 
+const creatingDirectorStage = ref(false)
+async function openBlankDirectorStage() {
+  const owner = projectOwner.value
+  if (!owner || creatingDirectorStage.value) return
+  creatingDirectorStage.value = true
+  try {
+    await sceneSaveQueue
+    const existing = new Set((await files.list(owner)).map(item => item.path))
+    const path = nextMaterialPath('3D导演台', '空白导演台.jcscene', existing)
+    const resource = await files.createText(owner, path, serializeScene3DDocument(createScene3DDocument({ title: '3D导演台', objects: [] })))
+    await previewProjectResource(resource)
+  } catch (cause) {
+    error.value = `3D导演台打开失败：${cause instanceof Error ? cause.message : String(cause)}`
+  } finally {
+    creatingDirectorStage.value = false
+  }
+}
+
 async function openSceneCard(path: string) {
   const owner = projectOwner.value
   if (!owner) {
@@ -4715,6 +4732,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         :disabled="!conversation"
         @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
       ><JcIcon name="movie_filter" /><span>创作面板</span></button>
+          <button v-if="desktopOnlyRuntime" class="memory-creation-toggle" type="button" title="3D导演台" aria-label="3D导演台" :disabled="!projectOwner || creatingDirectorStage" @click="openBlankDirectorStage"><JcIcon name="view-in-ar" /><span>3D导演台</span></button>
       <button
         class="memory-window-action"
         type="button"
@@ -4790,6 +4808,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             :disabled="!conversation"
             @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
           ><JcIcon name="movie_filter" /><span>创作面板</span></button>
+          <button v-if="desktopOnlyRuntime" class="memory-creation-toggle" type="button" title="3D导演台" aria-label="3D导演台" :disabled="!projectOwner || creatingDirectorStage" @click="openBlankDirectorStage"><JcIcon name="view-in-ar" /><span>3D导演台</span></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />

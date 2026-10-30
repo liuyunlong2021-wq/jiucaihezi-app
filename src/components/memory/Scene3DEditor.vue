@@ -910,6 +910,16 @@ function rotateCharacter() {
   transform.attach(target)
 }
 
+function addCharacter(model: Scene3DCharacter['model']) {
+  if (props.readOnly || playing.value || manualRecording.value) return
+  if (document.objects.length >= 500) { notice.value = '独立对象最多 500 个'; return }
+  const id = crypto.randomUUID()
+  document.objects.push({ id, type: 'person', label: selectedModelLabel(model), position: [0, 0, 0], pose: 'standing', character: { model, scale: 1 } })
+  buildScene()
+  attachSelection(id)
+  persist()
+}
+
 function setCharacterModel(model: Scene3DCharacter['model']) {
   const item = selectedCharacter.value
   if (!item?.character || item.character.model === model) return
@@ -1347,20 +1357,13 @@ onBeforeUnmount(() => {
 <template>
   <section class="scene3d-editor" :class="{ 'recording-only': recordingOnly }">
     <header v-if="!recordingOnly" class="scene3d-toolbar">
-      <strong>{{ document.title }}</strong>
+      <strong title="3D导演台">{{ document.title }}</strong>
       <div class="scene3d-tools">
-        <button title="俯拍" @click="setCameraPreset('top')">俯</button>
-        <button title="平视" @click="setCameraPreset('front')">平</button>
-        <button title="侧视" @click="setCameraPreset('side')">侧</button>
-        <button title="低机位" @click="setCameraPreset('low')">低</button>
-        <button title="恢复默认视角" @click="setCameraPreset('reset')">复</button>
-        <button :disabled="readOnly || playing || manualRecording" title="查看全场景，自动取景" @click="focusScene()">全景</button>
-        <button :disabled="!selectedId || readOnly || playing || manualRecording" title="聚焦选中对象（F），自动透视取景" @click="focusScene(selectedId)">聚焦</button>
-        <button :disabled="readOnly || playing" :class="{ active: roamMode }" :aria-pressed="roamMode" title="漫游：按住右键看方向，WASD 移动，Q/E 升降，Shift 加速，滚轮调速，Esc 退出" @click="toggleRoam">漫游</button>
-        <span class="scene3d-divider"></span>
-        <button :class="{ active: document.camera.projection === 'perspective' }" title="透视视图" @click="setProjection('perspective')">透</button>
-        <button :class="{ active: document.camera.projection === 'orthographic' }" title="正交视图" @click="setProjection('orthographic')">正</button>
-        <button v-for="focal in FOCAL_STEPS" :key="focal" :class="{ active: currentFocal === focal }" :title="FOCAL_TITLES[focal]" @click="setFocal(focal)">{{ focal }}</button>
+        <button :class="{ active: frameMode }" title="取景模式：拖动只平移机位，不改朝向" @click="toggleFrameMode">取景</button>
+        <button class="primary" title="截图保存到图片" @click="capture"><JcIcon name="photo-camera" /></button>
+        <button v-if="!manualRecording" title="开始手动运镜录制" @click="startManualRecording"><JcIcon name="radio-button-checked" /></button>
+        <button v-else class="recording" title="停止并保存录制" @click="stopManualRecording"><JcIcon name="stop" /></button>
+
         <span class="scene3d-divider"></span>
         <button v-for="aspect in ['16:9', '9:16', '1:1', '4:3', '3:4']" :key="aspect" :class="{ active: currentAspect === aspect }" :title="`${aspect} 画幅`" @click="setAspect(aspect as Scene3DDocument['canvas']['aspect'])">{{ aspect }}</button>
         <span class="scene3d-divider"></span>
@@ -1369,7 +1372,6 @@ onBeforeUnmount(() => {
         <select v-if="document.canvas.snap" v-model.number="snapStep" class="scene3d-snap-step" title="吸附步长（米）" aria-label="吸附步长" @change="setSnapStep(snapStep)">
           <option v-for="step in SNAP_STEPS" :key="step" :value="step">{{ step }}</option>
         </select>
-        <button :class="{ active: frameMode }" title="取景模式：拖动只平移机位，不改朝向" @click="toggleFrameMode">取景</button>
         <button :class="{ active: labelsVisible }" title="显示或隐藏标签" @click="toggleLabels"><JcIcon name="label" /></button>
         <button :disabled="!selectedId" :class="{ active: previewHidden.has(selectedId) }" :title="previewHidden.has(selectedId) ? '恢复显示选中对象' : '临时隐藏选中对象（只影响预览，不写进场景）'" @click="togglePreviewHidden"><JcIcon :name="previewHidden.has(selectedId) ? 'visibility-off' : 'visibility'" /></button>
         <details class="scene3d-lighting">
@@ -1388,10 +1390,7 @@ onBeforeUnmount(() => {
         <button title="重做 Cmd/Ctrl+Shift+Z" :disabled="historyIndex >= history.length - 1" @click="redo"><JcIcon name="redo" /></button>
         <button title="复制选中物体 Cmd/Ctrl+C" :disabled="!selectedId" @click="copySelection"><JcIcon name="content-copy" /></button>
         <button title="粘贴物体 Cmd/Ctrl+V" :disabled="!copiedSelection" @click="pasteSelection"><JcIcon name="content-paste" /></button>
-        <button class="primary" title="截图保存到图片" @click="capture"><JcIcon name="photo-camera" /></button>
         <button :disabled="!selectedId" title="删除选中物体（Delete）" @click="removeSelection"><JcIcon name="delete" /></button>
-        <button v-if="!manualRecording" title="开始手动运镜录制" @click="startManualRecording"><JcIcon name="radio-button-checked" /></button>
-        <button v-else class="recording" title="停止并保存录制" @click="stopManualRecording"><JcIcon name="stop" /></button>
         <span v-if="recordingError" class="scene3d-recording-error">{{ recordingError }}</span>
         <template v-if="duration">
           <span class="scene3d-divider"></span>
@@ -1399,6 +1398,29 @@ onBeforeUnmount(() => {
           <button title="从头重播" @click="replay"><JcIcon name="restart-alt" /></button>
           <span class="scene3d-time">{{ currentTime.toFixed(1) }} / {{ duration.toFixed(1) }}s</span>
         </template>
+        <details class="scene3d-lighting">
+          <summary>添加人物</summary>
+          <div class="scene3d-lighting-menu">
+            <button v-for="model in STORYBOARDER_CHARACTER_MODELS" :key="model" :disabled="readOnly || playing || manualRecording" @click="addCharacter(model)">{{ selectedModelLabel(model) }}</button>
+          </div>
+        </details>
+        <details class="scene3d-lighting">
+          <summary>视角与焦段</summary>
+          <div class="scene3d-lighting-menu">
+        <button title="俯拍" @click="setCameraPreset('top')">俯</button>
+        <button title="平视" @click="setCameraPreset('front')">平</button>
+        <button title="侧视" @click="setCameraPreset('side')">侧</button>
+        <button title="低机位" @click="setCameraPreset('low')">低</button>
+        <button title="恢复默认视角" @click="setCameraPreset('reset')">复</button>
+        <button :disabled="readOnly || playing || manualRecording" title="查看全场景，自动取景" @click="focusScene()">全景</button>
+        <button :disabled="!selectedId || readOnly || playing || manualRecording" title="聚焦选中对象（F），自动透视取景" @click="focusScene(selectedId)">聚焦</button>
+        <button :disabled="readOnly || playing" :class="{ active: roamMode }" :aria-pressed="roamMode" title="漫游：按住右键看方向，WASD 移动，Q/E 升降，Shift 加速，滚轮调速，Esc 退出" @click="toggleRoam">漫游</button>
+        <span class="scene3d-divider"></span>
+        <button :class="{ active: document.camera.projection === 'perspective' }" title="透视视图" @click="setProjection('perspective')">透</button>
+        <button :class="{ active: document.camera.projection === 'orthographic' }" title="正交视图" @click="setProjection('orthographic')">正</button>
+        <button v-for="focal in FOCAL_STEPS" :key="focal" :class="{ active: currentFocal === focal }" :title="FOCAL_TITLES[focal]" @click="setFocal(focal)">{{ focal }}</button>
+          </div>
+        </details>
       </div>
     </header>
     <div class="scene3d-workspace" :class="{ 'inspector-open': Boolean(selectedEntry) }">
@@ -1496,9 +1518,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .scene3d-editor { min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: #15201c; color: #e8efeb; }
-.scene3d-toolbar { display: flex; align-items: flex-start; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
+.scene3d-toolbar { display: flex; align-items: flex-start; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); flex-wrap: wrap; }
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
-.scene3d-tools { display: flex; align-items: center; gap: 3px; }
+.scene3d-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-width: 0; }
 .scene3d-character-name { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
 .scene3d-tools button, .scene3d-cameras button, .scene3d-lighting summary { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
 .scene3d-snap-step { height: 30px; padding: 0 2px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; color: #dce8e1; background: rgba(0, 0, 0, .18); font: inherit; font-size: 11px; }
@@ -1520,7 +1542,7 @@ onBeforeUnmount(() => {
 .scene3d-lighting { position: relative; }
 .scene3d-lighting summary { display: grid; place-items: center; list-style: none; padding: 0 7px; }
 .scene3d-lighting summary::-webkit-details-marker { display: none; }
-.scene3d-lighting-menu { position: absolute; z-index: 4; top: calc(100% + 6px); left: 0; display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; width: max-content; padding: 8px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
+.scene3d-lighting-menu { position: absolute; z-index: 4; top: calc(100% + 6px); right: 0; display: grid; grid-template-columns: repeat(5, minmax(40px, auto)); gap: 4px; width: max-content; padding: 8px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
 .scene3d-lighting-menu span { grid-column: 1 / -1; color: #aebcb5; font-size: 11px; }
 .scene3d-lighting-menu button { border-color: rgba(216, 235, 223, .16); }
 .scene3d-workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
