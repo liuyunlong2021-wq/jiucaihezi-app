@@ -62,47 +62,14 @@
     }
   },
   {
-    "id": "jc-duanju-cehua",
-    "name": "jc-duanju-cehua",
-    "displayName": "jc-duanju-cehua",
-    "description": "写短剧改编的项目总纲，给用户看：一句话主题与事件摘要。不写分集、切分或正文。",
-    "triggers": [],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/人物塑造方法.md",
-      "references/独立写作旧规则.md"
-    ],
-    "package": {
-      "schemaVersion": 1,
-      "entry": "SKILL.md",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "kind": "instruction"
-        },
-        {
-          "path": "references/人物塑造方法.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/独立写作旧规则.md",
-          "kind": "reference"
-        }
-      ]
-    }
-  },
-  {
     "id": "jc-duanju-fenji",
     "name": "jc-duanju-fenji",
     "displayName": "jc-duanju-fenji",
-    "description": "根据用户提供的小说文件或章节目录路径切分短剧集数：读取指定章节，按冲突、因果、转折和结尾钩子规划分集，按真实行号切出各集原文并写入Wiki。用户说“切分集”“这一章分几集”“按要求切集”时使用；支持单章、指定范围与已有分集的定向修订。",
+    "description": "把小说章节切分成短剧集：读取用户指定的章节文件或目录，一章可切成几集，每集有开场钩子和结尾钩子，按真实行号切出各集原文并写入Wiki。用户说“切分集”“这一章分几集”“按要求切集”时使用；只切分，不改写。",
     "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/时间账标注兼容流程.md",
-      "references/独立写作旧规则.md"
+      "SKILL.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -111,28 +78,19 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
-        },
-        {
-          "path": "references/时间账标注兼容流程.md",
-          "kind": "reference"
-        },
-        {
-          "path": "references/独立写作旧规则.md",
-          "kind": "reference"
         }
       ]
     }
   },
   {
-    "id": "jc-duanju-pipeline",
-    "name": "jc-duanju-pipeline",
-    "displayName": "jc-duanju-pipeline",
-    "description": "短剧改编流水线：按章节点目录或原文，原文只读一遍，每段约20章同时整理角色、场景、道具与事件并保存回合标注，程序按时间账切集并写切分卡，再逐集按时间改编（先出样集）；产出交给漫剧制作，支持分批、事后调整与续做。",
+    "id": "jc-duanju-gaibian",
+    "name": "jc-duanju-gaibian",
+    "displayName": "jc-duanju-gaibian",
+    "description": "把已切分的短剧集原文改编成可拍的分集剧本：开场钩子前置、结尾钩子完善、中间冲突写好、小说描写改成画面。用户说“改编第N集”“把这集改成剧本”时使用；需要先有切分好的分集原文。",
     "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/按时间改编兼容.md"
+      "SKILL.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -141,10 +99,6 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
-        },
-        {
-          "path": "references/按时间改编兼容.md",
-          "kind": "reference"
         }
       ]
     }

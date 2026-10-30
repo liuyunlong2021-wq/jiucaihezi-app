@@ -488,49 +488,12 @@
         "manju"
       ]
     },
-    "adaptation_annotation": {
-      "path": "改编方案/标注/{entity}.json",
-      "index": "改编方案/标注/index.md",
-      "label": "{entity}标注",
-      "entity": true,
-      "mode": "adaptation_annotation",
-      "production_routes": [
-        "short-drama"
-      ]
-    },
-    "adaptation_event": {
-      "path": "改编方案/事件/{entity}.md",
-      "index": "改编方案/事件/index.md",
-      "label": "{entity}",
-      "entity": true,
-      "production_routes": [
-        "short-drama"
-      ]
-    },
     "adaptation_cut": {
       "path": "改编方案/分集切分/{episode}原文.md",
       "index": "改编方案/分集切分/index.md",
       "label": "{episode}原文切分",
       "episode": true,
       "mode": "adaptation_cut",
-      "production_routes": [
-        "short-drama"
-      ]
-    },
-    "adaptation_card": {
-      "path": "改编方案/切分卡/{episode}.md",
-      "index": "改编方案/切分卡/index.md",
-      "label": "{episode}切分卡",
-      "episode": true,
-      "production_routes": [
-        "short-drama"
-      ]
-    },
-    "adaptation_checkpoint": {
-      "path": "改编方案/执行进度.json",
-      "index": "改编方案/index.md",
-      "label": "短剧改编执行进度",
-      "mode": "adaptation_pipeline",
       "production_routes": [
         "short-drama"
       ]
@@ -717,10 +680,6 @@
       {
         "path": "改编方案/分集切分",
         "purpose": "保存分集切分及对应索引。"
-      },
-      {
-        "path": "改编方案/切分卡",
-        "purpose": "保存每集切分卡（回合、时间预算、峰值、钩子、可闪回素材）及对应索引。"
       },
       {
         "path": "剧本",

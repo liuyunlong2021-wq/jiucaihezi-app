@@ -112,7 +112,7 @@ test('unsent toggle preferences survive reopening without leaking to a new conve
 
 test('short drama restores explicitly selected route skills and removes them on exit', async () => {
   const { SHORT_DRAMA_SKILLS, restoreShortDramaSelection } = await import('../shortDramaProduction')
-  const selected = ['production:short-drama', 'jc-duanju-cehua', WIKI_MEMORY_SKILL]
+  const selected = ['production:short-drama', 'jc-duanju-gaibian', WIKI_MEMORY_SKILL]
   assert.ok(SHORT_DRAMA_SKILLS.includes('jc-xiangmuziliao'))
   assert.deepEqual(restoreShortDramaSelection(selected, { enabled: true }), selected)
   assert.deepEqual(restoreShortDramaSelection(selected, { enabled: false }), [WIKI_MEMORY_SKILL])
@@ -127,7 +127,7 @@ test('short drama route resources are packaged and all delegated links resolve i
   const allowed = new Set([...skills, 'wiki-memory'])
   // 借用的设计Skill只取设计方法，其原有漫剧交接链接（如角色格式）可指向漫剧范围。
   // 时间戳分镜仅做忠实转换；既有短剧按场改编参考复用漫剧导演方法。
-  const borrowed = new Set(['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt', 'jc-renqun', 'jc-duanju-pipeline'])
+  const borrowed = new Set(['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt', 'jc-renqun'])
   const manju = new Set(JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8')).manju as string[])
   for (const name of skills) {
     const entry = index.find((item: { name: string }) => item.name === name)
@@ -259,55 +259,20 @@ test('full-auto mode is opt-in from the manju menu and only spends after the con
   assert.match(workbench, /\.memory-manju-button\.auto \{[^}]*var\(--jc-error\)/)
 })
 
-test('short-drama full-auto adaptation is opt-in from the short-drama menu and drives batches from the confirmation card', () => {
+test('短剧改编只有切分与改编两个 Skill，没有全自动流水线', () => {
   const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
-  const panel = readFileSync('src/components/memory/DuanjuAutoPanel.vue', 'utf8')
-  const controller = readFileSync('src/composables/useDuanjuAuto.ts', 'utf8')
-  // 2026-10-27：自由改编（默认）/ 全自动·改编 / 退出。
-  assert.match(workbench, /const duanjuMode = ref<'free' \| 'auto'>\('free'\)/)
-  assert.match(workbench, /mode: 'free', label: '自由改编'[\s\S]*mode: 'auto', label: '全自动·改编'/)
-  assert.match(workbench, /退出短剧改编/)
-  // 全自动模式下发送的原文先走入稿回合，回合结束后弹确认卡。
-  assert.match(workbench, /DUANJU_INTAKE_PREFIX/)
-  assert.match(workbench, /<DuanjuAutoPanel/)
-  assert.match(controller, /runDuanjuAuto/)
-  assert.match(controller, /改编方案\/执行进度\.json/)
-  // 确认卡：章节范围、每批章数（默认100）、每次读章数（默认20）、续做。
-  assert.match(panel, /每批章数/)
-  assert.match(panel, /每次读章数/)
-  assert.match(panel, /batchSize = ref\(100\)/)
-  assert.match(panel, /readSize = ref\(20\)/)
-  assert.match(panel, /续做/)
-  // 实测修正（2026-10-27）：续做时立即显示运行中、清掉旧原因；同一时间只允许一个运行；暂停提示可以关闭。
-  assert.match(controller, /run\.value = \{ \.\.\.state, status: 'running', reason: undefined \}/)
-  assert.match(controller, /if \(active\) return/)
-  assert.match(panel, /emit\('dismiss'\)/)
-  // 2026-10-27 用户要求：进度显示为输入框上方的芯片（同已选 Skill），停止统一用输入框右下角按钮，芯片显示全程用时。
-  assert.match(workbench, /class="memory-attachment-chip memory-duanju-chip"/)
-  assert.match(workbench, /duanjuAuto\.stop\(\)/)
-  assert.match(workbench, /v-if="!sending && duanjuActive"/)
-  assert.match(controller, /elapsedMs/)
-  assert.doesNotMatch(panel, /class="duanju-auto-progress"/)
-  // 一遍标注与程序组装（2026-10-28）：开始前选三种预设之一，不再有风格与分集审阅卡；分集清单保存后删除旧集文件。
-  assert.match(panel, /DUANJU_PRESETS/)
-  assert.match(panel, /v-model="preset"/)
-  assert.doesNotMatch(panel, /请选择项目风格|请决定每个事件切几集/)
-  assert.match(controller, /removeStale/)
-  assert.match(workbench, /改编方案[\s\S]{0,4}标注[\s\S]{0,40}duanjuAuto\.removeStale\(\)/)
-  // 时间账与逐集改编（2026-10-28）：确认卡有样集先行、每轮改编集数、只切分不改编；样集确认卡；删除多余集时一并删切分卡。
-  assert.match(panel, /样集先行/)
-  assert.match(panel, /每轮改编集数/)
-  assert.match(panel, /只切分/)
-  assert.match(panel, /整体偏快[\s\S]*整体偏慢/)
-  assert.match(panel, /emit\('review'/)
-  assert.match(panel, /目标秒数/)
-  assert.match(workbench, /@review="decision => duanjuAuto\.decideSample\(decision\)"/)
-  assert.match(controller, /decideSample/)
-  assert.match(controller, /改编方案\/切分卡\//)
-  assert.match(controller, /version === 3/)
-  const pipeline = readFileSync('public/skills/jc-duanju-pipeline/SKILL.md', 'utf8')
-  assert.match(pipeline, /## 全自动改编/)
-  assert.match(pipeline, /【全自动改编·入稿】/)
+  const skills = JSON.parse(readFileSync('public/skills/production-skills.json', 'utf8'))['short-drama'] as string[]
+  assert.ok(skills.includes('jc-duanju-fenji') && skills.includes('jc-duanju-gaibian'))
+  assert.ok(!skills.includes('jc-duanju-pipeline') && !skills.includes('jc-duanju-cehua'))
+  assert.doesNotMatch(workbench, /duanjuAuto|DuanjuAutoPanel|全自动·改编/)
+  assert.match(workbench, /@click="toggleShortDramaProduction\(\)"/)
+  const fenji = readFileSync('public/skills/jc-duanju-fenji/SKILL.md', 'utf8')
+  assert.match(fenji, /开场有钩子|开场钩子/)
+  assert.match(fenji, /一章可切几集/)
+  const gaibian = readFileSync('public/skills/jc-duanju-gaibian/SKILL.md', 'utf8')
+  assert.match(gaibian, /开场钩子提前/)
+  assert.match(gaibian, /结尾钩子完善/)
+  assert.match(gaibian, /画面化/)
 })
 
 test('缺比例与风格时确认卡给出确认入口，不猜默认比例', () => {
@@ -339,14 +304,8 @@ test('缺比例与风格时确认卡给出确认入口，不猜默认比例', ()
 
 test('项目文件超过 1000 条时，判定存在不能再依赖整树列表', () => {
   const manju = readFileSync('src/composables/useManjuAuto.ts', 'utf8')
-  const duanju = readFileSync('src/composables/useDuanjuAuto.ts', 'utf8')
   // dev_list_files 每条目录也占额度、按目录名深度优先：1010 个文件的项目里
   // 列表止于 wiki/资产/*，项目资料、项目风格全部丢失（2026-10-28 E:\1028全自动教程 实测）。
   assert.match(manju, /service\.searchPaths\(owner, query, 2000\)/)
   assert.doesNotMatch(manju, /const list = await createRuntimeProjectFileService\(\)\.list\(owner\)/)
-  // 梗概读不到就会把「收尾已完成」误判成未完成；进度读不到就会重做已完成集。
-  assert.doesNotMatch(duanju, /if \(!\(paths \?\? await filePaths\(owner\)\)\.includes\(path\)\) return undefined/)
-  assert.doesNotMatch(duanju, /return \(await filePaths\(owner\)\)\.includes\(path\) \? await files\(owner\)\.readText\(path\) : undefined/)
-  // 删 stale 集时按父目录列，绕开整树上限。
-  assert.match(duanju, /listDirectory\(owner, dir\)/)
 })

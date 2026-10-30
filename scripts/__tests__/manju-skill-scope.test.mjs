@@ -7,7 +7,7 @@ const groups = JSON.parse(readFileSync('public/skills/production-skills.json', '
 test('production scopes are plain business allowlists with no executable router', () => {
   assert.deepEqual(Object.keys(groups), ['manju', 'short-drama', 'novel'])
   assert.equal(groups.manju.length, 15)
-  assert.equal(groups['short-drama'].length, 9)
+  assert.equal(groups['short-drama'].length, 8)
   assert.ok(groups['short-drama'].includes('jc-shijiancuo-fenjing'), '短剧与漫剧均可使用时间戳分镜')
   assert.ok(!groups['short-drama'].includes('jc-duanju-xiezuo'), 'jc-duanju-xiezuo 已并入工程剧本')
   for (const name of ['jc-juese-sheji', 'jc-fuzhuang-prompt', 'jc-scene-prompt', 'jc-prop-prompt']) assert.ok(groups['short-drama'].includes(name), name)
