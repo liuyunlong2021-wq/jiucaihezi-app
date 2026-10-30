@@ -1103,8 +1103,9 @@ async function requireAdaptationReads(ctx, args, exec, contract, agent) {
     const summary = await exists(`${root}/项目资料/原作/故事梗概.md`) ? `${root}/项目资料/原作/故事梗概.md` : `${root}/项目资料/故事梗概.md`
     await adaptationFile(ctx, exec, summary, agent, true)
   }
-  if (['adaptation_episode_plan', 'screenplay'].includes(args.artifact_kind)) await adaptationFile(ctx, exec, `${root}/改编方案/项目总纲.md`, agent, true)
-  if (['project_overview', 'adaptation_episode_plan', 'screenplay'].includes(args.artifact_kind)) {
+  // 项目总纲不再由流程产出：存在才要求读过，不存在不挡切分规划与剧本。
+  if (args.artifact_kind === 'screenplay' && await exists(`${root}/改编方案/项目总纲.md`)) await adaptationFile(ctx, exec, `${root}/改编方案/项目总纲.md`, agent, true)
+  if (['project_overview', 'screenplay'].includes(args.artifact_kind)) {
     for (const category of ['人物小传', '场景', '道具']) {
       const selected = new Map()
       for (const version of ['', '原作/', '改编版/']) {

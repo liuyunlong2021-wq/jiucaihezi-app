@@ -794,6 +794,19 @@ test('short-drama saves the episode plan as 分集规划 but keeps an existing �
   assert.equal(kept.path, 'wiki/改编方案/逐章规划.md')
 })
 
+test('short-drama split plan saves after a Wiki read even when no 项目总纲 exists', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-plan-no-overview-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root, { route: 'short-drama' })
+  const index = join(root, 'wiki/index.md')
+  files.set(index, { content: '# Wiki', version: 1 })
+  sourceAgent.session = exec.agent.session
+  resetWikiReads(sourceAgent)
+  recordWikiRead(sourceAgent, { targetKey: index }, { kind: 'present', version: 1 }, { ...exec, agent: sourceAgent, name: 'read' })
+  const result = await tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '# 分集规划\n第1集。' }, exec)
+  assert.equal(result.path, 'wiki/改编方案/分集规划.md')
+})
+
 test('漫剧工程阶段遇已有工程剧本走复用：读过来源后只登记，正文不变', async t => {
   const root = mkdtempSync(join(tmpdir(), 'jc-manju-engineering-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
