@@ -64,6 +64,25 @@ test('ComfyUI is an official stdio preset configured in MCP with an existing com
   assert.match(source, /原凭据已保留/)
 })
 
+test('connected ComfyUI collapses configuration behind one settings action', () => {
+  assert.match(source, /const comfyEditing = ref\(false\)/)
+  assert.match(source, /class="mcp-comfy-connected"/)
+  assert.match(source, />已连接</)
+  assert.match(source, />连接设置</)
+  assert.match(source, /card\.server\?\.status !== 'connected' \|\| comfyEditing/)
+})
+
+test('connected ComfyUI exposes three explicit default workflow slots', () => {
+  assert.match(source, /loadComfyWorkflowDefaults/)
+  assert.match(source, /chooseComfyWorkflow\(kind: ComfyWorkflowKind\)/)
+  assert.match(source, /extensions: \['json'\]/)
+  assert.match(source, /\['image', '图片'\]/)
+  assert.match(source, /\['video', '视频'\]/)
+  assert.match(source, /\['audio', '音频'\]/)
+  assert.match(source, /请选择 ComfyUI 导出的 API 工作流 JSON/)
+  assert.match(source, /card\.id === 'comfyui' && isDesktopRuntime" class="mcp-comfy-workflows"/)
+})
+
 test('GitHub OAuth client id is read from the gateway at connect time, not baked in at build time', () => {
   assert.doesNotMatch(catalogSource, /import\.meta\.env\.VITE_GITHUB_OAUTH_CLIENT_ID/)
   assert.doesNotMatch(catalogSource, /oauthClientId: import\.meta\.env/)

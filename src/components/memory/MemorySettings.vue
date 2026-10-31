@@ -404,7 +404,7 @@ async function saveKey() {
         </section>
         <section class="memory-local-model">
           <strong>ComfyUI</strong>
-          <p>通过官方 MCP 控制工作流，在输入框选择 @MCP → ComfyUI。</p>
+          <p>通过官方 MCP 控制工作流；连接后在输入框使用 @comfyui。</p>
           <div class="memory-local-actions"><button @click="tab = 'mcp'">打开 MCP 设置</button></div>
         </section>
         </template>

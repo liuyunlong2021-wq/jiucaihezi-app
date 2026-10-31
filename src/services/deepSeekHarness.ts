@@ -5,6 +5,7 @@ import { deriveTurnTokenUsage } from '../../src-tauri/resources/deepseek-harness
 import { invoke } from '@tauri-apps/api/core'
 import { appDataDir, join, resolveResource } from '@tauri-apps/api/path'
 import { mkdir, writeTextFile } from '@tauri-apps/plugin-fs'
+import { comfyWorkflowExecutionPrompt } from '@/utils/comfyWorkflowDefaults'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
@@ -1288,10 +1289,15 @@ export function deepSeekHandoffTurns(turns: ConversationTurn[]): ConversationTur
 
 export function deepSeekMcpPrompt(message: string, serverIds: string[] = []): string {
   if (!serverIds.length) return message
+  const selected = [...new Set(serverIds)]
+  const comfySelected = selected.includes('comfyui')
   return [
-    `【本轮用户显式选择的 MCP 服务】${JSON.stringify([...new Set(serverIds)])}`,
-    '当本轮任务需要这些服务的能力时，使用所选 MCP 实际执行。Skill 仅作辅助，不能用提示词、方案或 Skill 文本代替用户要求的生成结果。先核实服务和所需依赖；服务未启动或执行失败时说明真实原因，不得宣称已经完成。用户明确只要提示词或方案时按其要求处理。',
-    '【本轮消息】', message,
+    `【本轮用户显式选择的 MCP 服务】${JSON.stringify(selected)}`,
+    comfySelected
+      ? '用户已将 ComfyUI 指定为本轮唯一生成执行器。只要用户要求生成、编辑、续写、查询或取回图片/视频/工作流结果，必须先调用所选 ComfyUI MCP 实际执行，不得改用其他生图或生视频能力，不能只回复提示词、教程或方案。Skill 仅作辅助，不能取代 ComfyUI 执行。参数未指定时使用安全合理的默认值，不因可自行决定的细节改走其他路由。只有用户明确说“只要提示词/方案/讲解，不要执行”时才不调用。'
+      : '用户显式选择了该 MCP；任务属于其能力时必须先调用所选 MCP 实际执行。Skill 仅作辅助，不能用方案或 Skill 文本代替执行结果。',
+    '先核实服务和所需依赖；服务未启动或执行失败时说明真实原因，不得宣称已经完成。',
+    '【本轮消息】', comfySelected ? comfyWorkflowExecutionPrompt(message) : message,
   ].join('\n\n')
 }
 

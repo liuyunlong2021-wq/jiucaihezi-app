@@ -2083,6 +2083,23 @@ test('aggregate MCP mentions remain searchable by their internal tool prefix', (
   assert.doesNotMatch(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return \[\.\.\.skills/)
 })
 
+test('literal @comfyui selects the connected official server and clears competing media routes', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /stripExplicitComfyMention\(rawMessage\)/)
+  assert.match(workbench, /isComfyMcpServer\(server\) && server\.status === 'connected'/)
+  assert.match(workbench, /selectedMcpToolNames\.value = \[`mcp__\$\{comfy\.id\}`\]/)
+  assert.match(workbench, /mediaSelected\.value = false[\s\S]*?avSelected\.value = false[\s\S]*?scene3dSelected\.value = false/)
+})
+
+test('ComfyUI generation shows and requires the matching default workflow', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /const comfyWorkflowPreview = computed/)
+  assert.match(workbench, /resolveComfyWorkflow\(rawMessage\)/)
+  assert.match(workbench, /尚未设置默认\$\{label\}工作流/)
+  assert.match(workbench, /将使用：ComfyUI · \{\{ comfyWorkflowPreview\.name \}\}/)
+})
+
 test('capability chips survive a completed round and come back with the conversation', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 

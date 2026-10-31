@@ -13,6 +13,11 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { canvasAgentConnection, isCanvasAgentServer } from '@/services/canvasAgentConnection'
 import { comfyMcpConfig, isComfyMcpServer, COMFY_MCP_DOCS } from '@/services/comfyMcp'
 import { saveComfyWorkflowApiKey } from '@/utils/comfyWorkflowCredential'
+import {
+  loadComfyWorkflowDefaults,
+  saveComfyWorkflowDefault,
+  type ComfyWorkflowKind,
+} from '@/utils/comfyWorkflowDefaults'
 
 type ViewMode = 'grid' | 'list'
 type CatalogCard = BuiltinMcpCatalogEntry & {
@@ -33,6 +38,8 @@ const comfyCommand = ref('comfy-mcp')
 const comfyBin = ref('')
 const comfyKey = ref('')
 const comfyServiceStatus = ref('')
+const comfyEditing = ref(false)
+const comfyWorkflowDefaults = ref(loadComfyWorkflowDefaults())
 const addFormError = ref('')
 const newServer = ref({
   name: '',
@@ -348,12 +355,38 @@ async function saveComfyConnection() {
     const server = existing || mcpStore.addServer(config)
     await mcpStore.persist()
     await toggleServer(server)
+    if (server.status === 'connected') comfyEditing.value = false
   } catch (error) { message.value = error instanceof Error ? error.message : String(error) }
 }
 
 async function saveComfyKey() {
   try { await saveComfyWorkflowApiKey(comfyKey.value); comfyKey.value = ''; message.value = '工作流上游模型 Key 已保存到安全存储' }
   catch (error) { message.value = error instanceof Error ? error.message : String(error) }
+}
+
+async function chooseComfyWorkflow(kind: ComfyWorkflowKind) {
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const { readTextFile } = await import('@tauri-apps/plugin-fs')
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      title: `选择默认${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}工作流`,
+      filters: [{ name: 'ComfyUI API 工作流', extensions: ['json'] }],
+    })
+    if (typeof selected !== 'string') return
+    const parsed = JSON.parse(await readTextFile(selected))
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+      || !Object.values(parsed).some(node => node && typeof node === 'object' && 'class_type' in node)) {
+      throw new Error('请选择 ComfyUI 导出的 API 工作流 JSON')
+    }
+    const name = selected.replaceAll('\\', '/').split('/').pop() || selected
+    saveComfyWorkflowDefault(kind, { name, path: selected })
+    comfyWorkflowDefaults.value = loadComfyWorkflowDefaults()
+    message.value = `默认工作流已设置：${name}`
+  } catch (error) {
+    message.value = `工作流设置失败：${error instanceof Error ? error.message : String(error)}`
+  }
 }
 
 async function inspectComfyService(server: McpServerConfig) {
@@ -568,19 +601,33 @@ async function removeServer(server: McpServerConfig) {
               }}</span>
             </div>
 
-            <p class="mcp-desc">{{ card.description }}</p>
+            <p v-if="card.id !== 'comfyui' || card.server?.status !== 'connected' || comfyEditing" class="mcp-desc">{{ card.description }}</p>
 
-            <div class="mcp-tags">
+            <div v-if="card.id !== 'comfyui' || card.server?.status !== 'connected' || comfyEditing" class="mcp-tags">
               <span>{{ authLabel(card.auth) }}</span>
               <span :class="{ danger: card.risk === 'high' }">{{ riskLabel(card.risk) }}</span>
             </div>
 
-            <div class="mcp-tasks">
+            <div v-if="card.id !== 'comfyui' || card.server?.status !== 'connected' || comfyEditing" class="mcp-tasks">
               <span v-for="task in card.tasks.slice(0, 3)" :key="task">{{ task }}</span>
             </div>
 
-            <div class="mcp-hint">{{ card.installHint }}</div>
-            <div v-if="card.id === 'comfyui' && isDesktopRuntime" class="mcp-comfy-fields">
+            <div v-if="card.id !== 'comfyui' || card.server?.status !== 'connected' || comfyEditing" class="mcp-hint">{{ card.installHint }}</div>
+            <div v-if="card.id === 'comfyui' && isDesktopRuntime" class="mcp-comfy-workflows" aria-label="默认工作流">
+              <strong>默认工作流</strong>
+              <div v-for="item in ([['image', '图片'], ['video', '视频'], ['audio', '音频']] as const)" :key="item[0]">
+                <span>{{ item[1] }}</span>
+                <span class="mcp-comfy-workflow-name" :title="comfyWorkflowDefaults[item[0]]?.path">{{ comfyWorkflowDefaults[item[0]]?.name || '未设置' }}</span>
+                <button class="mcp-ghost" type="button" @click="chooseComfyWorkflow(item[0])">{{ comfyWorkflowDefaults[item[0]] ? '更换' : '选择' }}</button>
+              </div>
+            </div>
+            <div v-if="card.id === 'comfyui' && card.server?.status === 'connected' && !comfyEditing" class="mcp-comfy-connected">
+              <div class="mcp-comfy-connected-head">
+                <strong>已连接</strong>
+                <button class="mcp-ghost" type="button" @click="comfyEditing = true">连接设置</button>
+              </div>
+            </div>
+            <div v-if="card.id === 'comfyui' && isDesktopRuntime && (card.server?.status !== 'connected' || comfyEditing)" class="mcp-comfy-fields">
               <label>ComfyUI 服务地址<input v-model="comfyTarget" placeholder="http://127.0.0.1:8188" /></label>
               <label>官方 MCP 可执行文件<input v-model="comfyCommand" placeholder="comfy-mcp 或完整路径" /></label>
               <label>comfy-cli 可执行文件（可选）<input v-model="comfyBin" placeholder="comfy 或虚拟环境中的完整路径" /></label>
@@ -610,7 +657,7 @@ async function removeServer(server: McpServerConfig) {
                       : '加入仓库'
                 }}
               </button>
-              <template v-else-if="card.server">
+              <template v-else-if="card.server && !(card.id === 'comfyui' && card.server.status === 'connected' && !comfyEditing)">
                 <button v-if="isCanvasAgentServer(card.server) && card.server.status === 'connected'" class="mcp-ghost" @click="openCanvas(card.server)">打开画布</button>
                 <button
                   class="mcp-primary"
@@ -704,6 +751,11 @@ async function removeServer(server: McpServerConfig) {
 .mcp-comfy-fields { display: grid; gap: 8px; }
 .mcp-comfy-fields label { display: grid; gap: 4px; font-size: 12px; color: var(--ink2); }
 .mcp-comfy-fields input { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink1); background: var(--paper); }
+.mcp-comfy-connected { display: grid; gap: 12px; color: var(--olive-dark); }
+.mcp-comfy-connected-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mcp-comfy-workflows { display: grid; gap: 6px; color: var(--ink2); }
+.mcp-comfy-workflows > div { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 32px; }
+.mcp-comfy-workflow-name { overflow: hidden; color: var(--ink1); text-overflow: ellipsis; white-space: nowrap; }
 
 .mcp-panel {
   height: 100%;

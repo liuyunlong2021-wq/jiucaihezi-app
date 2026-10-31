@@ -50,10 +50,17 @@ test('explicit MCP selection reaches the model as execution intent, not only a m
   const prompt = deepSeekMcpPrompt('生成一张美女图片', ['comfyui', 'comfyui'])
   assert.match(prompt, /comfyui/)
   assert.match(prompt, /实际执行/)
+  assert.match(prompt, /必须先调用/)
+  assert.match(prompt, /不得改用其他生图或生视频能力/)
   assert.match(prompt, /不能.*提示词/)
   assert.match(prompt, /Skill.*辅助/)
   assert.match(prompt, /未启动/)
   assert.ok(prompt.endsWith('生成一张美女图片'))
+})
+
+test('selected ComfyUI receives the configured workflow contract', () => {
+  const harnessSource = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  assert.match(harnessSource, /comfyWorkflowExecutionPrompt\(message\)/)
 })
 
 test('权限档 maps to the official Harness full-access mode', () => {

@@ -151,6 +151,13 @@ import { queuePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
 import { saveSplitTiles } from '@/utils/imageGridSplit'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
+import { isComfyMcpServer } from '@/services/comfyMcp'
+import { stripExplicitComfyMention } from '@/utils/comfyMention'
+import {
+  COMFY_WORKFLOW_DEFAULTS_CHANGED,
+  loadComfyWorkflowDefaults,
+  resolveComfyWorkflow,
+} from '@/utils/comfyWorkflowDefaults'
 import { createScene3DDocument, parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
@@ -425,6 +432,20 @@ const mcpStore = useMcpStore()
 const mediaSelected = ref(false)
 const avSelected = ref(false)
 const scene3dSelected = ref(false)
+const comfyWorkflowDefaults = ref(loadComfyWorkflowDefaults())
+const refreshComfyWorkflowDefaults = () => { comfyWorkflowDefaults.value = loadComfyWorkflowDefaults() }
+onMounted(() => window.addEventListener(COMFY_WORKFLOW_DEFAULTS_CHANGED, refreshComfyWorkflowDefaults))
+onBeforeUnmount(() => window.removeEventListener(COMFY_WORKFLOW_DEFAULTS_CHANGED, refreshComfyWorkflowDefaults))
+const comfyWorkflowPreview = computed(() => {
+  const comfySelected = selectedMcpToolNames.value.some(id => {
+    const server = mcpStore.servers.find(item => `mcp__${item.id}` === id)
+    return Boolean(server && isComfyMcpServer(server))
+  })
+    || /(^|\s)@comfyui(?=\s|$)/i.test(input.value)
+  if (!comfySelected) return undefined
+  const kind = resolveComfyWorkflow(input.value)?.kind
+  return kind ? comfyWorkflowDefaults.value[kind] : undefined
+})
 const productionActive = computed(() => productionRoute(selectedSkillNames.value) !== 'none')
 function blockProductionTool(id: string): boolean {
   if (!productionActive.value || !(['media', 'av', 'scene3d', 'mcp'].includes(id) || id.startsWith('mcp__'))) return false
@@ -2878,7 +2899,36 @@ async function send(remoteText?: string) {
   }
   const remote = typeof remoteText === 'string'
   const active = conversation.value
-  const rawMessage = (remote ? remoteText : input.value).trim()
+  let rawMessage = (remote ? remoteText : input.value).trim()
+  if (!remote) {
+    const comfyMention = stripExplicitComfyMention(rawMessage)
+    if (comfyMention.explicit) {
+      if (productionActive.value) {
+        contextNotice.value = '当前创作路线禁用外部 MCP，请先退出创作模式再使用 @comfyui。'
+        return
+      }
+      const comfy = mcpStore.servers.find(server => isComfyMcpServer(server) && server.status === 'connected')
+      if (!comfy) {
+        contextNotice.value = 'ComfyUI 尚未连接，请先在设置 → MCP 连接 ComfyUI。'
+        return
+      }
+      selectedMcpToolNames.value = [`mcp__${comfy.id}`]
+      mediaSelected.value = false
+      avSelected.value = false
+      scene3dSelected.value = false
+      rawMessage = comfyMention.message
+    }
+    const comfySelected = selectedMcpToolNames.value.some(id => {
+      const server = mcpStore.servers.find(item => `mcp__${item.id}` === id)
+      return Boolean(server && isComfyMcpServer(server))
+    })
+    const workflow = comfySelected ? resolveComfyWorkflow(rawMessage) : undefined
+    if (workflow && !workflow.workflow) {
+      const label = workflow.kind === 'image' ? '图片' : workflow.kind === 'video' ? '视频' : '音频'
+      contextNotice.value = `尚未设置默认${label}工作流，请先在设置 → MCP → ComfyUI 中选择。`
+      return
+    }
+  }
   const activeAttachments = remote ? [] : [...persistentAttachments.value, ...attachments.value]
   const pendingAttachments = remote ? [] : attachments.value.slice()
   const activeReferencedFiles = remote ? [] : referencedFiles.value
@@ -5167,6 +5217,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button title="移除附件" @click="removeAttachment(file.id)">×</button>
           </div>
         </div>
+        <div v-if="comfyWorkflowPreview" class="memory-comfy-workflow-preview" role="status">
+          将使用：ComfyUI · {{ comfyWorkflowPreview.name }}
+        </div>
         <div v-if="referencedFiles.length" class="memory-attachments memory-references">
           <div v-for="file in referencedFiles" :key="file.name" class="memory-attachment-chip">
             <JcIcon name="attach-file" />
@@ -5856,6 +5909,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }
 .memory-composer-editable::-webkit-scrollbar-thumb { min-height: 36px; border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
+.memory-comfy-workflow-preview { margin: 8px 12px 0; color: var(--olive-dark); font-size: 12px; }
 .send-button { border-color: var(--olive); background: var(--olive); color: white; }
 .memory-action-row > .send-button { width: 30px; height: 30px; flex-basis: 30px; border: 0; border-radius: 6px; }
 .memory-action-row > .send-button > svg { width: 17px; height: 17px; }
