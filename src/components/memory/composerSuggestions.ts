@@ -1,3 +1,5 @@
+import { isOfficialMediaReferenceQuery } from '@/utils/creationMediaReferences'
+
 export type ComposerSuggestion = {
   trigger: '@' | '/'
   start: number
@@ -13,6 +15,7 @@ export function findComposerSuggestion(text: string, cursor: number): ComposerSu
   if (!match) return null
   const start = caret - match[2].length - 1
   const trigger = match[1] as '@' | '/'
+  if (trigger === '@' && isOfficialMediaReferenceQuery(match[2])) return null
   let end = caret
   while (end < text.length && !/\s/.test(text[end]!)) end += 1
   return { trigger, start, end, query: match[2] }

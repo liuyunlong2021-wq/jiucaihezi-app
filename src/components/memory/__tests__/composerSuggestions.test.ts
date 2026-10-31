@@ -5,6 +5,9 @@ import { findComposerSuggestion, replaceComposerSuggestion } from '../composerSu
 test('composer suggestions recognize slash and at triggers at token boundaries', () => {
   assert.deepEqual(findComposerSuggestion('/mcp', 4), { trigger: '/', start: 0, end: 4, query: 'mcp' })
   assert.deepEqual(findComposerSuggestion('请看 @wiki/角色.md', 10), { trigger: '@', start: 3, end: 14, query: 'wiki/角' })
+  for (const token of ['@图1', '@图1:', '@图2：角色', '@视频1', '@音频1']) {
+    assert.equal(findComposerSuggestion(token, token.length), null)
+  }
   assert.equal(findComposerSuggestion('https://example.test/path', 14), null)
   assert.equal(findComposerSuggestion('hello/world', 11), null)
 })

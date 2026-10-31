@@ -35,6 +35,8 @@ test('props are only plot props and character signature items; everyday objects 
   for (const name of ['jc-prop-prompt', 'jc-manju-pipeline']) assert.match(read(name), /道具判定标准/, name)
   assert.match(read('jc-scene-prompt'), /陈设”中的日常物件/)
   assert.match(read('jc-seedance'), /日常物件属于场景陈设，不占@图/)
+  assert.match(read('jc-seedance'), /`@图N`、`@视频N`、`@音频N` 是 Seedance 正式素材引用/)
+  assert.match(read('jc-seedance'), /Seedance 2\.5 官方 `\[00\.0-05\.0s\]` 区间格式/)
   assert.match(read('h3-prompt-writing'), /日常物件属于场景陈设，不占图/)
 })
 

@@ -414,13 +414,16 @@ test('canvas annotations are local to the selected image and export only that im
   assert.doesNotMatch(source, /请先选中一张图片后标注/)
 })
 
-test('canvas references use horizontal order only', () => {
+test('canvas references snapshot row-major order and submissions keep that stable order', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const selection = source.match(/const assets = selected[\s\S]*?\.sort\(([\s\S]*?)\n        \)/)?.[1] || ''
+  const selection = source.match(/function syncSelectedReferences\(\)[\s\S]*?\n}/)?.[0] || ''
+  const submission = source.match(/const selectedNodes = new Map[\s\S]*?const fileLimits/)?.[0] || ''
 
-  assert.match(selection, /visualLeft\(a\.node\) - visualLeft\(b\.node\)/)
-  assert.doesNotMatch(selection, /node\.y/)
-  assert.match(source, /const visualLeft = \(node: any\)[\s\S]*?node\.getBounds\?\.\('world'\)/)
+  assert.match(selection, /sortCanvasReferences\(selected/)
+  assert.match(selection, /x: Number\(/)
+  assert.match(selection, /y: Number\(/)
+  assert.match(submission, /selectedReferenceIds\.value[\s\S]*?selectedNodes\.get\(id\)/)
+  assert.doesNotMatch(submission, /sortCanvasReferences/)
 })
 
 test('canvas pen offers five visual stroke widths and uses the selected width', () => {
@@ -711,6 +714,19 @@ test('creation panel persists direct Web and Desktop imports before adding them 
   assert.doesNotMatch(source, /\.cp-drag-over/)
   assert.doesNotMatch(source, /flex: 0 0 34px/)
   assert.doesNotMatch(source, />添加参考素材</)
+})
+
+test('creation panel keeps official Seedance references separate from project-media search', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const references = readFileSync(join(root, 'src/utils/creationMediaReferences.ts'), 'utf8')
+
+  assert.match(source, /trailingMediaSearch\(cpState\.prompt\)/)
+  assert.match(source, /creationMentionRequest\+\+[\s\S]*?creationMentionOpen\.value = false/)
+  assert.match(source, /validateMediaReferenceSlots\(cpState\.prompt, availableReferences\)/)
+  assert.match(source, /sortCanvasReferences\(selected/)
+  assert.match(source, /class="cp-reference-order"/)
+  assert.match(references, /\(\?:图\|视频\|音频\)\\d/)
+  assert.match(references, /提示词引用了/)
 })
 
 test('creation panel snapshots debounced saves and binds media work to its restore owner', () => {

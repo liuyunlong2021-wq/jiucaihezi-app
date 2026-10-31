@@ -173,6 +173,13 @@ import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
 import { buildMediaFilename } from '@/utils/mediaFilename'
+import {
+  mediaReferenceToken,
+  sortCanvasReferences,
+  trailingMediaSearch,
+  validateMediaReferenceSlots,
+  type CreationReferenceKind,
+} from '@/utils/creationMediaReferences'
 import { writeProjectMedia } from '@/utils/projectMediaWriter'
 import { saveGeneratedFile } from '@/utils/exportSave'
 import type {
@@ -973,6 +980,22 @@ async function runCreationViaTaskStore() {
       cpState.progressText = currentModelAvailability.value.reason || '该模型暂时不可用'
       return
     }
+    const availableReferences: Record<CreationReferenceKind, number> = {
+      image: currentReferenceModalities.value.has('image')
+        ? cpState.files.filter(file => file.type.startsWith('image/')).length
+          + selectedReferenceAssets.value.filter(asset => asset.kind === 'image').length : 0,
+      video: currentReferenceModalities.value.has('video')
+        ? cpState.files.filter(file => file.type.startsWith('video/')).length
+          + selectedReferenceAssets.value.filter(asset => asset.kind === 'video').length : 0,
+      audio: currentReferenceModalities.value.has('audio')
+        ? cpState.files.filter(file => file.type.startsWith('audio/')).length
+          + selectedReferenceAssets.value.filter(asset => asset.kind === 'audio').length : 0,
+    }
+    const referenceError = validateMediaReferenceSlots(cpState.prompt, availableReferences)
+    if (referenceError) {
+      cpState.progressText = referenceError
+      return
+    }
     const task = m.capability.task
     const outputModalities = currentCreationSpec.value?.capabilities.outputModalities || []
     const mediaType =
@@ -1001,17 +1024,11 @@ async function runCreationViaTaskStore() {
         cpState.progressText = isTauriRuntime() ? '请先选择项目文件夹' : '请先选择 Web 项目'
         return
       }
-      const visualLeft = (node: any) => {
-        const bounds = node.getBounds?.('world') || node.getBounds?.()
-        return Number(bounds?.x ?? node.x ?? 0)
-      }
-      const assets = selected
-        .map(node => ({ node, asset: canvasStore.assets[String(node.id)] }))
+      const selectedNodes = new Map(selected.map(node => [String(node.id), node]))
+      const assets = selectedReferenceIds.value
+        .map(id => ({ node: selectedNodes.get(id), asset: canvasStore.assets[id] }))
         .filter((entry): entry is { node: any; asset: NonNullable<typeof entry.asset> } =>
-          Boolean(entry.asset),
-        )
-        .sort(
-          (a, b) => visualLeft(a.node) - visualLeft(b.node),
+          Boolean(entry.node && entry.asset),
         )
       const fileLimits = currentCreationSpec.value?.files
       const selectedImageCount = assets.filter(({ asset }) => asset.kind === 'image').length
@@ -1239,6 +1256,19 @@ const selectedReferenceAssets = computed(() =>
     .map(id => canvasStore.assets[id])
     .filter((asset): asset is NonNullable<typeof asset> => Boolean(asset)),
 )
+const orderedReferenceLabels = computed(() => {
+  const slots: Record<CreationReferenceKind, number> = { image: 0, video: 0, audio: 0 }
+  const fileLabels = cpState.files.map(file => {
+    const kind: CreationReferenceKind = file.type.startsWith('video/') ? 'video'
+      : file.type.startsWith('audio/') ? 'audio' : 'image'
+    return `${mediaReferenceToken(kind, ++slots[kind])} ${file.name}`
+  })
+  const canvasLabels = selectedReferenceAssets.value.map(asset => {
+    const kind = asset.kind as CreationReferenceKind
+    return `${mediaReferenceToken(kind, ++slots[kind])} ${mediaDisplayName(asset.resource.path)}`
+  })
+  return [...fileLabels, ...canvasLabels]
+})
 const currentReferenceModalities = computed(() => {
   const modalities = new Set<string>(currentCreationSpec.value?.capabilities.inputModalities || [])
   if (cpState.task === 'ai-app') {
@@ -1661,9 +1691,17 @@ function isCurrentCanvasMediaRequest(request: CanvasMediaOwnership): boolean {
 }
 
 function syncSelectedReferences() {
-  selectedReferenceIds.value = (app?.editor?.list || [])
+  const selected = (app?.editor?.list || [])
+    .filter(node => Boolean(canvasStore.assets[String((node as any).id)]))
+  selectedReferenceIds.value = sortCanvasReferences(selected, node => {
+    const bounds = (node as any).getBounds?.('world') || (node as any).getBounds?.()
+    return {
+      x: Number(bounds?.x ?? (node as any).x ?? 0),
+      y: Number(bounds?.y ?? (node as any).y ?? 0),
+      height: Number(bounds?.height ?? (node as any).height ?? 0),
+    }
+  })
     .map(node => String((node as any).id))
-    .filter(id => Boolean(canvasStore.assets[id]))
 }
 
 function selectCanvasReferences(nodes: any[]) {
@@ -4104,16 +4142,21 @@ const creationMentionActive = ref(0)
 let creationMentionRequest = 0
 
 async function updateCreationMention() {
-  const match = cpState.prompt.match(/@([^\s@]*)$/)
-  if (!match) {
+  const query = trailingMediaSearch(cpState.prompt)
+  if (query === null) {
+    creationMentionRequest++
     creationMentionOpen.value = false
     return
   }
   const owner = selectedCanvasOwner()
-  if (!owner) return
+  if (!owner) {
+    creationMentionRequest++
+    creationMentionOpen.value = false
+    return
+  }
   const request = ++creationMentionRequest
-  const resources = match[1]
-    ? await projectFiles.searchPaths(owner, match[1], 30)
+  const resources = query
+    ? await projectFiles.searchPaths(owner, query, 30)
     : await projectFiles.list(owner)
   if (request !== creationMentionRequest) return
   creationMentionItems.value = resources
@@ -4132,15 +4175,20 @@ function onCreationPromptInput(event: Event) {
 }
 
 async function selectCreationMention(resource: ProjectResource) {
-  cpState.prompt = cpState.prompt.replace(/@([^\s@]*)$/, '')
+  const kind = canvasMediaKindForPath(resource.path) as CreationReferenceKind | undefined
+  if (!kind) return
+  const existing = orderedReferenceLabels.value.filter(label => label.startsWith(`@${kind === 'image' ? '图' : kind === 'video' ? '视频' : '音频'}`)).length
+  const token = mediaReferenceToken(kind, existing + 1)
+  const prompt = cpState.prompt.replace(/@([^\s@]*)$/, token)
   creationMentionOpen.value = false
-  saveCpState()
   await addFileTreeMediaToCanvas({
     projectId: resource.owner,
     path: resource.path,
     kind: canvasMediaKindForPath(resource.path),
     label: resource.name,
   })
+  cpState.prompt = prompt
+  saveCpState()
 }
 
 function onCreationPromptKeydown(event: KeyboardEvent) {
@@ -5236,6 +5284,9 @@ const canSend = computed(
             <JcIcon name="image" /><span>参考素材 · {{ selectedReferenceAssets.length + cpState.files.length }}</span>
             <small v-if="unsupportedReferenceSummary">当前模型不使用 {{ unsupportedReferenceSummary }}</small>
           </div>
+          <div class="cp-reference-order" aria-label="参考素材顺序">
+            <span v-for="label in orderedReferenceLabels" :key="label" :title="label">{{ label }}</span>
+          </div>
           </div>
           <!-- 模型专属参数 -->
           <div v-if="showTitleInput" class="cp-suno-row">
@@ -6238,9 +6289,9 @@ input.cp-dur-val {
 .cp-reference-popover {
   position: absolute;
   z-index: 30;
-  right: 12px;
   bottom: calc(100% + 6px);
   left: 12px;
+  width: min(420px, calc(100% - 24px));
   max-height: min(280px, 40vh);
   overflow-y: auto;
   padding: 5px;
@@ -6267,6 +6318,18 @@ input.cp-dur-val {
 .cp-reference-popover button:hover, .cp-reference-popover button.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
 .cp-reference-popover button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-reference-empty { padding: 8px; color: var(--ink3); font-size: 12px; }
+.cp-reference-order { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.cp-reference-order span {
+  max-width: 180px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--olive) 10%, transparent);
+  color: var(--ink2);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cp-fk-model-info { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 14px 8px; color: var(--ink3); font-size: 12px; }
 .cp-fk-model-info small { font-size: inherit; }
 .cp-model-status { margin-left: 6px; color: var(--ink3); font-size: 11px; }
